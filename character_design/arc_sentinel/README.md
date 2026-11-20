@@ -39,9 +39,8 @@ left flank carries the sword sheath. There is no head.
   electric sword, shield field, iris and seams are the only saturated light.
 * **Ball-turret camera eye.** A small ball housing sits just outside the hull
   front; the barrel retracts only ~0.08 m (the glowing eye stays the outermost
-  part) and the static iris/socket closes the hull behind it. It looks up at
-  the blade during the rising cut. The ball can yaw/pitch without sweeping a
-  collar through the hull.
+  part) and the static iris/socket closes the hull behind it. During both
+  attacks the ball compensates for torso motion to keep looking forward.
 
 Dimensions (defaults): wheel radius 0.325 m, wheel centres x ±0.45 m, body root
 y 0.62 m, hull radius 0.225 m, shoulder pivots ±0.27 m / y 1.10 m, upper arm
@@ -79,25 +78,15 @@ one-shots start and end on the idle base pose.
 | `rest` | 4.0 s | yes | sword generator docked in the left sheath (blade off), shield hung on the rear hook, arms folded low, torso twisted 35° toward the sheath |
 | `idle` | 3.2 s | yes | deployed low guard: sword low-right, shield low-left/front, gentle balance sway |
 | `walk` | 0.9 s | yes | rolling gait: one wheel revolution per cycle, suspension bob, body lean, arm counter-swing |
-| `attack` | 1.60 s | no | left-back windup → left-front-up straight → right-down finish; body turns into the cut |
-| `attack_up` | 1.77 s | no | rising diagonal lower-left → upper-right, straight-arm finish |
+| `attack` | 1.45 s | no | high left-front windup → forward sweep → low right-front finish with suspension compression |
+| `attack_up` | 1.50 s | no | lower-right loading motion → upper-left front cut with level optics |
 | `defend` | 1.26–1.28 s | no | threat-driven block: front-left 45° ⇒ shield, front-right 45° ⇒ sword |
 | `draw` | 0.90 s | no | rest → idle: shield off the back hook, sword out of the sheath, blade ignites when clear |
 | `sheathe` | 0.85 s | no | idle → rest: blade off before the generator enters the sheath, shield back on the hook |
 
-The exact attack constraints are enforced by the solver and checked by QA:
-
-* `attack` windup: tool above the left shoulder at (0.45, 1.55, −0.05) m,
-  blade direction (0.55, 0.50, −0.67) — left, back and up; body/torso yaw
-  +12°/+30°. Via: blade (0.60, 0.45, 0.66) left-front-up with a straight arm
-  (0.00°). Front: blade (0, 0, 1) straight forward, tip z 2.06 m, chest facing
-  front. End: straight arm/blade direction (−0.60, −0.45, 0.66) —
-  **right-front-down**, tool x −0.92 m / z 0.66 m, tip y 0.15 m / z 1.34 m;
-  the sword stays in front. Body stays near front (body 0° / torso −10°) so the
-  cut is in front, not at the side.
-* `attack_up` windup: blade exactly horizontal backward (0, 0, −1), every part
-  of the blade left of the hull (min x +0.497 m), tool y 0.80 m. End: arm and
-  blade are one straight line at 44.93° up-right (0.00° between them).
+Both attacks start and end in the deployed guard. The right elbow stays
+outside the camera envelope. The body turns into each stroke, the blade
+follows, and the suspension absorbs the follow-through before settling.
 
 ## 4. Block contract
 
@@ -118,20 +107,13 @@ table; plan time is ≤5 ms.
   (Korein/Badler-style). The wrist is a 3-DOF ball joint; the elbow is a ball
   joint with a pure pitch plus a twist-sharing roll. All joints are stored as
   **quaternions**, so no Euler gimbal flips can reach the rig.
-* The tool target is authored in root space and transformed into torso space,
-  so torso yaw/lean participates while the exact end pose is preserved.
-* Key poses are solved with **collision-aware swivel selection** against body
-  capsules/discs; a whole-clip swivel branch is selected for the attack path.
-* Attack/draw/block trajectories are sampled (56 Hz) from Cartesian key
-  targets, solved with warm-start swivel continuity, collision-repaired and
-  smoothed. The attack is re-timed as one swing by the sword-tip arc length
-  with a single smooth speed bell (no per-key stops); the other clips are
-  locally time-reparameterized to a 25 rad/s joint-speed cap. The result is baked to `data/arc_traj_v2.json` (≈0.7 MB, far
-  below the 50 MB budget). Runtime plan times: **attack 1 ms, attack_up 1 ms,
-  block ≤13 ms**.
-* The table is signed by the geometry parameters. If a geometry parameter
-  changes, the runtime solver rebuilds the clips (offline-style, seconds) and
-  the stale table is not used.
+* The two cuts have authored elbow and wrist guides that preserve the fixed
+  arm lengths. The blade face follows the swing without sudden roll reversals.
+  The optic tracks forward, and the shield path leaves room for the cut.
+* Draw, sheathe, and block use Cartesian targets and collision-aware swivel
+  selection. The attack paths, other one-shots, and their key poses are baked
+  to data/arc_traj_v2.json. The cache signature covers geometry and the
+  authored strike revision. Runtime plan times are about 1 ms per attack.
 * Idle/walk/rest are solved live (small procedural targets, fixed elbow pole)
   and are also covered by the collision audit.
 * Runtime smoothness: there is no periodic full-vertex radius scan or collision
@@ -156,7 +138,7 @@ shield on the rear hook) are exempt only while actually docked.
 Run:
 
 ```bash
-# full QA (collisions on every clip frame, reachable transitions, exact attack
+# full QA (collisions on every clip frame, reachable transitions, attack
 # poses, both blocks, solver timing)
 godot --headless --path . res://scenes/qa.tscn
 
@@ -177,14 +159,14 @@ Latest QA (`renders/v2/qa_report.json`): **PASS, 0 failures**.
 
 | check | result |
 | --- | --- |
-| clip self-collision | rest +0.0265 / idle +0.0526 / walk +0.0407 / attack +0.0392 / attack_up +0.0099 / defend +0.0130 / draw +0.0265 / sheathe +0.0536 m |
+| clip self-collision | rest +0.0265 / idle +0.0526 / walk +0.0407 / attack +0.0091 / attack_up +0.0080 / defend +0.0130 / draw +0.0265 / sheathe +0.0536 m |
 | floor | every clip ≥ −0.0000 m |
 | reachable blends | worst +0.0501 m (all state-machine-reachable transitions) |
-| attack pose | windup (0.45,1.55,−0.05) dir left-back-up / via left-front-up straight / front (0,0,1) tip z 2.06 / end dir (−0.60,−0.45,0.66) right-front-down, arm straight |
-| attack_up pose | dir (0,0,−1), min x 0.497 / end arm+blade straight at 44.93° up-right |
+| attack pose | high-left preparation, forward sweep, right-front-down finish |
+| attack_up pose | low-right preparation, upper-left finish, forward optic |
 | blocks | shield & sword both hit, no guard |
 | solver | attack 1 ms, attack_up 1 ms, block ≤13 ms (baked) |
-| joint speed | attack: single smooth tip-speed bell, peak qdot 47.7 rad/s (shield-arm correction); other clips capped at 25 rad/s |
+| joint speed | peak qdot 24.9 rad/s for attack, 18.3 rad/s for attack_up |
 
 Visual evidence is in `renders/v2/`:
 
@@ -203,11 +185,8 @@ mirror or plastic.
 
 ## 7. Known limits (honest)
 
-* The camera eye retracts only 0.08 m and stays outside the hull; the barrel
-  never dives into the body. During `attack_up` it pitches up to watch the
-  blade, so the lens is not facing the viewer in that clip.
-* The attack is 1.60 s including anticipation, one smooth swing and recovery;
-  the sword-tip speed rises once and falls once through the cut.
+* The camera stays forward during both attacks, with at most ~1° of deviation
+  through the guard endpoints. Collision checks use geometric proxies.
 * The baked trajectory table is bound to the default geometry signature. If you
   change hull/wheel/shield/blade dimensions, the solver rebuilds; the first
   build after such a change is seconds, not milliseconds.

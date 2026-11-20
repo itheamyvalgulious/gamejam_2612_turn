@@ -274,6 +274,16 @@ func arm_solve(side: int, tool_pos: Vector3, tool_basis: Basis,
 	return best
 
 
+## Author the elbow and forearm directly while preserving both link lengths.
+func arm_from_guides(side: int, elbow_guide: Vector3, wrist_guide: Vector3,
+		tool_basis: Basis, pose: Dictionary) -> Dictionary:
+	var inv := torso_xf(pose).affine_inverse()
+	var s := shoulder_local(side)
+	var e := s + (inv * elbow_guide - s).normalized() * L1
+	var w := e + (inv * wrist_guide - e).normalized() * L2
+	return _solve_elbow(side, s, e, w, (inv.basis * tool_basis).orthonormalized(), pose)
+
+
 func _solve_elbow(side: int, s: Vector3, e: Vector3, w: Vector3,
 		b_local: Basis, pose: Dictionary) -> Dictionary:
 	var u := (e - s)

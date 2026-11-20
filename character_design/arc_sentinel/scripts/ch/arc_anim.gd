@@ -3,7 +3,8 @@ class_name ArcAnim2
 ## ARC // SENTINEL v2 — pose library, solver-driven clips and trajectories.
 ##
 ## Authoring model:
-##   * a clip is a list of key frames; each key stores body joint values plus
+##   * attacks lead with authored elbow and wrist guides;
+##   * other action keys store body joint values plus
 ##     Cartesian tool targets (right sword, left shield);
 ##   * `_build_traj()` samples the Cartesian targets (Catmull-Rom position,
 ##     basis slerp), solves both arms at every sample with the previous sample
@@ -43,7 +44,6 @@ var clip_dur: Dictionary = {}
 var traj_ms: Dictionary = {}
 var baked_defend: Dictionary = {}
 var baked_keys: Dictionary = {}
-var clip_swivel: Dictionary = {}
 var bake_ms := 0
 var bake_loaded := false
 var build_ms := 0
@@ -56,8 +56,8 @@ var key_stats: Array = []
 const SWIVELS := [-75.0, -48.0, -24.0, 0.0, 24.0, 48.0, 75.0]
 const TRAJ_HZ := 56.0
 
-const ATTACK_TOTAL := 1.60
-const ATTACK_UP_TOTAL := 1.60
+const ATTACK_TOTAL := 1.45
+const ATTACK_UP_TOTAL := 1.50
 const DEFEND_TOTAL := 1.25
 const DRAW_TOTAL := 0.90
 const SHEATHE_TOTAL := 0.85
@@ -82,14 +82,12 @@ func build() -> void:
 	var ta := Time.get_ticks_usec()
 	_build_attack()
 	if not bake_loaded:
-		_resolve_clip_keys(attack_keys)
-		_build_traj("attack", attack_keys)
+		_build_strike_traj("attack", attack_keys)
 	attack_ms = int((Time.get_ticks_usec() - ta) / 1000)
 	ta = Time.get_ticks_usec()
 	_build_attack_up()
 	if not bake_loaded:
-		_resolve_clip_keys(attack_up_keys)
-		_build_traj("attack_up", attack_up_keys)
+		_build_strike_traj("attack_up", attack_up_keys)
 	attack_up_ms = int((Time.get_ticks_usec() - ta) / 1000)
 	ta = Time.get_ticks_usec()
 	_build_draw_sheathe()
@@ -149,16 +147,6 @@ func _sword_target(pos: Vector3, dir: Vector3, face := Vector3(1, 0, 0),
 	if use_wrist:
 		pos = pos + d * kin.L3
 	return {"tool": pos, "basis": b, "dir": d}
-
-
-## A fully extended arm+blade line: the tool sits at the reach limit along
-## the blade direction, so the elbow is straight and the blade continues the
-## arm.  Used for the downswing/end of `attack` (no bent-elbow "short" cut).
-func _straight_target(body: Dictionary, dir: Vector3, face := Vector3(0, 0, 1)) -> Dictionary:
-	var d := dir.normalized()
-	var s := _shoulder(body, -1)
-	var reach: float = kin.L1 + kin.L2 + kin.L3 - 0.002
-	return _sword_target(s + d * reach, d, face)
 
 
 func _shield_target(c: Vector3, n: Vector3, up := Vector3.UP) -> Dictionary:
@@ -314,14 +302,6 @@ func _swivel_of(side: int, pose: Dictionary) -> float:
 func _k(t: float, body: Dictionary, rt: Dictionary, lt: Dictionary,
 		blade_on: float, ds: float, dw: float, label: String,
 		seed: Dictionary = {}) -> Dictionary:
-	if label.begins_with("attack/"):
-		body["cam_slide"] = 0.30
-		body["cam_drop"] = 0.0
-	elif label.begins_with("attack_up/"):
-		body["cam_slide"] = 0.30
-		body["cam_drop"] = 0.0
-		# look up at the rising blade; the barrel lifts clear of the elbow
-		body["lens_pitch"] = -60.0 * D2R
 	var pose: Dictionary
 	if bake_loaded and baked_keys.has(label):
 		pose = (baked_keys[label] as Dictionary).duplicate()
@@ -435,247 +415,165 @@ func rest(t: float) -> Dictionary:
 
 # ------------------------------------------------------------------ attack
 
-func _blade_start_body() -> Dictionary:
-	# big left twist: right hand crosses above the left shoulder
-	return {
-		"root_lift": 0.010, "root_sway": 0.012, "body_yaw": 12.0 * D2R,
-		"body_roll": -2.0 * D2R, "torso_yaw": 30.0 * D2R,
-		"torso_pitch": -3.0 * D2R, "torso_roll": -1.5 * D2R,
-	}
-
-
-func _blade_end_body() -> Dictionary:
-	# Turn the body right into the cut. The blade finishes right-down with
-	# zero front/back component; because the chest is turned right, that cut
-	# is in front of the body, not off its front-right.
-	return {
-		"root_lift": -0.012, "root_sway": -0.010, "body_yaw": 0.0,
-		"body_roll": 2.0 * D2R, "torso_yaw": -10.0 * D2R,
-		"torso_pitch": 4.0 * D2R, "torso_roll": 2.0 * D2R,
-	}
-
-
-func _idle_key_at(t: float) -> Dictionary:
-	return {"t": t, "body": idle_body, "rt": idle_rt, "lt": idle_lt,
-		"blade": 1.0, "ds": 0.0, "dw": 0.0, "label": "idle", "pose": idle_key}
-
-
 func _build_attack() -> void:
-	attack_keys.clear()
-	var start_key := _idle_key_at(0.0)
-	start_key["label"] = "attack/start"
-	attack_keys.append(start_key)
-	var prev: Dictionary = idle_key
-	# raise from idle, then carry the generator across to the left shoulder
-	var bv1 := _body({"root_lift": 0.004, "body_yaw": 2.0 * D2R,
-		"torso_yaw": 6.0 * D2R})
-	var rv1 := _sword_target(Vector3(-0.35, 1.28, 0.48),
-		Vector3(0.0, 0.25, 0.97), Vector3(0, 0, 1))
-	var lv1 := _shield_target(Vector3(0.56, 1.03, 0.46),
-		Vector3(0.50, 0.03, 0.86), Vector3.UP)
-	var kv1 := _k(0.10, bv1, rv1, lv1, 1.0, 0.0, 0.0, "attack/lift1", prev)
-	attack_keys.append(kv1)
-	prev = kv1["pose"]
-	var bv2 := _body({"root_lift": 0.008, "body_yaw": 4.0 * D2R,
-		"torso_yaw": 14.0 * D2R, "torso_pitch": -1.0 * D2R})
-	var rv2 := _sword_target(Vector3(0.05, 1.58, 0.20),
-		Vector3(0.20, 0.60, 0.77), Vector3(0, 0, 1))
-	var lv2 := _shield_target(Vector3(0.57, 1.04, 0.45),
-		Vector3(0.54, 0.04, 0.84), Vector3.UP)
-	var kv2 := _k(0.20, bv2, rv2, lv2, 1.0, 0.0, 0.0, "attack/lift2", prev)
-	attack_keys.append(kv2)
-	prev = kv2["pose"]
-	# Windup: generator above the LEFT shoulder, blade pointing left-back-up.
-	var b0 := _blade_start_body()
-	var r0 := _sword_target(Vector3(0.45, 1.55, -0.05),
-		Vector3(0.55, 0.50, -0.67), Vector3(0, 0, 1))
-	var l0 := _shield_target(Vector3(0.58, 1.03, 0.44),
-		Vector3(0.55, 0.05, 0.83), Vector3.UP)
-	var k1 := _k(0.34, b0, r0, l0, 1.0, 0.0, 0.0, "attack/windup", prev)
-	attack_keys.append(k1)
-	prev = k1["pose"]
-	# Via: straight arm, blade left-front-up. This is the top of the swing;
-	# there is no hold key between it and the finish.
-	var bv := _body({"root_lift": 0.0, "body_yaw": 4.0 * D2R,
-		"torso_yaw": 12.0 * D2R, "torso_pitch": 0.0})
-	var d_via := Vector3(0.60, 0.45, 0.66).normalized()
-	var rv := _straight_target(bv, d_via, Vector3(0, 0, 1))
-	var lv := _shield_target(Vector3(0.58, 1.06, 0.42),
-		Vector3(0.58, 0.03, 0.81), Vector3.UP)
-	var kv := _k(0.50, bv, rv, lv, 1.0, 0.0, 0.0, "attack/via", prev)
-	attack_keys.append(kv)
-	prev = kv["pose"]
-	# Front: the blade must actually travel through the space in front of the
-	# body, not cut the chord from left to right.  Straight forward, arm
-	# straight, chest still facing front.
-	var bf := _body({"root_lift": 0.0, "body_yaw": 0.0,
-		"torso_yaw": 0.0, "torso_pitch": 0.0})
-	var d_front := Vector3(0.0, 0.0, 1.0)
-	var rf := _straight_target(bf, d_front, Vector3(0, 0, 1))
-	var lf := _shield_target(Vector3(0.58, 1.06, 0.42),
-		Vector3(0.58, 0.03, 0.81), Vector3.UP)
-	var kf := _k(0.60, bf, rf, lf, 1.0, 0.0, 0.0, "attack/front", prev)
-	attack_keys.append(kf)
-	prev = kf["pose"]
-	kf["lin"] = true
-	# Finish: straight arm/blade right-down, zero front/back component. The
-	# body is turned right, so this is a forward cut in the body's frame.
-	var b2 := _blade_end_body()
-	var d_end := Vector3(-0.60, -0.45, 0.66).normalized()
-	var r2 := _straight_target(b2, d_end, Vector3(0, 0, 1))
-	var l2 := _shield_target(Vector3(0.58, 1.08, 0.38),
-		Vector3(0.60, 0.02, 0.80), Vector3.UP)
-	var k3 := _k(0.72, b2, r2, l2, 1.0, 0.0, 0.0, "attack/end", prev)
-	attack_keys.append(k3)
-	prev = k3["pose"]
-	# One continuous arc: no zero-velocity key at the via or the end.
-	kv["lin"] = true
-	k3["lin"] = true
-	var b3 := _blade_end_body()
-	b3["torso_yaw"] = -14.0 * D2R
-	b3["body_yaw"] = 0.0
-	b3["torso_pitch"] = 6.0 * D2R
-	b3["root_lift"] = -0.018
-	var d_over := Vector3(-0.62, -0.43, 0.66).normalized()
-	var r3 := _straight_target(b3, d_over, Vector3(0, 0, 1))
-	var l3 := _shield_target(Vector3(0.57, 1.06, 0.36),
-		Vector3(0.62, 0.02, 0.78), Vector3.UP)
-	var k4 := _k(0.82, b3, r3, l3, 1.0, 0.0, 0.0, "attack/overshoot", prev)
-	attack_keys.append(k4)
-	prev = k4["pose"]
-	k4["lin"] = true
-	var b4 := _blade_end_body()
-	b4["torso_yaw"] = -10.0 * D2R
-	b4["body_yaw"] = 0.0
-	b4["torso_pitch"] = 3.0 * D2R
-	var d_follow := Vector3(-0.62, -0.43, 0.66).normalized()
-	var r4 := _straight_target(b4, d_follow, Vector3(0, 0, 1))
-	var l4 := _shield_target(Vector3(0.57, 1.04, 0.40),
-		Vector3(0.55, 0.04, 0.83), Vector3.UP)
-	var k5 := _k(0.96, b4, r4, l4, 1.0, 0.0, 0.0, "attack/follow", prev)
-	attack_keys.append(k5)
-	var k5h := _k(0.98, b4, r4, l4, 1.0, 0.0, 0.0, "attack/follow_hold", k5["pose"])
-	attack_keys.append(k5h)
-	attack_keys.append(_idle_key_at(1.22))
-	attack_keys.append(_idle_key_at(ATTACK_TOTAL))
-
-
-func _up_start_body() -> Dictionary:
-	return {
-		"root_lift": -0.030, "root_sway": 0.030, "body_yaw": 8.0 * D2R,
-		"body_roll": -4.0 * D2R, "torso_yaw": 22.0 * D2R,
-		"torso_pitch": 2.0 * D2R, "torso_roll": -2.0 * D2R,
-	}
+	attack_keys = [
+		_strike_idle("attack/start", 0.0),
+		_strike_key("attack/lift", 0.16, _strike_body(0.005, 0.012, 1, 10, 2),
+			Vector3(-0.69, 1.18, 0.04), Vector3(-0.49, 1.46, 0.16),
+			Vector3(-0.14, 0.80, 0.58), Vector3(0.59, 1.00, 0.43)),
+		_strike_key("attack/windup", 0.34, _strike_body(-0.015, 0.031, -3, 42, -4),
+			Vector3(-0.24, 1.45, 0.37), Vector3(0.20, 1.60, 0.51),
+			Vector3(0.59, 0.77, -0.24), Vector3(0.67, 0.94, 0.27)),
+		_strike_key("attack/release", 0.46, _strike_body(-0.010, 0.020, 1, 25, -2),
+			Vector3(-0.25, 1.34, 0.48), Vector3(0.16, 1.43, 0.68),
+			Vector3(0.52, 0.65, 0.56), Vector3(0.66, 0.97, 0.30)),
+		_strike_key("attack/front", 0.58, _strike_body(-0.020, -0.015, 5, 5, 4),
+			Vector3(-0.40, 1.16, 0.47), Vector3(-0.05, 1.16, 0.75),
+			Vector3(-0.08, 0.08, 0.99), Vector3(0.62, 1.02, 0.36)),
+		_strike_key("attack/end", 0.70, _strike_body(-0.029, -0.032, 6, -16, 5),
+			Vector3(-0.65, 0.94, 0.35), Vector3(-0.82, 0.78, 0.67),
+			Vector3(-0.53, -0.44, 0.73), Vector3(0.53, 1.10, 0.43)),
+		_strike_key("attack/follow", 0.83, _strike_body(-0.037, -0.026, 4, -20, 5),
+			Vector3(-0.67, 0.91, 0.32), Vector3(-0.86, 0.73, 0.63),
+			Vector3(-0.63, -0.45, 0.65), Vector3(0.55, 1.07, 0.43)),
+		_strike_key("attack/recover", 1.02, _strike_body(0.013, -0.020, 0, -12, -2),
+			Vector3(-0.70, 0.87, 0.12), Vector3(-0.66, 0.77, 0.50),
+			Vector3(-0.40, -0.08, 0.91), Vector3(0.56, 1.02, 0.45)),
+		_strike_key("attack/settle", 1.23, _strike_body(-0.004, 0, 2, -3, 2),
+			Vector3(-0.69, 0.85, -0.04), Vector3(-0.53, 0.76, 0.31),
+			Vector3(-0.23, 0.55, 0.80), Vector3(0.53, 1.00, 0.47)),
+		_strike_idle("attack/idle", ATTACK_TOTAL),
+	]
 
 
 func _build_attack_up() -> void:
-	attack_up_keys.clear()
-	attack_up_keys.append(_idle_key_at(0.0))
-	var prev: Dictionary = idle_key
-	# lift the blade in front, rotate it backward while high, then drop it to
-	# the low-left windup
-	var bv1 := _body({"root_lift": -0.004, "root_sway": 0.006,
-		"body_yaw": 2.0 * D2R, "torso_yaw": 6.0 * D2R})
-	var rv1 := _sword_target(Vector3(-0.44, 1.12, 0.62),
-		Vector3(0.02, -0.12, 0.99), Vector3(0, 0, 1))
-	var lv1 := _shield_target(Vector3(0.70, 1.27, 0.45),
-		Vector3(0.56, 0.03, 0.83), Vector3.UP)
-	var kv1 := _k(0.09, bv1, rv1, lv1, 1.0, 0.0, 0.0, "attack_up/lift1", prev)
-	attack_up_keys.append(kv1)
-	prev = kv1["pose"]
-	var bv2 := _body({"root_lift": -0.006, "root_sway": 0.010,
-		"body_yaw": 4.0 * D2R, "torso_yaw": 12.0 * D2R})
-	var rv2 := _sword_target(Vector3(-0.20, 1.20, 0.92),
-		Vector3(0.12, -0.08, 0.99), Vector3(0, 0, 1), true)
-	var lv2 := _shield_target(Vector3(0.72, 1.33, 0.47),
-		Vector3(0.62, 0.04, 0.78), Vector3.UP)
-	var kv2 := _k(0.17, bv2, rv2, lv2, 1.0, 0.0, 0.0, "attack_up/lift2", prev)
-	attack_up_keys.append(kv2)
-	prev = kv2["pose"]
-	var bv3 := _body({"root_lift": -0.018, "root_sway": 0.018,
-		"body_yaw": 6.0 * D2R, "torso_yaw": 18.0 * D2R,
-		"body_roll": -2.0 * D2R})
-	var rv3 := _sword_target(Vector3(0.40, 1.05, 0.62),
-		Vector3(0.10, -0.05, -0.99), Vector3(1, 0, 0))
-	var lv3 := _shield_target(Vector3(0.72, 1.39, 0.50),
-		Vector3(0.66, 0.04, 0.75), Vector3.UP)
-	var kv3 := _k(0.29, bv3, rv3, lv3, 1.0, 0.0, 0.0, "attack_up/rotate", prev)
-	attack_up_keys.append(kv3)
-	prev = kv3["pose"]
-	var b0 := _up_start_body()
-	var r0 := _sword_target(Vector3(0.55, 0.80, 0.48), Vector3(0, 0, -1), Vector3(1, 0, 0))
-	var l0 := _shield_target(Vector3(0.72, 1.45, 0.52),
-		Vector3(0.70, 0.05, 0.71), Vector3.UP)
-	var k1 := _k(0.38, b0, r0, l0, 1.0, 0.0, 0.0, "attack_up/windup", prev)
-	attack_up_keys.append(k1)
-	prev = k1["pose"]
-	var b1 := _up_start_body()
-	b1["torso_yaw"] = 26.0 * D2R
-	b1["root_lift"] = -0.036
-	var r1 := _sword_target(Vector3(0.55, 0.78, 0.48), Vector3(0, 0, -1), Vector3(1, 0, 0))
-	var l1 := _shield_target(Vector3(0.74, 1.45, 0.54),
-		Vector3(0.74, 0.05, 0.67), Vector3.UP)
-	var k2 := _k(0.48, b1, r1, l1, 1.0, 0.0, 0.0, "attack_up/hold", prev)
-	attack_up_keys.append(k2)
-	prev = k2["pose"]
-	var bm1 := _body({
-		"root_lift": -0.012, "root_sway": 0.015, "body_yaw": 4.0 * D2R,
-		"body_roll": -2.0 * D2R, "torso_yaw": 12.0 * D2R,
-		"torso_pitch": 3.0 * D2R,
-	})
-	var rm1 := _sword_target(Vector3(0.36, 0.70, 0.60),
-		Vector3(0.55, 0.25, 0.80), Vector3(0, 0, 1))
-	var lm1 := _shield_target(Vector3(0.64, 1.24, 0.50),
-		Vector3(0.74, 0.04, 0.67), Vector3.UP)
-	var k3 := _k(0.60, bm1, rm1, lm1, 1.0, 0.0, 0.0, "attack_up/sweep1", prev)
-	attack_up_keys.append(k3)
-	prev = k3["pose"]
-	var bm2 := _body({
-		"root_lift": 0.002, "root_sway": 0.004, "body_yaw": 0.0,
-		"body_roll": 0.5 * D2R, "torso_yaw": 2.0 * D2R,
-		"torso_pitch": 4.0 * D2R,
-	})
-	var rm2 := _sword_target(Vector3(0.10, 0.88, 0.66),
-		Vector3(0.30, 0.75, 0.59), Vector3(0, 0, 1))
-	var lm2 := _shield_target(Vector3(0.62, 1.14, 0.48),
-		Vector3(0.70, 0.04, 0.71), Vector3.UP)
-	var k4 := _k(0.70, bm2, rm2, lm2, 1.0, 0.0, 0.0, "attack_up/sweep2", prev)
-	attack_up_keys.append(k4)
-	prev = k4["pose"]
-	var be := _body({
-		"root_lift": -0.010, "root_sway": -0.012, "body_yaw": -5.0 * D2R,
-		"body_roll": 2.0 * D2R, "torso_yaw": -16.0 * D2R,
-		"torso_pitch": 4.0 * D2R, "torso_roll": 1.5 * D2R,
-	})
-	# arm and blade are one straight line at the upper-right finish
-	var rblade := Vector3(-0.707, 0.707, 0.05).normalized()
-	var rend := _straight_target(be, rblade, Vector3(0, 0, 1))
-	var lend := _shield_target(Vector3(0.58, 1.08, 0.42),
-		Vector3(0.60, 0.02, 0.80), Vector3.UP)
-	var k5 := _k(0.84, be, rend, lend, 1.0, 0.0, 0.0, "attack_up/end", prev)
-	attack_up_keys.append(k5)
-	prev = k5["pose"]
-	k2["lin"] = true
-	k3["lin"] = true
-	k4["lin"] = true
-	k5["lin"] = true
-	var bo := _body({
-		"root_lift": -0.014, "root_sway": -0.016, "body_yaw": -7.0 * D2R,
-		"body_roll": 3.0 * D2R, "torso_yaw": -17.0 * D2R,
-		"torso_pitch": 5.0 * D2R,
-	})
-	var ro := _straight_target(bo, Vector3(-0.68, 0.73, 0.06), Vector3(0, 0, 1))
-	var lo := _shield_target(Vector3(0.58, 1.07, 0.40),
-		Vector3(0.62, 0.02, 0.78), Vector3.UP)
-	var k6 := _k(0.94, bo, ro, lo, 1.0, 0.0, 0.0, "attack_up/overshoot", prev)
-	attack_up_keys.append(k6)
-	k6["lin"] = true
-	attack_up_keys.append(_idle_key_at(1.10))
-	attack_up_keys.append(_idle_key_at(1.40))
-	attack_up_keys.append(_idle_key_at(ATTACK_UP_TOTAL))
+	attack_up_keys = [
+		_strike_idle("attack_up/start", 0.0),
+		_strike_key("attack_up/lower", 0.17, _strike_body(-0.025, -0.025, 3, -9, 5),
+			Vector3(-0.72, 0.87, -0.02), Vector3(-0.68, 0.65, 0.31),
+			Vector3(-0.61, 0.28, 0.74), Vector3(0.59, 1.02, 0.40)),
+		_strike_key("attack_up/windup", 0.36, _strike_body(-0.038, -0.027, 4, -19, 5),
+			Vector3(-0.67, 0.79, -0.03), Vector3(-0.80, 0.57, 0.28),
+			Vector3(-0.82, -0.24, -0.51), Vector3(0.62, 1.03, 0.34)),
+		_strike_key("attack_up/drive", 0.46, _strike_body(-0.022, -0.020, 1, -11, 4),
+			Vector3(-0.68, 0.80, 0.01), Vector3(-0.80, 0.61, 0.34),
+			Vector3(-0.88, -0.19, -0.44), Vector3(0.62, 1.05, 0.35)),
+		_strike_key("attack_up/release", 0.57, _strike_body(0.023, 0.006, -4, 2, -2),
+			Vector3(-0.67, 0.96, 0.28), Vector3(-0.72, 0.83, 0.65),
+			Vector3(-0.54, -0.04, 0.84), Vector3(0.64, 1.03, 0.37)),
+		_strike_key("attack_up/front", 0.67, _strike_body(0.027, 0.028, -3, 19, -4),
+			Vector3(-0.38, 1.17, 0.485), Vector3(-0.025, 1.20, 0.77),
+			Vector3(0.10, 0.40, 0.91), Vector3(0.69, 0.94, 0.27)),
+		_strike_key("attack_up/end", 0.78, _strike_body(0.005, 0.040, -1, 37, -6),
+			Vector3(-0.085, 1.30, 0.52), Vector3(0.345, 1.51, 0.72),
+			Vector3(0.65, 0.70, 0.29), Vector3(0.71, 0.89, 0.25)),
+		_strike_key("attack_up/follow", 0.89, _strike_body(-0.028, 0.031, 1, 40, -5),
+			Vector3(-0.075, 1.36, 0.49), Vector3(0.35, 1.61, 0.61),
+			Vector3(0.62, 0.76, 0.20), Vector3(0.70, 0.92, 0.26)),
+		_strike_key("attack_up/recover", 1.11, _strike_body(0.010, 0.015, 1, 18, 2),
+			Vector3(-0.55, 1.14, 0.12), Vector3(-0.28, 1.24, 0.46),
+			Vector3(0.16, 0.83, 0.54), Vector3(0.57, 0.98, 0.43)),
+		_strike_key("attack_up/settle", 1.32, _strike_body(-0.004, 0, 2, 2, 1),
+			Vector3(-0.70, 0.87, -0.04), Vector3(-0.52, 0.77, 0.31),
+			Vector3(-0.18, 0.66, 0.73), Vector3(0.53, 1.00, 0.47)),
+		_strike_idle("attack_up/idle", ATTACK_UP_TOTAL),
+	]
 
 
-# ------------------------------------------------------------------ draw
+func _strike_body(lift: float, sway: float, pitch: float, yaw: float, roll: float) -> Dictionary:
+	return _body({
+		"root_lift": lift, "root_sway": sway, "root_shift": pitch * 0.006,
+		"body_pitch": pitch * D2R, "body_yaw": yaw * 0.22 * D2R, "body_roll": roll * D2R,
+		"torso_pitch": pitch * 0.28 * D2R, "torso_yaw": yaw * 0.78 * D2R,
+	})
+
+
+func _strike_key(label: String, time: float, body: Dictionary, elbow: Vector3,
+		wrist: Vector3, blade_dir: Vector3, shield_center: Vector3) -> Dictionary:
+	return {"label": label, "t": time, "body": body, "elbow": elbow,
+		"wrist": wrist, "blade_dir": blade_dir.normalized(), "shield_center": shield_center,
+		"pose": baked_keys.get(label, {})}
+
+
+func _strike_idle(label: String, time: float) -> Dictionary:
+	var arm := kin.arm_fk(-1, idle_key)
+	var key := _strike_key(label, time, idle_body, arm["e"], arm["w"], arm["dir"], idle_lt["c"])
+	key["pose"] = idle_key
+	return key
+
+
+func _build_strike_traj(name: String, keys: Array) -> void:
+	var started := Time.get_ticks_usec()
+	var frames: Array = [{"t": 0.0, "pose": idle_key}]
+	var previous := idle_key
+	for segment in keys.size() - 1:
+		var start: float = keys[segment]["t"]
+		var end: float = keys[segment + 1]["t"]
+		var steps := ceili((end - start) * TRAJ_HZ)
+		for i in range(1, steps + 1):
+			var time := lerpf(start, end, float(i) / steps)
+			var pose := idle_key if segment == keys.size() - 2 and i == steps else (
+				_strike_pose(keys, segment, time, previous))
+			frames.append({"t": time, "pose": pose})
+			previous = pose
+		keys[segment + 1]["pose"] = previous
+	trajs[name] = frames
+	clip_dur[name] = float(keys.back()["t"])
+	traj_ms[name] = int((Time.get_ticks_usec() - started) / 1000)
+
+
+func _strike_pose(keys: Array, segment: int, time: float, previous: Dictionary) -> Dictionary:
+	var a: Dictionary = keys[segment]
+	var b: Dictionary = keys[segment + 1]
+	var weight := inverse_lerp(float(a["t"]), float(b["t"]), time)
+	var body := _body()
+	for part in body:
+		body[part] = _strike_curve(keys, segment, part, weight, true)
+	var pose := _base(body)
+	# The turret compensates chassis motion to keep the optic level with the target.
+	var eye_forward := kin.torso_xf(pose).basis.inverse() * Vector3.BACK
+	pose["cam_yaw"] = atan2(eye_forward.x, eye_forward.z)
+	pose["lens_pitch"] = -asin(clampf(eye_forward.y, -1.0, 1.0))
+	pose["_seed"] = previous
+	pose["_traj"] = 1.0
+	var elbow: Vector3 = _strike_curve(keys, segment, "elbow", weight)
+	var wrist: Vector3 = _strike_curve(keys, segment, "wrist", weight)
+	var direction: Vector3 = _strike_curve(keys, segment, "blade_dir", weight)
+	var shield_center: Vector3 = _strike_curve(keys, segment, "shield_center", weight)
+	var prior_arm := kin.arm_fk(-1, previous)
+	var old_direction: Vector3 = prior_arm["dir"]
+	var new_direction := direction.normalized()
+	var blade_basis := Basis(Quaternion(old_direction.normalized(), new_direction)) * (prior_arm["tool_basis"] as Basis)
+	# Transport the blade face with its direction. Restore the idle roll gradually
+	# once the blade is back in front and both orientations share the same axis.
+	if time >= 0.94:
+		var idle_facing := kin.sword_basis(new_direction, Vector3.RIGHT)
+		blade_basis = blade_basis.slerp(idle_facing, smoothstep(0.94, 1.25, time) * 0.22)
+	var right := kin.arm_from_guides(-1, elbow, wrist, blade_basis, pose)
+	_merge_arm(pose, right, "R")
+	var shield := _shield_target(shield_center, Vector3(0.45, 0.056, 0.89))
+	var left := _solve_arm(1, shield, pose, SWIVELS, _body_obstacles(pose) + _arm_obstacles(pose, "R"))
+	_merge_arm(pose, left, "L")
+	pose.erase("_seed")
+	pose.erase("_traj")
+	return _unwrap_pose(previous, pose)
+
+
+func _strike_curve(keys: Array, segment: int, field: String, weight: float, is_body := false) -> Variant:
+	var first: Dictionary = keys[maxi(segment - 1, 0)]
+	var a: Dictionary = keys[segment]
+	var b: Dictionary = keys[segment + 1]
+	var last: Dictionary = keys[mini(segment + 2, keys.size() - 1)]
+	var t0: float = a["t"]
+	var to: float = float(b["t"]) - t0
+	var pre: float = float(first["t"]) - t0
+	var post: float = float(last["t"]) - t0
+	if is_body:
+		return cubic_interpolate_in_time(a["body"][field], b["body"][field],
+			first["body"][field], last["body"][field], weight, to, pre, post)
+	var v: Vector3 = a[field]
+	return v.cubic_interpolate_in_time(b[field], first[field], last[field], weight, to, pre, post)
+
 
 func _draw_back_targets() -> Array:
 	# lift the shield straight back off the hook before swinging it around
@@ -827,8 +725,7 @@ func _build_defend() -> void:
 # ------------------------------------------------------------------ trajectories
 
 func _build_trajs() -> void:
-	for spec in [["attack", attack_keys], ["attack_up", attack_up_keys],
-			["draw", draw_keys], ["sheathe", sheathe_keys]]:
+	for spec in [["draw", draw_keys], ["sheathe", sheathe_keys]]:
 		if not trajs.has(spec[0]):
 			_build_traj(spec[0], spec[1])
 
@@ -837,23 +734,10 @@ func _build_traj(name: String, keys: Array) -> void:
 	if keys.size() < 2:
 		return
 	var t0 := Time.get_ticks_usec()
-	var sw: Array = clip_swivel.get(name, [])
-	var out: Array = _build_traj_raw(name, keys, sw)
+	var out := _build_traj_raw(name, keys)
 	_smooth_traj(out, keys)
 	_smooth_traj(out, keys)
-	# The attack used to be a chain of per-key segments, which made the sword
-	# tip speed repeatedly rise and fall at every key (especially the via).
-	# Re-time the whole windup -> follow swing by the tip arc length with one
-	# smooth bell, so the blade accelerates once through the cut and slows once
-	# into the follow-through.  The path (and every key pose) is unchanged.
-	if name == "attack":
-		# the swing speed is authored by the tip-arc retime; a local joint
-		# limiter would re-introduce the sawtooth, so the attack is not
-		# additionally time-warped here
-		_retime_swing_by_tip_arc(out, keys)
-	elif name == "draw" or name == "sheathe":
-		# One smooth bell for the whole draw/sheathe; the old per-key
-		# smoothsteps and local qdot limiter made it stop at every key.
+	if name == "draw" or name == "sheathe":
 		_retime_clip_by_tool_arc(out)
 	else:
 		_limit_qdot(out, 25.0)
@@ -862,18 +746,9 @@ func _build_traj(name: String, keys: Array) -> void:
 	traj_ms[name] = int((Time.get_ticks_usec() - t0) / 1000)
 
 
-func _build_traj_raw(name: String, keys: Array, sw: Array = [], strict := false) -> Array:
+func _build_traj_raw(name: String, keys: Array) -> Array:
 	var dur := float(keys[keys.size() - 1]["t"])
 	var steps := maxi(2, int(ceil(dur * TRAJ_HZ)))
-	var t_via := -1.0
-	var t_follow := -1.0
-	if name == "attack":
-		for k in keys:
-			var lb := str(k.get("label", ""))
-			if lb == "attack/via":
-				t_via = float(k["t"])
-			elif lb == "attack/follow":
-				t_follow = float(k["t"])
 	var out: Array = []
 	var prev: Dictionary = keys[0]["pose"]
 	out.append({"t": 0.0, "pose": prev})
@@ -888,13 +763,6 @@ func _build_traj_raw(name: String, keys: Array, sw: Array = [], strict := false)
 		var rt := _interp_target(keys, seg, u, true)
 		var lt := _interp_target(keys, seg, u, false)
 		var blade := lerpf(float(keys[seg]["blade"]), float(keys[seg + 1]["blade"]), ee)
-		# Keep the sword arm on the full-reach sphere through the cut.  A
-		# straight chord between the via and end tool points would fall inside
-		# the sphere, fold the elbow and read as a mid-swing hitch.
-		if t_via >= 0.0 and t >= t_via - 1e-6 and t <= t_follow + 1e-6:
-			var sh := _shoulder(_interp_body(keys[seg]["body"], keys[seg + 1]["body"], ee), -1)
-			var vd := ((rt["basis"] as Basis) * Vector3(0, -1, 0)).normalized()
-			rt = _sword_target(sh + vd * (kin.L1 + kin.L2 + kin.L3 - 0.002), vd, Vector3(0, 0, 1))
 		if blade > 0.45:
 			_guard_blade(rt)
 		_guard_shield(lt)
@@ -982,50 +850,6 @@ func _tool_of(pose: Dictionary) -> Vector3:
 ## samples between the windup and follow keys are solved from s(t) with a
 ## single smoothstep, so tip speed is zero at the ends and has one broad peak
 ## in the middle - no sawtooth from stitching key segments.
-func _retime_swing_by_tip_arc(out: Array, keys: Array) -> void:
-	if out.size() < 4:
-		return
-	var t0 := -1.0
-	var t1 := -1.0
-	for k in keys:
-		var lb := str(k.get("label", ""))
-		if lb == "attack/start":
-			t0 = float(k["t"])
-		elif lb == "attack/follow_hold":
-			t1 = float(k["t"])
-	if t0 < 0.0 or t1 <= t0:
-		return
-	var i0 := out.size() - 1
-	var i1 := out.size() - 1
-	for i in out.size():
-		var t := float(out[i]["t"])
-		if t <= t0 + 1e-6:
-			i0 = i
-		if t <= t1 + 1e-6:
-			i1 = i
-	if i1 - i0 < 4:
-		return
-	var ss: Array[float] = [0.0]
-	var prev := _tip_of(out[i0]["pose"])
-	for i in range(i0 + 1, i1 + 1):
-		var tip := _tip_of(out[i]["pose"])
-		ss.append(ss[ss.size() - 1] + tip.distance_to(prev))
-		prev = tip
-	var total: float = ss[ss.size() - 1]
-	if total < 1e-5:
-		return
-	for j in ss.size():
-		var u := ss[j] / total
-		var v := _inv_smoothstep(u)
-		out[i0 + j]["t"] = t0 + (t1 - t0) * v
-
-
-func _tip_of(pose: Dictionary) -> Vector3:
-	var fk: Dictionary = kin.arm_fk(-1, pose)
-	var d: Vector3 = (fk["tool_basis"] as Basis) * Vector3(0, -1, 0)
-	return (fk["tool"] as Vector3) + d * kin.blade_len
-
-
 func _inv_smoothstep(u: float) -> float:
 	if u <= 0.0:
 		return 0.0
@@ -1046,7 +870,7 @@ func _inv_smoothstep(u: float) -> float:
 ## feeding it to the speed limiter used to stretch whole clips for a fake jump.
 func _is_redundant_euler(a: Dictionary, b: Dictionary, k: String) -> bool:
 	if k.ends_with("_pitch") or k.ends_with("_yaw") or k.ends_with("_roll"):
-		var base := k.substr(0, k.length() - 6)
+		var base := k.left(k.rfind("_"))
 		return a.has(base + "_q") and b.has(base + "_q")
 	return false
 
@@ -1243,7 +1067,11 @@ func sample(name: String, t: float) -> Dictionary:
 		"rest": return rest(t)
 		"idle": return idle(t)
 		"walk": return walk(t)
-		"attack", "attack_up", "defend", "draw", "sheathe":
+		"attack", "attack_up":
+			if not trajs.has(name):
+				_build_strike_traj(name, _keys_for(name))
+			return _sample_traj(name, t)
+		"defend", "draw", "sheathe":
 			if not trajs.has(name):
 				_build_traj(name, _keys_for(name))
 			return _sample_traj(name, t)
@@ -1342,66 +1170,7 @@ func traj_qdot(name: String) -> float:
 	return best
 
 
-# ------------------------------------------------------------------ branch
-
-func _solve_fixed(body: Dictionary, rt: Dictionary, lt: Dictionary,
-		blade_on: float, ds: float, dw: float, sr: float, sl: float,
-		seed: Dictionary) -> Dictionary:
-	var base := _base(body)
-	base["_blade_on"] = blade_on
-	base["_docked_shield"] = ds
-	base["_docked_sword"] = dw
-	base["_seed"] = idle_key if seed.is_empty() else seed
-	var body_obs := _body_obstacles(base)
-	var lb := kin.arm_solve(1, lt["tool"], lt["basis"], base, {"swivels": [sl]}, body_obs)
-	var lpose := base.duplicate()
-	_merge_arm(lpose, lb, "L")
-	var lobs := _arm_obstacles(lpose, "L")
-	var rb := kin.arm_solve(-1, rt["tool"], rt["basis"], base, {"swivels": [sr]}, body_obs + lobs)
-	var pose := base.duplicate()
-	_merge_arm(pose, rb, "R")
-	_merge_arm(pose, lb, "L")
-	return pose
-
-
-func _resolve_clip_keys(keys: Array) -> void:
-	# Choose one swivel per arm for the whole clip so the elbow cannot switch
-	# branch between keys. This is what makes quaternion key interpolation
-	# stable and removes the wrist compensation spikes.
-	var best_l := 0.0
-	var best_l_score := -9.0
-	for sl in SWIVELS:
-		var score := 9.0
-		for k in keys:
-			var p := _solve_fixed(k["body"], k["rt"], k["lt"], float(k["blade"]),
-				float(k["ds"]), float(k["dw"]), float(SWIVELS[3]), float(sl), k["pose"])
-			score = minf(score, float(kin.audit(p)["min"]))
-		if score > best_l_score:
-			best_l_score = score
-			best_l = float(sl)
-	var nm_clip := _clip_name_for(keys)
-	var best_r := 0.0
-	var best_score := -9.0
-	# Evaluate the whole Cartesian path, not only the keys: a swivel that is
-	# clear at the keys can still scrape the camera between them.
-	for sr in SWIVELS:
-		var out_probe: Array = _build_traj_raw(nm_clip, keys, [float(sr), best_l], true)
-		var score2 := 9.0
-		for sp in out_probe:
-			score2 = minf(score2, float(kin.audit(sp["pose"])["min"]))
-		if score2 > best_score:
-			best_score = score2
-			best_r = float(sr)
-	clip_swivel[nm_clip] = [best_r, best_l]
-
-
-func _clip_name_for(keys: Array) -> String:
-	if keys == attack_keys:
-		return "attack"
-	if keys == attack_up_keys:
-		return "attack_up"
-	return ""
-
+# ------------------------------------------------------------------ joint trajectories
 
 func _build_joint_traj(name: String, keys: Array) -> void:
 	var t0 := Time.get_ticks_usec()
@@ -1441,8 +1210,8 @@ func _joint_traj_raw(keys: Array) -> Array:
 # ------------------------------------------------------------------ bake
 
 func _sig() -> String:
-	var keys := ["wheel_radius", "shield_radius", "blade_length"]
-	var parts: Array = []
+	var keys := ["body_scale", "hull_radius", "wheel_radius", "shield_radius", "blade_length", "blade_width"]
+	var parts: Array = ["strikes=3"]
 	for k in keys:
 		parts.append("%s=%.6f" % [k, float(P.get(k, 0.0))])
 	return "|".join(parts)

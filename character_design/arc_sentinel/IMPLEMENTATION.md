@@ -16,7 +16,7 @@ the claims were checked. It is intentionally separate from the art/usage README.
 | shield style kept | same hard-light disc/struts/rim construction, recolored orange-red to the palette |
 | rest: sword sheathed, shield on back, hands low | `rest` clip: right tool docks at the left sheath mouth (blade off), left tool docks on the rear hook (shield on the back), torso twisted 35°, low folded arms |
 | draw / sheathe transitions | `draw` and `sheathe` one-shots with Cartesian shield/sword paths around the left side; blade ignites only after clearing the sheath and turns off before re-entry |
-| two attacks with exact poses | `attack` and `attack_up` key targets + solver; attack: windup above the left shoulder, blade left-back-up; via left-front-up straight; front (0,0,1) with tip z 2.06; end right-front-down (−0.60,−0.45,0.66) with a straight arm; attack_up (0,0,−1), min x 0.497, straight arm+blade at 44.93° up-right |
+| two attacks with authored elbow paths | Fixed-length links follow elbow and wrist guides, with timed body weight shifts and suspension rebound |
 | left 45° must be shield; right 45° sword; no guard | `defend` resolves by threat; QA ray/disc and ray/segment tests: miss 0.000 m, effector shield/sword, no `guard` string |
 | actions connect without clipping | one-shots are never cancelled; rest↔drawn via draw/sheathe; reachable transition blends audited ≥ +0.0501 m |
 | 0 collisions between unconnected parts | capsule/disc proxy audit on every clip frame, every reachable transition and both block poses; all clearances positive; QA PASS |
@@ -35,17 +35,15 @@ the claims were checked. It is intentionally separate from the art/usage README.
    the shield/wheels/chassis, spheres for the ball joints. Adjacent chain links
    are exempt; docked generator/sheath and shield/rear-hook pairs are exempt
    only while actually docked. All other pairs are checked.
-3. **Whole-clip branch selection**: for the attack clips, one swivel pair per
-   arm is selected by evaluating the Cartesian path, not just the key poses.
-4. **Trajectory construction**: key targets (body + right sword tool frame +
-   left shield frame + blade/dock flags) are sampled at 56 Hz; each sample is
-   solved with the previous sample as seed and body obstacles, collision
-   repaired, unwrapped, smoothed, then locally time-reparameterized to a
-   25 rad/s joint-speed cap.
+3. **Attacks** use explicit elbow and wrist guides and preserve both upper
+   and lower link lengths. The blade face is transported along the arc and
+   returns to the guard orientation during recovery.
+4. **Other actions** use Cartesian tool targets, a warm-start swivel, and
+   collision-aware trajectory sampling.
 5. **Table**: the final per-clip joint trajectories and key poses are baked to
    `data/arc_traj_v2.json`. The table is signed by the live geometry parameters
-   (`wheel_radius`, `shield_radius`, `blade_length`); a mismatch falls back to
-   the runtime solver. Size ≈0.72 MB, well under 50 MB.
+   and the authored strike revision. A mismatch falls back to the runtime
+   motion builder. Size ≈0.72 MB, well under 50 MB.
 
 ## 3. Model / runtime fixes in this revision
 
@@ -56,8 +54,8 @@ the claims were checked. It is intentionally separate from the art/usage README.
 * **Camera** is a small ball eye just outside the hull (ball r 0.115, barrel
   r 0.092). Only a 0.08 m barrel/pod retraction is allowed; the glowing lens
   remains the outermost part. Yaw/pitch rotate the ball itself, the static
-  iris/socket closes the hull behind it, and the barrel looks up during the
-  rising cut. No hull interior is exposed.
+  iris/socket closes the hull behind it, and the barrel keeps its forward aim
+  through the attack poses.
 * **Hull shell** loft winding was clockwise-corrected, so the cylinder side
   wall, back and bottom caps are solid instead of showing the far inner wall.
 * **Wheels** have a glowing ring on the outboard face; tire/tread albedo was
@@ -78,13 +76,13 @@ the claims were checked. It is intentionally separate from the art/usage README.
 machine-readable report is `renders/v2/qa_report.json`.
 
 * Every clip is sampled at 97 points; non-adjacent proxy clearance is positive:
-  rest +0.0265, idle +0.0526, walk +0.0407, attack +0.0392, attack_up +0.0099,
+  rest +0.0265, idle +0.0526, walk +0.0407, attack +0.0091, attack_up +0.0080,
   defend +0.0130, draw +0.0265, sheathe +0.0536 m; floor ≥ 0.
 * All state-machine-reachable crossfades (idle/walk and one-shot ends into any
   drawn state) audited; worst +0.0501 m. Direct rest↔drawn blends are negative
   by design and are never executed (the state machine routes them through
   draw/sheathe).
-* Exact attack checks as listed above.
+* Attacks are checked for direction, elbow flexion, clearance and forward aim.
 * Blocks: left 45° shield miss 0.000 m, clearance +0.0130 m; right 45° sword
   miss 0.000 m, clearance +0.0191 m.
 * Runtime plan: attack 1 ms, attack_up 1 ms, block ≤13 ms; build with table
@@ -98,10 +96,8 @@ clip). The final independent vision review is in
 `renders/v2/details/`; the mandated block renders are
 `renders/v2/block_left.png` and `block_right.png`.
 
-The camera pod retraction during sword swings is intentional: the overhead and
-cross-body paths need the front volume, so the pod slides straight back into
-the hull and a static armoured iris remains. It is keyed to the attack clips
-only; idle/rest/defend keep the big lens exposed.
+The new strike guides route the arm around the camera at its deployed
+position while the optic compensates for movement of the chassis.
 
 ## 6. Agent usage
 

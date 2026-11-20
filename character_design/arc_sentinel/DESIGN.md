@@ -55,8 +55,8 @@ the shared mesh kit are reused.
 * `draw` / `sheathe` — one-shot transitions `rest → idle` / `idle → rest`,
   solved with the same analytic arm IK; blade ignites only after it clears the
   sheath.
-* `attack` — body-turned overhead cut upper-left → front; the arm/blade line is straight through the finish.
-* `attack_up` — rising cut lower-left → upper-right; the arm/blade line is straight at the finish.
+* `attack` — body-driven whip from upper-left to lower-right across the front.
+* `attack_up` — rising cut from the low sword side to the left-front high position.
 * `defend` — shield block for a front-left 45° threat, sword block for a
   front-right 45° threat. No "guard" fallback: both threats always resolve to
   their mandated effector.
@@ -65,43 +65,20 @@ All non-transition clips start and end on the idle base pose, so crossfades do
 not pop. `rest ↔ idle` only happens through `draw` / `sheathe` (automatic when
 `play_anim` is called across that boundary).
 
-## 4. Exact attack constraints
+## 4. Attack motion
 
-Measured from the analytic blade axis `d` (unit, root space).
-
-### attack (left-back → left-front-up → right-down)
-
-* Windup:
-  * generator above the **left** shoulder: tool (0.45, 1.55, −0.05) m;
-  * blade direction left-back-up (0.55, 0.50, −0.67);
-  * body/torso yaw +12°/+30° — a large left twist.
-* Via:
-  * blade left-front-up (0.60, 0.45, 0.66);
-  * arm and blade collinear (≤6°), full reach.
-* Front:
-  * blade exactly forward `d = (0, 0, 1)`, arm straight, tip z 2.06 m, chest
-    facing front — the blade must travel through the space in front of the body.
-* End:
-  * blade right-down with **zero front/back** component: `d = (−0.906, −0.423, 0)`;
-  * arm and blade collinear (≤6°), tool x −1.18 m / z −0.16 m, tip y 0.20 m;
-  * body/torso turn right (−12°/−30°) so this rightward cut is in front of the
-    body, not off its front-right.
-* The whole start → via → end → follow swing is re-timed by the sword-tip arc
-  length with one smooth bell; there are no per-key velocity zeros. Peak tip
-  speed 16.2 m/s; peak joint diagnostic 47.7 rad/s (shield arm correction).
-
-### attack_up (lower-left → upper-right)
-
-* Windup:
-  * blade horizontal and backward: `d.y ≈ 0`, `d.z < -0.97`;
-  * every sampled point of the blade volume has `x > 0.26` (entirely left of
-    the hull);
-  * tool point low-left: `y < 0.90`, `x > 0.30`.
-* End:
-  * arm and blade are collinear (≤6° between shoulder→wrist and blade);
-  * the whole line is raised 44.93° up-right; the arm is no longer horizontal;
-  * blade 45° up-right: `d.x < 0`, `d.y > 0`, angle to horizontal
-    `asin(d.y) = 45° ± 5°`.
+* Downward whip (1.45 s). The elbow stays to the right as the bent arm
+  brings the sword hand across the chassis centerline at head height. The
+  torso unwinds, the hand passes through the space in front of the chassis, and the blade settles at right-front low. The
+  right suspension compresses as the arm decelerates and then rebounds.
+* Rising diagonal (1.50 s). The right elbow folds down beside the hull,
+  the sword loads to the right and rear, and the torso lifts the shoulder
+  into a sweep through center-front. The sword hand crosses to the left and
+  the generator rises left of the forward optic. The blade finishes high and
+  the left suspension catches the follow-through.
+* Both moves keep the wheels in contact, the optic forward and the elbow
+  bent at the finish. The sword, shield, optic and ground have separate
+  clearance checks using the existing collision proxies.
 
 ## 5. Block contract
 
