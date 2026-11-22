@@ -2,21 +2,21 @@
 **/.godot/
 *.forward_bak
 
-# ---- 导出产物（basic/actdemo/web/build_web.sh build_all 重建） ----
-basic/actdemo/build/
+# ---- 导出产物（main/content/levels/actdemo/web/build_web.sh build_all 重建） ----
+main/content/levels/actdemo/build/
 
 # ---- 渲染输出（各工程 scenes/*shots.tscn / render_*.gf 重建） ----
 **/renders/
-basic/actdemo/shots/
+main/content/levels/actdemo/shots/
 
 # ---- 离线烘焙 / 生成资源 ----
-basic/mapbuilder/t3_spaceship/ds41-1017-max/baked/
-basic/mapbuilder/t3_spaceship/qwen38-max/cache/
-basic/mapbuilder/t2_terrain/ds41-1017-max/assets/
+main/content/maps/t3_spaceship/ds41-1017-max/baked/
+main/content/maps/t3_spaceship/qwen38-max/cache/
+main/content/maps/t2_terrain/ds41-1017-max/assets/
 
 # ---- 本地自签 TLS 开发证书（openssl 一行重建，不入库） ----
-basic/actdemo/web/dev_cert.pem
-basic/actdemo/web/dev_key.pem
+main/content/levels/actdemo/web/dev_cert.pem
+main/content/levels/actdemo/web/dev_key.pem
 
 # ---- 旧嵌套仓库备份（历史已废弃，仅留本地） ----
 _backup_nested_git/
@@ -28,3 +28,6 @@ __pycache__/
 # ---- 系统垃圾 ----
 .DS_Store
 Thumbs.db
+# Generated resources for the unified project and local exports.
+/main/runtime/
+/main/build/

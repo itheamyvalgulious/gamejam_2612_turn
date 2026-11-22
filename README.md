@@ -1,94 +1,86 @@
-# gamejam_2612_turn
+# TURN
 
-2026 年 12 月 Game Jam 的统一仓库：各子工程均为 **Godot 4.7.2 纯代码程序化**工程，
-零外部模型、零位图贴图（材质一律是写进 shader 的数学函数）。
+团队交付统一放在 `main/content/`，按关卡、敌人、主角、武器、地图和模板归档。每份交付和它的模型、动作、材质、说明及验证场景放在一起。未接入正式关卡的敌人也收在敌人分类下。
 
-| 目录 | 内容 | 一句话 |
-| --- | --- | --- |
-| `basic/` | 三个玩法原型 | ACT 四足刀客、VESPER 程序化主角、3×3 程序化地图/场景 |
-| `character_design/` | 敌人与武器角色工程 | ARC Sentinel、Shard Phantom、Boss Leviathan、少女头部、电弧剑 |
-| `main/` | 主程序预留目录 | 用于后续主程序整合 |
-| `scenes/` | 场景试验（无战斗） | 仓库 / 回廊实验舱 / 病房 / Cargo Hold2 / 霓虹街区 / Galleria |
+## 文件结构
 
-各目录的详细能力范围、参数开关与调参说明见各自目录下的 `README.md`。
+| 目录 | 内容 |
+| --- | --- |
+| `main/content/levels/` | 霓虹窄巷、雨夜广场、灯墙之厅、货舱 02、霓虹街区、坠击中庭和三个探索场景的源文件 |
+| `main/content/enemies/melee/` | [人形刀客](main/content/enemies/melee/mech_duelist/README.md)、[ARC Sentinel](main/content/enemies/melee/arc_sentinel/README.md) |
+| `main/content/enemies/ranged/` | [单轮巡射机甲](main/content/enemies/ranged/wheel_sentry/README.md) |
+| `main/content/enemies/phase/` | [Shard Phantom](main/content/enemies/phase/shard_phantom/README.md) |
+| `main/content/enemies/boss/` | [折相](main/content/enemies/boss/phase_boss/README.md)、[Leviathan](main/content/enemies/boss/leviathan/README.md) |
+| `main/content/characters/` | [VESPER 主角](main/content/characters/vesper/README.md) |
+| `main/content/weapons/` | [电弧剑](main/content/weapons/electric_sword/README.md) |
+| `main/content/maps/` | [城市、地形、飞船地图实验](main/content/maps/README.md)及 `_baseline/` 历史初稿 |
+| `main/content/templates/` | [敌人设计套件](main/content/templates/enemy_design/README_kit.md) |
+| `main/assets/ui/`、`main/ui/` | 菜单背景、关卡缩略图、菜单和选关界面 |
+| `main/core/`、`main/tools/` | 游戏会话、关卡目录和资源构建工具 |
+| `main/runtime/` | 构建生成的运行资源，按关卡、敌人、音效、角色、着色器和界面分目录 |
+| `main/docs/`、`main/build/` | [敌人设计说明](main/docs/enemy_design.md)与发行文件 |
 
-## basic
+### 正式关卡源文件
 
-| 目录 | 项目 | 一句话 |
-| --- | --- | --- |
-| `basic/actdemo/` | ACT // 四足刀客 | 四足机甲、武士刀、赛博朋克巷战的动作 demo，「看见就打不到 / 看见就会死」的视线博弈 |
+| 关卡 | 维护位置 |
+| --- | --- |
+| 霓虹窄巷、雨夜广场 | [levels/actdemo](main/content/levels/actdemo/README.md) |
+| 灯墙之厅 | [levels/shadow_chamber](main/content/levels/shadow_chamber/README.md) |
+| 货舱 02 | [levels/cargo_hold2](main/content/levels/cargo_hold2/README.md) |
+| 霓虹街区 | [levels/city](main/content/levels/city/README.md) |
+| 坠击中庭 | [levels/galleria](main/content/levels/galleria/README.md) |
+| 仓库、回廊实验舱、病房 | [levels/scene_lab](main/content/levels/scene_lab/README.md) |
 
-| `basic/mapbuilder/` | 程序化地图/场景探索 | 3 个任务（赛博城市 / 自然地形 / 宇宙飞船）× 3 个模型的 9 个独立交付，初稿冻结在 `_baseline/` |
+各关卡自带的合成音效源码在对应关卡的 `src/audio/`，构建时归到 `main/runtime/audio/`。编辑请从 `main/content/` 的原件开始。正式关卡使用 `main/project.godot` 启动。敌人与其他独立素材可以用各自的 `project.godot` 预览。
 
-## character_design
+## 正式关卡敌人
 
-| 目录 | 角色 | 定位 |
-| --- | --- | --- |
-| `character_design/hero/` | VESPER // VX-02 | 程序化四足高速 ACT 主角：4 次中心对称的噬菌体式机械腿 + 人形战斗底盘 + 激光大剑 |
-| `character_design/arc_sentinel/` | ARC // SENTINEL v3 | 普通近战小怪 · 三角履带炮塔 |
-| `character_design/shard_phantom/` | SHARD // PHANTOM | 位移敌人 · 模块化悬浮人形 |
-| `character_design/boss/` | LEVIATHAN // ABYSSAL WARDEN | 最终 Boss · 机械章鱼 |
-| `character_design/weapon_electricity_sword/` | 电弧剑 | 电弧场 / ribbon 独立资产 |
-| `character_design/_kit_template/` | 套件模板 | 新建角色工程的共享骨架 |
+| 敌人 | 关卡中的数量和用途 |
+| --- | --- |
+| ARC Sentinel | 12，替换原近战小兵 |
+| 单轮巡射机甲 | 5，替换原远程射手 |
+| Shard Phantom | 4，替换货舱和街区的相位位移怪 |
+| 折相 | 1，灯墙之厅首领 |
 
-三个敌人工程共享同一套「暗黑舞台 + 霓虹轮廓光 + ACES/Bloom/SSAO + 扫描线暗角」
-的呈现体系，与 `basic/actdemo`、`character_design/hero` 同一画风家族。
+人形刀客和 Leviathan 的素材在敌人目录中供后续关卡使用。构建工具只提取当前关卡需要的敌人依赖。三种普通敌人使用原设计工程的模型、动画和专用脚本，折相使用自身的完整战斗控制器。
 
-## scenes 独立关卡
+## 后续提交素材
 
-三个关卡各自包含完整的 Godot 工程、字体和启动脚本。Windows 双击对应目录内的 `run.cmd`；也可导入其 `project.godot`，等待资源导入完成后按 F5。
+按素材最终在游戏里的用途提交源码。更新已有内容时，修改对应的现有目录。新增内容时，在对应类别下用小写英文和下划线建立单独目录。
 
-| 目录 | 场景与玩法 | 敌人 |
-| --- | --- | --- |
-| [scenes/cargo_hold2](scenes/cargo_hold2/README.md) | 集装箱掩体、固定点位激光位移 | 3 位移 + 1 基础 |
-| [scenes/city](scenes/city/README.md) | 夜间赛博街区、三路绕侧、实体店铺与车辆掩体 | 3 基础 + 2 远程 + 1 位移 |
-| [scenes/galleria](scenes/galleria/README.md) | 高台跃下、空中左键坠击、下层中庭与返程阶梯 | 4 基础 + 2 远程 |
+| 要提交的内容 | 放置位置 |
+| --- | --- |
+| 可玩的关卡、布光、碰撞、出生点和刷怪配置 | `main/content/levels/<关卡名>/` |
+| 近战、远程、位移敌人或 Boss | `main/content/enemies/melee/`、`ranged/`、`phase/`、`boss/` 下对应敌人的目录 |
+| 多个敌人共用的战斗接口或工具脚本 | `main/content/enemies/shared/` |
+| 主角模型、骨架、动作与材质 | `main/content/characters/<角色名>/` |
+| 独立武器的模型、动作和特效 | `main/content/weapons/<武器名>/` |
+| 地图试验、原型和历史方案 | `main/content/maps/` 下对应主题的目录 |
+| 关卡内合成音效 | 对应关卡的 `src/audio/` |
+| 音频文件、贴图和其他原始素材 | 使用它们的关卡、敌人或角色目录中的 `assets/`，录制音频放在 `assets/audio/` |
+| 主菜单背景、关卡缩略图和菜单代码 | 图片放 `main/assets/ui/backgrounds/` 或 `main/assets/ui/level_previews/`，菜单代码放 `main/ui/menu/` |
 
-两个新关卡沿用 Cargo Hold2 的角色、输入、美术和独立启动管线，均以肃清当前区域为通关条件。Galleria 从高台下落时按左键可发动落地范围攻击。详见各关卡 README。
+每份交付把模型、动作、着色器、引用资源和预览场景放在同一目录。随素材提交或更新 `README.md`，写明预览入口、依赖和接入的关卡。未接入关卡的敌人也放在相应的敌人类别下。
 
-## scenes 场景试验
+- **调整现有关卡的刷怪**：改该关卡的源文件。新增正式关卡时，同时更新 `main/tools/prepare_game.py` 和 `main/core/level_catalog.gd`。
+- **把新敌人接入游戏**：更新关卡中的刷怪入口，并在 `main/tools/encounter_roster.py` 中声明共享模型和控制器依赖。关卡专用的接入脚本随关卡维护，敌人自身的模型和动作随敌人维护。
+- **提交和验证**：从最新 `main` 建分支，使用项目内相对路径，保留 Godot 资源的 `.uid` 和导入设置。运行下方构建命令，打开受影响的关卡或预览，然后发起合并请求，写明素材路径和验证结果。
+- **生成目录**：`main/runtime/`、`main/build/`、`.godot/` 和 `__pycache__/` 由本地工具生成。提交源文件即可，试玩包单独分发。
 
-纯场景、无敌人，用来验证尺度、走位、可跳平台与灯光；不做通关判定，用 `N` 手动切关。
-每个目录同样是完整的 Godot 4.7.2 工程，`./run.sh -- --<场景名>` 直接进对应场景。
+## 运行和导出
 
-| 目录 | 场景 | 看点 |
-| --- | --- | --- |
-| [scenes/scene_lab](scenes/scene_lab/README.md) | 仓库 / 回廊实验舱 / 病房 | 货架与箱顶攀爬、圆形场地边界、30 张病床 + 中央隔墙 + 12×4.56 m 平面镜 |
+Windows 双击 `main/build/Turn.exe`。游戏默认全屏，按 **F11** 切换全屏与窗口，关卡内按 **F1** 返回选关。
 
-## 运行
+从仓库根目录运行下列命令。需要 Python 3、Godot 4.7.2 和同版本的 Windows 导出模板。
 
-需要 Godot **4.7.2**（`godot` 在 `PATH` 里，或改各 `run.sh` 里的路径）。
+```powershell
+python main/tools/prepare_game.py
+godot --headless --path main --import
+godot --path main
 
-```bash
-cd scenes/cargo_hold2 && ./run.sh                 # 独立货舱关卡
-cd basic/actdemo    && ./run.sh                 # 游戏本体
-cd character_design/hero && ./run.sh            # 展示循环，按任意移动/攻击键接管
-cd basic/mapbuilder/t3_spaceship/ds41-1017-max && ./run.sh   # 任选一格，9 格都是独立工程
-
-cd character_design/arc_sentinel  && ./run.sh
-cd character_design/shard_phantom && ./run.sh
-cd character_design/boss          && ./run.sh
+# 导出时执行以下两行
+New-Item -ItemType Directory -Force main/build
+godot --headless --path main --export-release Windows build/Turn.exe
 ```
 
-`mapbuilder` 的每一格、`character_design` 的每个角色都是可独立打开的 Godot 工程；
-首次打开若出现 `class_name` 未注册，先执行一次 `godot --headless --path . --import`。
-
-## 生成物不入库
-
-按「源码能直接生成的一律不入库」的约定，以下内容被根目录 `.gitignore` 排除，
-随时可由源码重建（文件仍保留在本地磁盘）：
-
-| 路径 | 重建方式 |
-| --- | --- |
-| `**/.godot/` | 打开工程时自动重建（`godot --headless --path . --import`） |
-| `basic/actdemo/build/` | `./web/build_web.sh build_all`（Web / Windows / macOS 三端导出） |
-| `basic/actdemo/shots/` | `DISPLAY=:0 godot --path . res://scenes/shots.tscn` |
-| `**/renders/` | 各工程 `scenes/*shots.tscn`、`render_stills.tscn` / `render_movie.tscn` 等渲染场景 |
-| `basic/mapbuilder/t3_spaceship/*/baked/` | `./bake.sh`（`godot --path . -- --bake`） |
-| `basic/mapbuilder/t3_spaceship/qwen38-max/cache/` | 首次运行按 `scripts/main.gd` 的缓存逻辑生成 |
-| `basic/mapbuilder/t2_terrain/ds41-1017-max/assets/` | `python3 tools/gen_textures.py`、`gen_rockface.py --tex --mesh`、`gen_waterfall.py`（需 numpy + Pillow） |
-| `basic/actdemo/web/dev_*.pem` | 本地自签 TLS 证书，`openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -keyout dev_key.pem -out dev_cert.pem -subj "/CN=localhost"` |
-| `_backup_nested_git/` | 旧嵌套 git 仓库的 bundle 备份，仅留本地 |
-
-调试截图（各项目的 `shots/`、`screenshots/`）与编辑器缓存已从仓库移除，
-统计层面的取舍见上表。
+`main/runtime/`、`main/build/` 和 Godot 缓存都是本地生成目录。分享 Windows 试玩版时发送 `Turn.exe` 即可。
