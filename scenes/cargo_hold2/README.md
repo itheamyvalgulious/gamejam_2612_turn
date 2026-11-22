@@ -1,6 +1,6 @@
 # Cargo Hold2 · 相位伏击
 
-独立 Godot **4.7.2 / Forward+** 工程，入口为 `main/cargo_hold2/project.godot`。用 Godot 导入该文件，等待资源导入完成后按 **F5**，即可进入货舱关卡。不需要打开 ACT demo，也不需要单独运行 `src/cargo_hold2/` 中的脚本。
+独立 Godot **4.7.2 / Forward+** 工程，入口为 `scenes/cargo_hold2/project.godot`。用 Godot 导入该文件，等待资源导入完成后按 **F5**，即可进入货舱关卡。不需要打开 ACT demo，也不需要单独运行 `src/cargo_hold2/` 中的脚本。
 
 `project.godot` 是工程配置入口；游戏逻辑、场景与资源按仓库惯例分开存放。
 
@@ -46,14 +46,14 @@ Windows 下双击 `run.cmd`，会自动补齐字体和脚本导入后进入游�
 也可以手动导入后直接启动：
 
 ```powershell
-& 'D:\Godot\Godot_v4.7.2-stable_win64_console.exe' --headless --editor --path 'D:\gamejam_2612_turn\main\cargo_hold2' --import --quit
-& 'D:\Godot\Godot_v4.7.2-stable_win64_console.exe' --path 'D:\gamejam_2612_turn\main\cargo_hold2'
+& 'D:\Godot\Godot_v4.7.2-stable_win64_console.exe' --headless --editor --path 'D:\gamejam_2612_turn\scenes\cargo_hold2' --import --quit
+& 'D:\Godot\Godot_v4.7.2-stable_win64_console.exe' --path 'D:\gamejam_2612_turn\scenes\cargo_hold2'
 ```
 
 Bash 启动方式：
 
 ```bash
-cd main/cargo_hold2
+cd scenes/cargo_hold2
 ./run.sh
 ```
 

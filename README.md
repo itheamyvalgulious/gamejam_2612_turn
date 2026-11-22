@@ -1,14 +1,14 @@
 # gamejam_2612_turn
 
-2026 年 12 月 Game Jam 的统一仓库：三个部分全部是 **Godot 4.7.2 纯代码程序化**工程，
+2026 年 12 月 Game Jam 的统一仓库：各子工程均为 **Godot 4.7.2 纯代码程序化**工程，
 零外部模型、零位图贴图（材质一律是写进 shader 的数学函数）。
 
 | 目录 | 内容 | 一句话 |
 | --- | --- | --- |
 | `basic/` | 三个玩法原型 | ACT 四足刀客、VESPER 程序化主角、3×3 程序化地图/场景 |
 | `character_design/` | 敌人与武器角色工程 | ARC Sentinel、Shard Phantom、Boss Leviathan、少女头部、电弧剑 |
-| `main/` | 独立战斗关卡 | Cargo Hold2 / 霓虹街区 / Galleria |
-| `scenes/` | 场景试验（无战斗） | 仓库 / 回廊实验舱 / 病房 |
+| `main/` | 主程序预留目录 | 用于后续主程序整合 |
+| `scenes/` | 场景试验（无战斗） | 仓库 / 回廊实验舱 / 病房 / Cargo Hold2 / 霓虹街区 / Galleria |
 
 各目录的详细能力范围、参数开关与调参说明见各自目录下的 `README.md`。
 
@@ -34,15 +34,15 @@
 三个敌人工程共享同一套「暗黑舞台 + 霓虹轮廓光 + ACES/Bloom/SSAO + 扫描线暗角」
 的呈现体系，与 `basic/actdemo`、`character_design/hero` 同一画风家族。
 
-## main 独立关卡
+## scenes 独立关卡
 
 三个关卡各自包含完整的 Godot 工程、字体和启动脚本。Windows 双击对应目录内的 `run.cmd`；也可导入其 `project.godot`，等待资源导入完成后按 F5。
 
 | 目录 | 场景与玩法 | 敌人 |
 | --- | --- | --- |
-| [main/cargo_hold2](main/cargo_hold2/README.md) | 集装箱掩体、固定点位激光位移 | 3 位移 + 1 基础 |
-| [main/city](main/city/README.md) | 夜间赛博街区、三路绕侧、实体店铺与车辆掩体 | 3 基础 + 2 远程 + 1 位移 |
-| [main/galleria](main/galleria/README.md) | 高台跃下、空中左键坠击、下层中庭与返程阶梯 | 4 基础 + 2 远程 |
+| [scenes/cargo_hold2](scenes/cargo_hold2/README.md) | 集装箱掩体、固定点位激光位移 | 3 位移 + 1 基础 |
+| [scenes/city](scenes/city/README.md) | 夜间赛博街区、三路绕侧、实体店铺与车辆掩体 | 3 基础 + 2 远程 + 1 位移 |
+| [scenes/galleria](scenes/galleria/README.md) | 高台跃下、空中左键坠击、下层中庭与返程阶梯 | 4 基础 + 2 远程 |
 
 两个新关卡沿用 Cargo Hold2 的角色、输入、美术和独立启动管线，均以肃清当前区域为通关条件。Galleria 从高台下落时按左键可发动落地范围攻击。详见各关卡 README。
 
@@ -60,7 +60,7 @@
 需要 Godot **4.7.2**（`godot` 在 `PATH` 里，或改各 `run.sh` 里的路径）。
 
 ```bash
-cd main/cargo_hold2 && ./run.sh                 # 独立货舱关卡
+cd scenes/cargo_hold2 && ./run.sh                 # 独立货舱关卡
 cd basic/actdemo    && ./run.sh                 # 游戏本体
 cd character_design/hero && ./run.sh            # 展示循环，按任意移动/攻击键接管
 cd basic/mapbuilder/t3_spaceship/ds41-1017-max && ./run.sh   # 任选一格，9 格都是独立工程
