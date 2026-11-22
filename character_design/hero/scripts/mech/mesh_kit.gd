@@ -429,3 +429,475 @@ static func ellipsoid(radii: Vector3, rings := 24, sides := 40,
 			st.add_index(d)
 			st.add_index(c)
 	return st.commit()
+
+
+# ==============================================================================
+# Smooth parametric curved surfaces (loft, solid-thickness shell, lathe, blade)
+# ==============================================================================
+
+static func _emit_smooth_grid(st: SurfaceTool, rows: Array, norms: Array, uvs: Array,
+		wrap_cols: bool, base_idx := 0) -> int:
+	var r_count := rows.size()
+	var c_count: int = rows[0].size()
+	for r in r_count:
+		for c in c_count:
+			st.set_normal(norms[r][c])
+			st.set_uv(uvs[r][c])
+			st.add_vertex(rows[r][c])
+	var quads_c := c_count if wrap_cols else c_count - 1
+	for r in r_count - 1:
+		for c in quads_c:
+			var c1 := (c + 1) % c_count if wrap_cols else c + 1
+			var i0 := base_idx + r * c_count + c
+			var i1 := base_idx + r * c_count + c1
+			var i2 := base_idx + (r + 1) * c_count + c1
+			var i3 := base_idx + (r + 1) * c_count + c
+			var p0: Vector3 = rows[r][c]
+			var p1: Vector3 = rows[r][c1]
+			var p2: Vector3 = rows[r + 1][c1]
+			var p3: Vector3 = rows[r + 1][c]
+			var guide: Vector3 = norms[r][c] + norms[r][c1] + norms[r + 1][c1] + norms[r + 1][c]
+			var g := (p1 - p0).cross(p2 - p0)
+			if g.dot(guide) > 0.0:
+				st.add_index(i0)
+				st.add_index(i2)
+				st.add_index(i1)
+				st.add_index(i0)
+				st.add_index(i3)
+				st.add_index(i2)
+			else:
+				st.add_index(i0)
+				st.add_index(i1)
+				st.add_index(i2)
+				st.add_index(i0)
+				st.add_index(i2)
+				st.add_index(i3)
+	return base_idx + r_count * c_count
+
+
+static func _emit_cap_fan(st: SurfaceTool, center: Vector3, ring: Array,
+		nrm: Vector3, base_idx: int) -> int:
+	var n := ring.size()
+	st.set_normal(nrm)
+	st.set_uv(Vector2(0.5, 0.5))
+	st.add_vertex(center)
+	for i in n:
+		var a := TAU * float(i) / float(n)
+		st.set_normal(nrm)
+		st.set_uv(Vector2(0.5 + 0.5 * cos(a), 0.5 + 0.5 * sin(a)))
+		st.add_vertex(ring[i])
+	for i in n:
+		var j := (i + 1) % n
+		var p1: Vector3 = ring[i]
+		var p2: Vector3 = ring[j]
+		var g := (p1 - center).cross(p2 - center)
+		if g.dot(nrm) > 0.0:
+			st.add_index(base_idx)
+			st.add_index(base_idx + 1 + j)
+			st.add_index(base_idx + 1 + i)
+		else:
+			st.add_index(base_idx)
+			st.add_index(base_idx + 1 + i)
+			st.add_index(base_idx + 1 + j)
+	return base_idx + 1 + n
+
+
+static func _eval_station(stations: Array, u: float) -> Array:
+	var n := stations.size()
+	if u <= float(stations[0][0]):
+		return stations[0]
+	if u >= float(stations[n - 1][0]):
+		return stations[n - 1]
+	for i in n - 1:
+		var t0 := float(stations[i][0])
+		var t1 := float(stations[i + 1][0])
+		if u <= t1:
+			var uu := clampf((u - t0) / maxf(t1 - t0, 1e-6), 0.0, 1.0)
+			var s := uu * uu * (3.0 - 2.0 * uu)
+			var a: Array = stations[i]
+			var b: Array = stations[i + 1]
+			return [
+				u,
+				lerpf(float(a[1]), float(b[1]), s),
+				lerpf(float(a[2]), float(b[2]), s),
+				lerpf(float(a[3]), float(b[3]), s),
+				lerpf(float(a[4]), float(b[4]), s),
+				lerpf(float(a[5]), float(b[5]), s),
+				lerpf(float(a[6]), float(b[6]), s),
+			]
+	return stations[n - 1]
+
+
+static func _sample_station_ts(stations: Array, substeps: int) -> Array[float]:
+	var ts: Array[float] = []
+	var steps := maxi(substeps, 1)
+	for i in stations.size() - 1:
+		var t0 := float(stations[i][0])
+		var t1 := float(stations[i + 1][0])
+		for k in steps:
+			ts.append(lerpf(t0, t1, float(k) / float(steps)))
+	ts.append(float(stations[stations.size() - 1][0]))
+	return ts
+
+
+static func _super_section(a: float, ry_pos: float, ry_neg: float, rz: float,
+		exp_val: float, y_off: float, z_off: float) -> Vector2:
+	var cy := cos(a)
+	var sz := sin(a)
+	var ry := ry_pos if cy >= 0.0 else ry_neg
+	var y := y_off + signf(cy) * pow(absf(cy), exp_val) * ry
+	var z := z_off + signf(sz) * pow(absf(sz), exp_val) * rz
+	return Vector2(y, z)
+
+
+## Smooth parametric lofted limb body along +X (pivoting at x = 0).
+## Each station: [t, ry_pos, ry_neg, rz, exp_val, y_off, z_off].
+static func loft_x(length: float, stations: Array, sides := 24, substeps := 3,
+		cap_start := true, cap_end := true) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var ts := _sample_station_ts(stations, substeps)
+	var r_count := ts.size()
+	var rows := []
+	var centers: Array[Vector3] = []
+	var uvs := []
+	for r in r_count:
+		var t := ts[r]
+		var s := _eval_station(stations, t)
+		var ry_pos := float(s[1])
+		var ry_neg := float(s[2])
+		var rz := float(s[3])
+		var ex := float(s[4])
+		var yo := float(s[5])
+		var zo := float(s[6])
+		var x := t * length
+		centers.append(Vector3(x, yo, zo))
+		var prow := []
+		var urow := []
+		for c in sides:
+			var u := float(c) / float(sides)
+			var yz := _super_section(TAU * u, ry_pos, ry_neg, rz, ex, yo, zo)
+			prow.append(Vector3(x, yz.x, yz.y))
+			urow.append(Vector2(u, t))
+		rows.append(prow)
+		uvs.append(urow)
+	var norms := []
+	for r in r_count:
+		var nrow := []
+		var r0 := maxi(r - 1, 0)
+		var r1 := mini(r + 1, r_count - 1)
+		for c in sides:
+			var c0 := (c - 1 + sides) % sides
+			var c1 := (c + 1) % sides
+			var du: Vector3 = rows[r][c1] - rows[r][c0]
+			var dv: Vector3 = rows[r1][c] - rows[r0][c]
+			var n := du.cross(dv)
+			var radial: Vector3 = rows[r][c] - centers[r]
+			radial.x = 0.0
+			if n.length_squared() < 1e-12:
+				n = radial if radial.length_squared() > 1e-12 else Vector3.UP
+			n = n.normalized()
+			if n.dot(radial) < 0.0:
+				n = -n
+			nrow.append(n)
+		norms.append(nrow)
+	var base := _emit_smooth_grid(st, rows, norms, uvs, true, 0)
+	if cap_start:
+		base = _emit_cap_fan(st, centers[0], rows[0], Vector3.LEFT, base)
+	if cap_end:
+		_emit_cap_fan(st, centers[r_count - 1], rows[r_count - 1], Vector3.RIGHT, base)
+	return st.commit()
+
+
+## Solid-thickness curved armor cowling along +X spanning angle phi0..phi1
+## (0 = +Y top, +/-PI/2 = +/-Z sides, PI = -Y bottom).
+static func shell_x(length: float, stations: Array, phi0: float, phi1: float,
+		thickness: float, sides := 18, substeps := 3) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var ts := _sample_station_ts(stations, substeps)
+	var r_count := ts.size()
+	var c_count := sides + 1
+	var out_rows := []
+	var in_rows := []
+	var centers: Array[Vector3] = []
+	var th_local: Array[float] = []
+	var uvs := []
+	for r in r_count:
+		var t := ts[r]
+		var s := _eval_station(stations, t)
+		var ry_pos := float(s[1])
+		var ry_neg := float(s[2])
+		var rz := float(s[3])
+		var ex := float(s[4])
+		var yo := float(s[5])
+		var zo := float(s[6])
+		var x := t * length
+		centers.append(Vector3(x, yo, zo))
+		th_local.append(minf(thickness, minf(minf(ry_pos, ry_neg), rz) * 0.55))
+		var prow := []
+		var urow := []
+		for c in c_count:
+			var u := float(c) / float(sides)
+			var a := lerpf(phi0, phi1, u)
+			var yz := _super_section(a, ry_pos, ry_neg, rz, ex, yo, zo)
+			prow.append(Vector3(x, yz.x, yz.y))
+			urow.append(Vector2(u, t))
+		out_rows.append(prow)
+		uvs.append(urow)
+	var out_norms := []
+	var in_norms := []
+	for r in r_count:
+		var onrow := []
+		var inrow := []
+		var irow := []
+		var r0 := maxi(r - 1, 0)
+		var r1 := mini(r + 1, r_count - 1)
+		for c in c_count:
+			var c0 := maxi(c - 1, 0)
+			var c1 := mini(c + 1, c_count - 1)
+			var du: Vector3 = out_rows[r][c1] - out_rows[r][c0]
+			var dv: Vector3 = out_rows[r1][c] - out_rows[r0][c]
+			var n := du.cross(dv)
+			var radial: Vector3 = out_rows[r][c] - centers[r]
+			radial.x = 0.0
+			if n.length_squared() < 1e-12:
+				n = radial if radial.length_squared() > 1e-12 else Vector3.UP
+			n = n.normalized()
+			if n.dot(radial) < 0.0:
+				n = -n
+			onrow.append(n)
+			inrow.append(-n)
+			irow.append(out_rows[r][c] - n * th_local[r])
+		out_norms.append(onrow)
+		in_norms.append(inrow)
+		in_rows.append(irow)
+	var base := _emit_smooth_grid(st, out_rows, out_norms, uvs, false, 0)
+	base = _emit_smooth_grid(st, in_rows, in_norms, uvs, false, base)
+	# Stitch perimeter strips with crisp rim normals
+	for edge_c in [0, c_count - 1]:
+		var erows := []
+		var enorms := []
+		var euvs := []
+		for r in r_count:
+			var p_out: Vector3 = out_rows[r][edge_c]
+			var p_in: Vector3 = in_rows[r][edge_c]
+			var tang: Vector3
+			if edge_c == 0:
+				tang = (out_rows[r][0] - out_rows[r][1]).normalized()
+			else:
+				tang = (out_rows[r][edge_c] - out_rows[r][edge_c - 1]).normalized()
+			erows.append([p_out, p_in])
+			enorms.append([tang, tang])
+			euvs.append([Vector2(0.0, ts[r]), Vector2(1.0, ts[r])])
+		base = _emit_smooth_grid(st, erows, enorms, euvs, false, base)
+	for cap_spec in [[0, Vector3.LEFT], [r_count - 1, Vector3.RIGHT]]:
+		var rr: int = int(cap_spec[0])
+		var nrm: Vector3 = cap_spec[1]
+		var crows := [[], []]
+		var cnorms := [[], []]
+		var cuvs := [[], []]
+		for c in c_count:
+			var u := float(c) / float(sides)
+			crows[0].append(out_rows[rr][c])
+			crows[1].append(in_rows[rr][c])
+			cnorms[0].append(nrm)
+			cnorms[1].append(nrm)
+			cuvs[0].append(Vector2(u, 0.0))
+			cuvs[1].append(Vector2(u, 1.0))
+		base = _emit_smooth_grid(st, crows, cnorms, cuvs, false, base)
+	return st.commit()
+
+
+## Interpolated Z half-width (rz) at distance `d` along +X for a loft_x / shell_x
+## station array. Used to plant forearm lamps flush on the curved armor skin.
+static func loft_half_w(d: float, length: float, stations: Array) -> float:
+	var u := clampf(d / maxf(length, 1e-5), 0.0, 1.0)
+	var s := _eval_station(stations, u)
+	return float(s[3])
+
+
+## Smooth surface of revolution along axis ("x", "y", or "z").
+## profile_cr: array of [coord, radius] pairs.
+static func smooth_lathe(profile_cr: Array, sides := 28, axis := "y",
+		cap_start := true, cap_end := true) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var r_count := profile_cr.size()
+	var rows := []
+	var centers: Array[Vector3] = []
+	var uvs := []
+	for r in r_count:
+		var coord := float(profile_cr[r][0])
+		var rad := maxf(float(profile_cr[r][1]), 0.0)
+		var c_pt := Vector3(coord, 0, 0) if axis == "x" else (Vector3(0, 0, coord) if axis == "z" else Vector3(0, coord, 0))
+		centers.append(c_pt)
+		var prow := []
+		var urow := []
+		for c in sides:
+			var u := float(c) / float(sides)
+			var a := TAU * u
+			var ca := cos(a) * rad
+			var sa := sin(a) * rad
+			var pt: Vector3
+			if axis == "x":
+				pt = Vector3(coord, ca, sa)
+			elif axis == "z":
+				pt = Vector3(ca, sa, coord)
+			else:
+				pt = Vector3(ca, coord, sa)
+			prow.append(pt)
+			urow.append(Vector2(u, float(r) / float(maxi(r_count - 1, 1))))
+		rows.append(prow)
+		uvs.append(urow)
+	var norms := []
+	for r in r_count:
+		var nrow := []
+		var r0 := maxi(r - 1, 0)
+		var r1 := mini(r + 1, r_count - 1)
+		for c in sides:
+			var c0 := (c - 1 + sides) % sides
+			var c1 := (c + 1) % sides
+			var du: Vector3 = rows[r][c1] - rows[r][c0]
+			var dv: Vector3 = rows[r1][c] - rows[r0][c]
+			var radial: Vector3 = rows[r][c] - centers[r]
+			var n := du.cross(dv)
+			if n.length_squared() < 1e-12:
+				if radial.length_squared() > 1e-12:
+					n = radial
+				else:
+					var ax_v := Vector3.RIGHT if axis == "x" else (Vector3.BACK if axis == "z" else Vector3.UP)
+					n = -ax_v if r == 0 else ax_v
+			n = n.normalized()
+			if radial.length_squared() > 1e-10 and n.dot(radial) < 0.0:
+				n = -n
+			nrow.append(n)
+		norms.append(nrow)
+	var base := _emit_smooth_grid(st, rows, norms, uvs, true, 0)
+	var ax_dir := Vector3.RIGHT if axis == "x" else (Vector3.BACK if axis == "z" else Vector3.UP)
+	if cap_start and float(profile_cr[0][1]) > 1e-4:
+		base = _emit_cap_fan(st, centers[0], rows[0], -ax_dir, base)
+	if cap_end and float(profile_cr[r_count - 1][1]) > 1e-4:
+		_emit_cap_fan(st, centers[r_count - 1], rows[r_count - 1], ax_dir, base)
+	return st.commit()
+
+
+## Compact double-curved aerodynamic shoulder shell with real rim thickness.
+static func pauldron_shell(rx: float, ry: float, rz: float, thickness: float,
+		sweep_z := 0.02, rings := 14, sides := 24) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var out_rows := []
+	var in_rows := []
+	var uvs := []
+	for r in rings + 1:
+		var v := float(r) / float(rings)
+		var theta := lerpf(0.02, PI * 0.54, v)
+		var st_h := sin(theta)
+		var ct_h := cos(theta)
+		var prow := []
+		var urow := []
+		for c in sides:
+			var u := float(c) / float(sides)
+			var phi := TAU * u
+			var x := cos(phi) * st_h * rx
+			var z := sin(phi) * st_h * rz + pow(st_h, 1.5) * sweep_z
+			var y := ct_h * ry - pow(st_h, 2.0) * ry * 0.14
+			prow.append(Vector3(x, y, z))
+			urow.append(Vector2(u, v))
+		out_rows.append(prow)
+		uvs.append(urow)
+	var out_norms := []
+	var in_norms := []
+	for r in rings + 1:
+		var onrow := []
+		var inrow := []
+		var irow := []
+		var r0 := maxi(r - 1, 0)
+		var r1 := mini(r + 1, rings)
+		for c in sides:
+			var c0 := (c - 1 + sides) % sides
+			var c1 := (c + 1) % sides
+			var du: Vector3 = out_rows[r][c1] - out_rows[r][c0]
+			var dv: Vector3 = out_rows[r1][c] - out_rows[r0][c]
+			var n := du.cross(dv)
+			var guide: Vector3 = out_rows[r][c] + Vector3(0.0, ry * 0.35, 0.0)
+			if n.length_squared() < 1e-12:
+				n = Vector3.UP
+			n = n.normalized()
+			if n.dot(guide) < 0.0:
+				n = -n
+			onrow.append(n)
+			inrow.append(-n)
+			irow.append(out_rows[r][c] - n * thickness)
+		out_norms.append(onrow)
+		in_norms.append(inrow)
+		in_rows.append(irow)
+	var base := _emit_smooth_grid(st, out_rows, out_norms, uvs, true, 0)
+	base = _emit_smooth_grid(st, in_rows, in_norms, uvs, true, base)
+	# Cap apex hole (r=0) and stitch outer-to-inner perimeter rim (r=rings)
+	base = _emit_cap_fan(st, Vector3(0.0, ry, 0.0), out_rows[0], Vector3.UP, base)
+	base = _emit_cap_fan(st, Vector3(0.0, ry - thickness, 0.0), in_rows[0], Vector3.DOWN, base)
+	var rim_rows := [[], []]
+	var rim_norms := [[], []]
+	var rim_uvs := [[], []]
+	for c in sides:
+		var u := float(c) / float(sides)
+		var p_out: Vector3 = out_rows[rings][c]
+		var p_in: Vector3 = in_rows[rings][c]
+		var p_prev: Vector3 = out_rows[rings - 1][c]
+		var rim_n: Vector3 = (p_out - p_prev).normalized()
+		rim_rows[0].append(p_out)
+		rim_rows[1].append(p_in)
+		rim_norms[0].append(rim_n)
+		rim_norms[1].append(rim_n)
+		rim_uvs[0].append(Vector2(u, 0.0))
+		rim_uvs[1].append(Vector2(u, 1.0))
+	_emit_smooth_grid(st, rim_rows, rim_norms, rim_uvs, true, base)
+	return st.commit()
+
+
+## Smooth lenticular double-edged plasma blade along +Y.
+## UV.y runs guard (0) -> tip (1), and UV.x runs 0..1 symmetrically from -X edge
+## through 0.5 center spine to +X edge on BOTH front (+Z) and back (-Z) faces.
+static func energy_blade(length: float, width: float, thickness: float,
+		taper := 0.78, segments := 28) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var ux_pts := [0.0, 0.25, 0.50, 0.75, 1.0]
+	var px_pts := [-1.0, -0.52, 0.0, 0.52, 1.0]
+	var pz_pts := [0.0, 0.64, 1.0, 0.64, 0.0]
+	var base_idx := 0
+	for fs in [1.0, -1.0]:
+		var face_sign: float = float(fs)
+		var rows := []
+		var norms := []
+		var uvs := []
+		for s in segments + 1:
+			var t := float(s) / float(segments)
+			var env := 0.0
+			if t < 0.07:
+				env = lerpf(0.72, 1.0, smoothstep(0.0, 0.07, t))
+			elif t < taper:
+				env = 1.0
+			else:
+				env = pow(maxf(0.0, 1.0 - (t - taper) / maxf(1.0 - taper, 0.001)), 0.74)
+			env = maxf(env, 0.012)
+			var wenv := env
+			var tenv := minf(1.0, env * 1.25)
+			var prow := []
+			var nrow := []
+			var urow := []
+			for k in 5:
+				var px: float = float(px_pts[k]) * width * 0.5 * wenv
+				var pz: float = float(pz_pts[k]) * thickness * 0.5 * tenv * face_sign
+				prow.append(Vector3(px, t * length, pz))
+				var nx: float = float(px_pts[k]) * 0.42
+				var nz: float = face_sign * 0.90
+				nrow.append(Vector3(nx, 0.0, nz).normalized())
+				urow.append(Vector2(float(ux_pts[k]), t))
+			rows.append(prow)
+			norms.append(nrow)
+			uvs.append(urow)
+		base_idx = _emit_smooth_grid(st, rows, norms, uvs, false, base_idx)
+	return st.commit()

@@ -29,11 +29,12 @@ func _ready() -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 0.65
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 0.9
-	env.glow_enabled = false
-	env.glow_intensity = 0.35
+	env.tonemap_exposure = 0.90
+	env.glow_enabled = true
+	env.glow_intensity = 0.34
 	env.glow_bloom = 0.02
-	env.glow_hdr_threshold = 1.2
+	env.glow_hdr_threshold = 2.10
+	env.glow_strength = 0.90
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
@@ -62,13 +63,13 @@ func _ready() -> void:
 	add_child(key)
 	key.look_at_from_position(Vector3(-4, 6, -5), Vector3(0, 1.1, 0), Vector3.UP)
 	var fill := DirectionalLight3D.new()
-	fill.light_color = Color(0.40, 0.62, 1.0)
-	fill.light_energy = 1.1
+	fill.light_color = Color(0.78, 0.86, 1.0)
+	fill.light_energy = 1.05
 	add_child(fill)
 	fill.look_at_from_position(Vector3(5, 3, 2), Vector3(0, 1.2, 0), Vector3.UP)
 	var rim := DirectionalLight3D.new()
-	rim.light_color = Color(0.55, 0.78, 1.0)
-	rim.light_energy = 1.8
+	rim.light_color = Color(0.80, 0.89, 1.0)
+	rim.light_energy = 1.55
 	add_child(rim)
 	rim.look_at_from_position(Vector3(0, 3, 6), Vector3(0, 1.4, 0), Vector3.UP)
 
@@ -81,6 +82,7 @@ func _ready() -> void:
 
 	await _shot("full_front", Vector3(2.8, 1.55, -4.6), Vector3(0, 1.05, 0), 38.0)
 	await _shot("full_side", Vector3(4.8, 1.65, 0.3), Vector3(0, 1.05, 0), 38.0)
+	await _shot("legs_pelvis", Vector3(1.65, 0.72, -1.75), Vector3(0.0, 0.56, 0.0), 36.0)
 	await _shot("head", Vector3(0.52, 2.02, -0.78), Vector3(0, 1.94, -0.02), 30.0)
 	await _shot("head_side", Vector3(0.86, 1.96, 0.14), Vector3(0, 1.88, 0.03), 30.0)
 	await _shot("head_left", Vector3(-0.56, 2.02, -0.75), Vector3(0, 1.94, -0.02), 30.0)
@@ -114,6 +116,27 @@ func _ready() -> void:
 	for i in 24:
 		rig.advance(1.0 / 60.0)
 	await _shot("airborne", Vector3(2.8, 2.4, -4.2), Vector3(0, 1.6, 0), 40.0)
+
+	# back dash (dual thrusters swiveled forward — 3/4 side view clearly showing pods & forward jets)
+	rig.reset_demo(Vector3.ZERO, 0.0)
+	for i in 12:
+		rig.advance(1.0 / 60.0)
+	rig.request_dash(Vector3(0, 0, 1))
+	for i in 11:
+		rig.advance(1.0 / 60.0)
+	await _shot("dash_back", Vector3(2.35, 1.50, -0.75), Vector3(rig.global_position.x, 1.25, rig.global_position.z), 35.0)
+
+	# brisk locomotion hair drape (verify zero scalp exposure & flowing ends)
+	rig.reset_demo(Vector3.ZERO, 0.0)
+	rig.move_command = Vector3(0, 0, -6.5)
+	for i in 45:
+		if i == 25:
+			rig.heading += 0.65
+			rig.rotation.y = rig.heading
+		rig.advance(1.0 / 60.0)
+		await get_tree().process_frame
+	var hp: Vector3 = rig.head.global_position
+	await _shot("hair_move", hp + Vector3(0.75, 0.15, 0.72), hp + Vector3(0, -0.10, 0), 34.0)
 
 	print("V2 DETAILS DONE -> ", out_dir)
 	get_tree().quit()

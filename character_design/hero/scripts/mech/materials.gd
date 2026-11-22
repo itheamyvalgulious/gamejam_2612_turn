@@ -20,16 +20,17 @@ const TRAIL_SHADER := preload("res://shaders/blade_trail.gdshader")
 const FLOOR_SHADER := preload("res://shaders/arena_floor.gdshader")
 const RING_SHADER := preload("res://shaders/ring_fx.gdshader")
 
-## Theme colours — the single source of truth for the blue-white identity.
-const ENERGY_BLUE := Color(0.16, 0.44, 1.0)
-const ENERGY_WHITE := Color(0.88, 0.95, 1.0)
+## Theme colours — white-leaning silver metallic + crisp sapphire/electric blue.
+const ENERGY_BLUE := Color(0.16, 0.48, 1.0)
+const ENERGY_WHITE := Color(0.90, 0.97, 1.0)
 const SIGNAL_GREEN := Color(0.20, 1.0, 0.45)
 
-const ARMOR_WHITE := Color(0.68, 0.73, 0.80)
-const ARMOR_NAVY := Color(0.050, 0.100, 0.260)
-const ARMOR_DARK := Color(0.055, 0.080, 0.145)
-const STEEL := Color(0.80, 0.84, 0.92)
-const BRIGHT_STEEL := Color(0.92, 0.95, 1.0)
+const ARMOR_WHITE := Color(0.80, 0.84, 0.89)
+const ARMOR_SILVER := Color(0.72, 0.76, 0.82)
+const ARMOR_NAVY := Color(0.055, 0.155, 0.420)
+const ARMOR_DARK := Color(0.125, 0.155, 0.215)
+const STEEL := Color(0.86, 0.90, 0.96)
+const BRIGHT_STEEL := Color(0.95, 0.97, 1.0)
 
 static var _cache: Dictionary = {}
 static var _radial_tex: GradientTexture2D
@@ -70,8 +71,8 @@ static func _metal(key: String, albedo: Color, metallic: float, roughness: float
 	m.set_shader_parameter("edge_power", 2.6)
 	m.set_shader_parameter("panel_scale", 2.6)
 	m.set_shader_parameter("panel_variation", panel_variation)
-	m.set_shader_parameter("tint_blue", Color(0.62, 0.78, 1.0))
-	m.set_shader_parameter("env_sheen", 0.10)
+	m.set_shader_parameter("tint_blue", Color(0.82, 0.89, 1.0))
+	m.set_shader_parameter("env_sheen", 0.13)
 	_cache[key] = m
 	return m
 
@@ -81,8 +82,16 @@ static func armor_white() -> Material:
 	var cached: Material = _cache.get("armor_white")
 	if cached != null:
 		return cached
-	return _metal("armor_white", ARMOR_WHITE, 0.62, 0.44,
-		0.62, 0.12, 0.65, 24.0, 0.34, BRIGHT_STEEL)
+	return _metal("armor_white", ARMOR_WHITE, 0.76, 0.30,
+		0.42, 0.06, 0.28, 28.0, 0.09, BRIGHT_STEEL)
+
+
+static func armor_silver() -> Material:
+	var cached: Material = _cache.get("armor_silver")
+	if cached != null:
+		return cached
+	return _metal("armor_silver", ARMOR_SILVER, 0.88, 0.24,
+		0.40, 0.05, 0.25, 32.0, 0.08, BRIGHT_STEEL)
 
 
 static func armor() -> Material:
@@ -93,40 +102,51 @@ static func armor_blue() -> Material:
 	var cached: Material = _cache.get("armor_blue")
 	if cached != null:
 		return cached
-	return _metal("armor_blue", ARMOR_NAVY, 0.95, 0.27,
-		0.50, 0.16, 0.45, 30.0, 0.26, Color(0.62, 0.78, 1.0))
+	return _metal("armor_blue", ARMOR_NAVY, 0.90, 0.22,
+		0.45, 0.10, 0.34, 30.0, 0.10, Color(0.58, 0.78, 1.0))
+
+
+static func joint_blue() -> Material:
+	var cached: Material = _cache.get("joint_blue")
+	if cached != null:
+		return cached
+	var m := _metal("joint_blue", Color(0.035, 0.115, 0.360), 0.88, 0.32,
+		0.12, 0.04, 0.24, 30.0, 0.05, Color(0.28, 0.50, 0.92)) as ShaderMaterial
+	m.set_shader_parameter("env_sheen", 0.03)
+	m.set_shader_parameter("tint_blue", Color(0.20, 0.44, 0.88))
+	return m
 
 
 static func armor_shadow() -> Material:
 	var cached: Material = _cache.get("armor_shadow")
 	if cached != null:
 		return cached
-	return _metal("armor_shadow", Color(0.020, 0.032, 0.062), 0.92, 0.36,
-		0.45, 0.12, 0.50, 28.0, 0.28, Color(0.55, 0.66, 0.86))
+	return _metal("armor_shadow", Color(0.06, 0.08, 0.13), 0.90, 0.30,
+		0.40, 0.08, 0.36, 28.0, 0.12, Color(0.62, 0.72, 0.88))
 
 
 static func armor_dark() -> Material:
 	var cached: Material = _cache.get("armor_dark")
 	if cached != null:
 		return cached
-	return _metal("armor_dark", ARMOR_DARK, 0.90, 0.42,
-		0.35, 0.10, 0.45, 32.0, 0.22, Color(0.45, 0.55, 0.75))
+	return _metal("armor_dark", ARMOR_DARK, 0.92, 0.28,
+		0.36, 0.08, 0.34, 32.0, 0.10, Color(0.65, 0.74, 0.88))
 
 
 static func armor_edge() -> Material:
 	var cached: Material = _cache.get("armor_edge")
 	if cached != null:
 		return cached
-	return _metal("armor_edge", Color(0.72, 0.77, 0.86), 1.0, 0.22,
-		0.72, 0.06, 0.38, 34.0, 0.42, BRIGHT_STEEL)
+	return _metal("armor_edge", Color(0.84, 0.88, 0.94), 0.98, 0.18,
+		0.62, 0.05, 0.28, 34.0, 0.12, BRIGHT_STEEL)
 
 
 static func trim() -> Material:
 	var cached: Material = _cache.get("trim")
 	if cached != null:
 		return cached
-	return _metal("trim", Color(0.84, 0.88, 0.95), 1.0, 0.17,
-		0.42, 0.03, 0.22, 40.0, 0.24, BRIGHT_STEEL)
+	return _metal("trim", Color(0.91, 0.93, 0.97), 0.98, 0.13,
+		0.38, 0.03, 0.18, 40.0, 0.06, BRIGHT_STEEL)
 
 
 # ------------------------------------------------------------- frame / joints
@@ -134,16 +154,16 @@ static func frame() -> Material:
 	var cached: Material = _cache.get("frame")
 	if cached != null:
 		return cached
-	return _metal("frame", Color(0.16, 0.22, 0.36), 0.94, 0.32,
-		0.50, 0.10, 0.52, 30.0, 0.30, Color(0.58, 0.70, 0.90))
+	return _metal("frame", Color(0.14, 0.21, 0.38), 0.90, 0.24,
+		0.45, 0.07, 0.34, 30.0, 0.10, Color(0.62, 0.74, 0.94))
 
 
 static func frame_light() -> Material:
 	var cached: Material = _cache.get("frame_light")
 	if cached != null:
 		return cached
-	return _metal("frame_light", Color(0.28, 0.35, 0.50), 0.92, 0.26,
-		0.52, 0.08, 0.45, 30.0, 0.32, Color(0.72, 0.82, 0.97))
+	return _metal("frame_light", Color(0.68, 0.73, 0.81), 0.94, 0.20,
+		0.48, 0.06, 0.30, 30.0, 0.08, BRIGHT_STEEL)
 
 
 static func rubber() -> Material:
@@ -284,9 +304,8 @@ static func hair_cap() -> Material:
 		return cached
 	var m := ShaderMaterial.new()
 	m.shader = HAIR_SHADER
-	m.set_shader_parameter("energy", 0.18)
-	m.set_shader_parameter("root_alpha", 1.0)
-	m.set_shader_parameter("tip_alpha", 1.0)
+	m.set_shader_parameter("is_scalp", true)
+	m.set_shader_parameter("energy", 0.015)
 	m.resource_name = k
 	_cache[k] = m
 	return m
@@ -376,16 +395,16 @@ static func crossguard() -> Material:
 	var cached: Material = _cache.get(k)
 	if cached != null:
 		return cached
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.035, 0.090, 0.240)
-	m.metallic = 0.85
-	m.roughness = 0.22
-	m.emission_enabled = true
-	m.emission = ENERGY_BLUE
-	m.emission_energy_multiplier = 0.35
-	m.rim_enabled = true
-	m.rim = 0.45
-	m.rim_tint = 0.8
+	var m := ShaderMaterial.new()
+	m.shader = BLADE_CORE_SHADER
+	m.set_shader_parameter("hot_color", Color(0.82, 0.95, 1.0))
+	m.set_shader_parameter("mid_color", Color(0.08, 0.40, 1.0))
+	m.set_shader_parameter("tip_color", Color(0.45, 0.86, 1.0))
+	m.set_shader_parameter("energy", 1.65)
+	m.set_shader_parameter("core_boost", 0.45)
+	m.set_shader_parameter("scan_scale", 22.0)
+	m.set_shader_parameter("flow_speed", 16.0)
+	m.set_shader_parameter("scan_strength", 0.18)
 	m.resource_name = "crossguard"
 	_cache[k] = m
 	return m
@@ -398,14 +417,14 @@ static func blade_core() -> ShaderMaterial:
 		return cached
 	var m := ShaderMaterial.new()
 	m.shader = BLADE_CORE_SHADER
-	m.set_shader_parameter("hot_color", Color(0.70, 0.88, 1.0))
-	m.set_shader_parameter("mid_color", ENERGY_BLUE)
-	m.set_shader_parameter("tip_color", Color(0.62, 0.90, 1.0))
-	m.set_shader_parameter("energy", 0.95)
-	m.set_shader_parameter("core_boost", 0.18)
-	m.set_shader_parameter("scan_scale", 18.0)
-	m.set_shader_parameter("flow_speed", 40.0)
-	m.set_shader_parameter("scan_strength", 0.12)
+	m.set_shader_parameter("hot_color", Color(0.88, 0.96, 1.0))
+	m.set_shader_parameter("mid_color", Color(0.08, 0.42, 1.0))
+	m.set_shader_parameter("tip_color", Color(0.45, 0.86, 1.0))
+	m.set_shader_parameter("energy", 1.50)
+	m.set_shader_parameter("core_boost", 0.45)
+	m.set_shader_parameter("scan_scale", 28.0)
+	m.set_shader_parameter("flow_speed", 14.0)
+	m.set_shader_parameter("scan_strength", 0.18)
 	_cache[k] = m
 	return m
 
@@ -417,9 +436,9 @@ static func blade_glow() -> ShaderMaterial:
 		return cached
 	var m := ShaderMaterial.new()
 	m.shader = BLADE_GLOW_SHADER
-	m.set_shader_parameter("color", Color(0.10, 0.34, 1.0))
-	m.set_shader_parameter("edge_color", Color(0.70, 0.88, 1.0))
-	m.set_shader_parameter("strength", 0.42)
+	m.set_shader_parameter("color", Color(0.10, 0.44, 1.0))
+	m.set_shader_parameter("edge_color", Color(0.55, 0.88, 1.0))
+	m.set_shader_parameter("strength", 0.65)
 	_cache[k] = m
 	return m
 
@@ -431,8 +450,9 @@ static func engine_petal() -> ShaderMaterial:
 		return cached
 	var m := ShaderMaterial.new()
 	m.shader = PETAL_SHADER
-	m.set_shader_parameter("color", Color(0.24, 0.58, 1.0))
+	m.set_shader_parameter("edge_color", Color(0.30, 0.62, 1.0))
 	m.set_shader_parameter("intensity", 1.0)
+	m.set_shader_parameter("open_glow", 0.0)
 	_cache[k] = m
 	return m
 

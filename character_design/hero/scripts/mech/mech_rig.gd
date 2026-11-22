@@ -40,8 +40,8 @@ const FOOT_R := 0.50
 const ANKLE_H := 0.08
 const WAIST_Y := 0.12
 const TORSO_SCALE := 1.107  # P.torso_scale 0.82 * P.upper_scale 1.35
-const UPPER := 0.496
-const FORE := 0.464
+const UPPER := 0.452
+const FORE := 0.422
 const GRIP := 0.16
 const BLADE_Y0 := 0.28
 const BLADE_LEN := 1.25
@@ -80,7 +80,7 @@ const BASE_POSE := {
 ## the clearance to the other forearm / hand, the chest and the blade.
 const CROSS_POLES := {
 	"SIDE_THRUST_R": {
-		"L": Vector3(-1.45, 0.75, -0.85), "R": Vector3(0.70, -1.05, -1.05),
+		"L": Vector3(-1.00, 1.60, -0.60), "R": Vector3(1.60, -0.60, -0.60),
 	},
 	"SIDE_THRUST_L": {
 		"L": Vector3(-1.95, 0.10, -0.30), "R": Vector3(1.90, -0.55, -0.35),
@@ -797,8 +797,8 @@ func _update_arms(pose: Dictionary) -> void:
 		# shoulder so the blade can pass underneath the armpit.  Offsets are
 		# scaled to the arm length (0.75x of the old 1.20 m arm) so the released
 		# hand stays inside a comfortable elbow bend instead of locking straight.
-		var low := sh + Vector3(sgn * 0.39, -0.045, -0.34)
-		var high := sh + Vector3(sgn * 0.34, 0.64, -0.41)
+		var low := sh + Vector3(sgn * 0.35, -0.040, -0.32)
+		var high := sh + Vector3(sgn * 0.33, 0.61, -0.39)
 		var rest := low.lerp(high, raise)
 		# Swing the releasing hand OUTWARD while it travels: a straight lerp
 		# between the hilt and the raised rest passes too close to the shoulder
@@ -1070,16 +1070,24 @@ func _update_thrusters(dt: float) -> void:
 	var walk_w := clampf(speed / maxf(RUN_SPEED, 0.1), 0.0, 1.0)
 	if dash_time > 0.0:
 		walk_w = 1.0
-	var target_yaw := 0.0
 	var target_pitch := 0.0
-	if desire.length_squared() > 1e-4:
-		target_yaw = clampf(atan2(-local.x, -local.z), -1.05, 1.05) * lerpf(0.50, 1.0, walk_w)
-		target_pitch = clampf(-local.y * 0.30, -0.24, 0.24) * walk_w
 	var idle := 0.85 + 0.15 * sin(time * 9.0) * sin(time * 3.7)
+	var back_w := 0.0
+	var yaw_fl := 0.0
+	if desire.length_squared() > 1e-4:
+		back_w = smoothstep(0.05, 0.65, local.z)
+		yaw_fl = atan2(-local.x, maxf(-local.z, 0.001))
+		target_pitch = clampf(-local.y * 0.30, -0.24, 0.24) * walk_w
 	for n in thruster_nodes:
 		if not is_instance_valid(n):
 			continue
-		var turn_rate := 7.5 if dash_time <= 0.0 else 5.0
+		var side := float(n.get_meta("side", 1.0))
+		var target_yaw := 0.0
+		if desire.length_squared() > 1e-4:
+			var yaw_side := clampf(yaw_fl, -0.82, 1.57) if side > 0.0 else clampf(yaw_fl, -1.57, 0.82)
+			var yaw_back := clampf(2.82 - local.x * 0.30, 2.55, 2.95) if side > 0.0 else clampf(-2.82 - local.x * 0.30, -2.95, -2.55)
+			target_yaw = lerpf(yaw_side, yaw_back, back_w) * lerpf(0.60, 1.0, walk_w)
+		var turn_rate := 14.0 if dash_time > 0.0 else 9.0
 		n.rotation.y = lerpf(n.rotation.y, target_yaw, 1.0 - exp(-turn_rate * step))
 		n.rotation.x = lerpf(n.rotation.x, target_pitch, 1.0 - exp(-turn_rate * step))
 		# The plume is built with its base ON the nozzle plane, so it physically
@@ -1107,12 +1115,13 @@ func _update_thrusters(dt: float) -> void:
 	var iris_target := 1.0 if boost > 0.04 else 0.0
 	var iris_rate := 26.0 if iris_target > _iris else 2.6
 	_iris = lerpf(_iris, iris_target, 1.0 - exp(-iris_rate * step))
-	var n_blades := maxi(engine_petals.size(), 1)
-	for i in engine_petals.size():
-		var p = engine_petals[i]
+	for p in engine_petals:
 		if is_instance_valid(p):
-			var base := TAU * float(i) / float(n_blades)
+			var base := float(p.get_meta("base_z", 0.0))
 			p.rotation.z = base + 1.02 * _iris
+	var petal_mat := MAT.engine_petal() as ShaderMaterial
+	if petal_mat != null:
+		petal_mat.set_shader_parameter("open_glow", clampf(_iris * 0.85, 0.0, 1.0))
 	if thruster_light != null:
 		thruster_light.light_energy = 0.22 + 2.2 * boost
 

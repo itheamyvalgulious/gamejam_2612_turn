@@ -44,12 +44,12 @@ func _build_environment() -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_exposure = 1.18
 	env.tonemap_white = 6.0
-	env.glow_enabled = false
-	env.glow_intensity = 0.30
+	env.glow_enabled = true
+	env.glow_intensity = 0.34
 	env.glow_bloom = 0.02
-	env.glow_hdr_threshold = 1.55
+	env.glow_hdr_threshold = 2.10
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
-	env.glow_strength = 1.0
+	env.glow_strength = 0.90
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.10, 0.13, 0.18)
 	env.fog_light_energy = 0.7

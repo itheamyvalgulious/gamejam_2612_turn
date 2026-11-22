@@ -18,8 +18,8 @@ const BB = preload("res://scripts/mech/body_builder.gd")
 const P := {
 	"hip_y": 1.235, "hip_r": 0.30, "femur": 0.60, "tibia": 0.66,
 	"foot_r": 0.50, "ankle_h": 0.08, "waist_y": 0.12,
-	"torso_scale": 0.82, "upper": 0.496, "fore": 0.464, "grip": 0.16,
-	"arm_w": 0.86,
+	"torso_scale": 0.82, "upper": 0.452, "fore": 0.422, "grip": 0.16,
+	"arm_w": 0.74,
 	"upper_scale": 1.35, "lower_scale": 0.78,
 	"blade_y0": 0.28, "blade_len": 1.25,
 }
@@ -203,8 +203,8 @@ func _report() -> void:
 	_check(absf(torso.scale.x - float(P["torso_scale"]) * float(P["upper_scale"])) < 0.001, "torso scale = 0.82 * upper_scale")
 	_check(absf(weapon_spin.rotation.y - 2.35) < 0.001, "weapon_spin yaw 2.35")
 	_check(legs.size() == 4 and arms.size() == 2, "4 legs / 2 arms")
-	_check(thruster_nodes.size() == 1, "single rear vector engine")
-	_check(engine_petals.size() >= 8, "iris nozzle petals")
+	_check(thruster_nodes.size() == 2, "dual symmetrical vector engines")
+	_check(engine_petals.size() >= 16, "iris nozzle petals")
 	for t in thruster_nodes:
 		var flame: Node = t.get_node_or_null("flame")
 		_check(flame != null and flame is MeshInstance3D, "thruster has flame child")

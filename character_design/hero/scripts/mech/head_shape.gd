@@ -474,20 +474,19 @@ static func build_feminine_torso_shell() -> Dictionary:
 
 
 ## 浓密头皮发壳（覆盖整个头顶、后脑勺、鬓角上方，与前额刘海和长发无缝融为一体）
-## 顶点颜色采用柔和根部底色，蓝白发丝掺杂完全由 vesper_hair.gdshader 在像素级按极细发丝混合！
+## 发射与发流方向一致的 ARRAY_TANGENT，确保头皮基底也参与 Kajiya-Kay 各向异性高光。
 static func build_scalp_hair_base() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var r_steps := 36
+	var r_steps := 38
 	var c_steps := 72
 	var rows := []
 	var norms := []
 	var cols := []
 	var uvs := []
 
-	# 顶点色只做明度/冷暖微调（shader 已提供珂朵莉蓝渐变主色）
-	var c_root := Color(0.78, 0.86, 0.96, 1.0)
-	var c_crown := Color(0.98, 1.0, 1.0, 1.0)
+	var c_root := Color(0.88, 0.91, 0.96, 1.0)
+	var c_crown := Color(0.92, 0.94, 0.97, 1.0)
 
 	for r in r_steps + 1:
 		var v := float(r) / float(r_steps) # v=0 为发际线底部，v=1 为头顶百会穴
@@ -501,27 +500,24 @@ static func build_scalp_hair_base() -> ArrayMesh:
 			var front_ang := absf(wrapf(phi - PI, -PI, PI))
 			var deg := rad_to_deg(front_ang)
 
-			var ymin := 0.078
-			if deg > 44.0:
-				ymin = lerpf(0.078, -0.025, smoothstep(44.0, 92.0, deg))
-			if deg > 92.0:
-				ymin = lerpf(-0.025, -0.082, smoothstep(92.0, 145.0, deg))
+			var ymin := 0.074
+			if deg > 40.0:
+				ymin = lerpf(0.074, -0.036, smoothstep(40.0, 88.0, deg))
+			if deg > 88.0:
+				ymin = lerpf(-0.036, -0.088, smoothstep(88.0, 142.0, deg))
 
 			var y := lerpf(ymin, Y_TOP - 0.0005, v)
 			var nrm := surface_normal(y, phi)
-			# 头皮基底厚 6.5mm，与从百会穴发旋生长的长发根部完美贴合在一个连续半球面上
 			var edge_t := smoothstep(0.0, 0.22, v)
-			var thick := lerpf(0.0020, 0.0068, edge_t)
+			var thick := lerpf(0.0020, 0.0042, edge_t)
 			var p := surface_point(y, phi, 1.0, thick)
-			# 在头顶百会穴 (v==1.0) 精确收敛到同一点，彻底消除头顶小孔
 			if r == r_steps:
-				p = Vector3(0.0, Y_TOP + 0.0068, 0.0)
+				p = Vector3(0.0, Y_TOP + 0.0042, 0.0)
 				nrm = Vector3.UP
 			prow.append(p)
 			nrow.append(nrm)
-			# UV.x 展开到 0.875 走管状发束分支（避免整圈被当成一片 sheet）；
-			# UV.y 在头皮范围内走中段偏亮的蓝，而不是发根的深色
-			urow.append(Vector2(u * 0.875, 0.30 + 0.35 * v))
+			# UV.x 展开在 [0, 1]，UV.y 从发旋 (0) 流向发际线 (1)
+			urow.append(Vector2(u, 1.0 - v))
 			crow.append(c_crown.lerp(c_root, 1.0 - v))
 		rows.append(prow)
 		norms.append(nrow)
@@ -529,11 +525,18 @@ static func build_scalp_hair_base() -> ArrayMesh:
 		uvs.append(urow)
 
 	for r in r_steps + 1:
+		var r_down := maxi(r - 1, 0)
+		var r_up := mini(r + 1, r_steps)
 		for c in c_steps:
+			var tang: Vector3 = rows[r_down][c] - rows[r_up][c]
+			if tang.length_squared() < 1e-10:
+				tang = Vector3.DOWN
+			tang = tang.normalized()
 			st.set_normal(norms[r][c])
+			st.set_tangent(Plane(tang.x, tang.y, tang.z, 1.0))
 			st.set_color(cols[r][c])
 			st.set_uv(uvs[r][c])
-			st.set_uv2(Vector2(0.5, 0.5))
+			st.set_uv2(Vector2(float(c) / float(c_steps), 0.5))
 			st.add_vertex(rows[r][c])
 
 	for r in r_steps:

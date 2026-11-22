@@ -1,26 +1,27 @@
 shader_type spatial;
 // =============================================================================
-// VESPER hair — Chtholly-style blue, filament-resolved
+// VESPER hair — Multi-stratum Hair Cards + Dual-Lobe Kajiya-Kay Shading
 // -----------------------------------------------------------------------------
-// Every ribbon is resolved into many separate fine filaments across its width.
-// The filament profile carves dark grooves between them, so the surface reads
-// as a bundle of strands instead of one smooth plastic sheet.  The lower hem of
-// the continuous under-sheet is cut into individual strand tips with ALPHA
-// SCISSOR: fragments are discarded outright, the remaining hair writes depth and
-// is fully OPAQUE, so nothing behind the hairstyle can bleed through it (the
-// old alpha-blended hem was what made the inside of the head visible).
-//
-// Palette: Chtholly Nota Seniorious — deep marine roots, azure mid-lengths,
-// pale cyan tips, with soft near-white lustre running along the strands.
+// Eliminates the "octopus tentacle" card silhouette via three overlapping
+// procedural fiber strata inside wide arched cards + alpha-to-coverage MSAA.
+// * Stratum C (12 body fibers): opaque root/mid coverage (t < ~0.68).
+// * Stratum A (24 primary strands): tapered strands ending in staggered tufts.
+// * Stratum B (40 ultra-fine wispy hairs): feathery micro-strands up to t = 1.0.
+// * Kajiya-Kay dual-lobe anisotropic specular (silvery R + azure TRT) + backlit TT.
 // =============================================================================
-render_mode blend_mix, depth_prepass_alpha, cull_disabled, depth_draw_opaque, diffuse_burley, specular_schlick_ggx;
+render_mode cull_disabled, depth_draw_opaque, alpha_to_coverage;
 
-uniform float energy = 0.05;
-uniform vec3 root_col : source_color = vec3(0.045, 0.170, 0.390);
-uniform vec3 mid_col  : source_color = vec3(0.100, 0.360, 0.680);
-uniform vec3 tip_col  : source_color = vec3(0.340, 0.660, 0.860);
-uniform vec3 sheen_col : source_color = vec3(0.870, 0.965, 1.0);
-uniform vec3 shade_col : source_color = vec3(0.020, 0.080, 0.230);
+uniform bool is_scalp = false;
+uniform float energy = 0.015;
+uniform vec3 root_col : source_color = vec3(0.210, 0.440, 0.720);
+uniform vec3 mid_col  : source_color = vec3(0.280, 0.540, 0.800);
+uniform vec3 tip_col  : source_color = vec3(0.360, 0.610, 0.840);
+uniform vec3 sheen_primary : source_color = vec3(0.72, 0.86, 0.98);
+uniform vec3 sheen_secondary : source_color = vec3(0.36, 0.62, 0.90);
+uniform vec3 shade_col : source_color = vec3(0.140, 0.300, 0.560);
+
+varying vec3 v_tangent;
+varying vec3 v_normal;
 
 float hash11(float p) {
 	p = fract(p * 0.1031);
@@ -29,90 +30,133 @@ float hash11(float p) {
 	return fract(p);
 }
 
+void vertex() {
+	v_tangent = normalize((MODELVIEW_MATRIX * vec4(TANGENT, 0.0)).xyz);
+	v_normal = normalize((MODELVIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+}
+
 void fragment() {
+	float u = clamp(UV.x, 0.0, 1.0);
 	float t = clamp(UV.y, 0.0, 1.0);
-	float u = UV.x;
 	float phase = UV2.x;
 	float bias = clamp(UV2.y, 0.0, 1.0);
 	vec3 vcol = COLOR.rgb;
 
-	// sheet (UV.x >= 1) vs tube (UV.x 0..0.875)
-	float is_sheet = step(0.99, u);
-	float ufold;
-	float fil_count;
-	if (is_sheet > 0.5) {
-		ufold = clamp((u - 1.0) / 3.0, 0.0, 1.0);
-		fil_count = 22.0;
+	float fiber_ridge = 1.0;
+	float fseed = 0.5;
+	float alpha_out = 1.0;
+	float color_t = t;
+
+	if (is_scalp) {
+		float fx = u * 160.0;
+		float fi = floor(fx);
+		float ff = fract(fx);
+		fseed = hash11(fi * 1.73 + 3.1);
+		fiber_ridge = 1.0 - smoothstep(0.26, 0.60, abs(ff - 0.5));
+		// Scalp spans crown (0.0) to hairline (1.0) in the deep->mid range
+		color_t = 0.06 + 0.36 * t;
+		alpha_out = 1.0;
 	} else {
-		ufold = clamp(u / 0.875, 0.0, 1.0);
-		fil_count = 15.0;
+		// Gentle natural hair wave along strand length
+		float wave = sin(t * 7.5 + phase * 3.1) * 0.018 + sin(t * 15.0 - phase * 1.7) * 0.008;
+		float uw = clamp(u + wave * smoothstep(0.04, 0.75, t), 0.0, 1.0);
+		float edge_dist = abs(uw - 0.5) * 2.0;
+		float edge_cut = pow(edge_dist, 2.2) * 0.30;
+
+		// Stratum C: broad inner body fibers (0.0 -> 0.56..0.74)
+		float fx_c = uw * 12.0;
+		float ic = floor(fx_c);
+		float fc = fract(fx_c);
+		float sc = hash11(ic * 2.13 + phase * 5.71);
+		float end_c = clamp((0.56 + 0.18 * sc) * (1.0 - edge_cut * 0.85), 0.20, 0.80);
+		float w_c = 0.46 * smoothstep(end_c, end_c - 0.12, t);
+		float cov_c = smoothstep(w_c + 0.07, w_c - 0.04, abs(fc - 0.5)) * smoothstep(end_c + 0.02, end_c - 0.04, t);
+
+		// Stratum A: 24 primary fine strands
+		float fx_a = uw * 24.0 + 0.31;
+		float ia = floor(fx_a);
+		float fa = fract(fx_a);
+		float sa = hash11(ia * 3.71 + phase * 9.17);
+		float end_a = clamp(0.66 + 0.28 * sa - edge_cut * 0.75, 0.30, 0.96);
+		float taper_a = smoothstep(end_a, end_a - 0.22, t);
+		float hw_a = mix(0.20, 0.44, taper_a);
+		float cov_a = smoothstep(hw_a + 0.05, hw_a - 0.04, abs(fa - 0.5)) * smoothstep(end_a + 0.02, end_a - 0.03, t);
+
+		// Stratum B: 40 ultra-fine feathery flyaway strands extending to tip
+		float fx_b = uw * 40.0 + 0.67;
+		float ib = floor(fx_b);
+		float fb = fract(fx_b);
+		float sb = hash11(ib * 5.19 + phase * 11.43);
+		float end_b = clamp((0.54 + 0.46 * pow(sb, 0.78)) - edge_cut * 0.55, 0.26, 1.00);
+		float taper_b = smoothstep(end_b, end_b - 0.26, t);
+		float hw_b = mix(0.16, 0.42, taper_b);
+		float cov_b = smoothstep(hw_b + 0.04, hw_b - 0.04, abs(fb - 0.5)) * smoothstep(end_b + 0.015, end_b - 0.025, t);
+
+		// Solid root seal so scalp roots never expose gaps
+		float root_seal = smoothstep(0.16, 0.02, t) * 0.95;
+		float combined = max(root_seal, max(cov_c, max(cov_a, cov_b)));
+		combined *= smoothstep(1.0, 0.88, edge_dist * smoothstep(0.12, 0.50, t));
+		alpha_out = clamp(combined, 0.0, 1.0);
+
+		fseed = mix(sa, sb, smoothstep(0.52, 0.85, t));
+		float ridge_a = (1.0 - smoothstep(0.14, 0.44, abs(fa - 0.5))) * cov_a;
+		float ridge_b = (1.0 - smoothstep(0.10, 0.38, abs(fb - 0.5))) * cov_b;
+		fiber_ridge = clamp(max(ridge_a, ridge_b * 0.92) + cov_c * 0.35, 0.0, 1.0);
 	}
 
-	// ---------------------------------------------------------------- filaments
-	float fx = ufold * fil_count;
-	float fi = floor(fx);
-	float ff = fract(fx);
-	float fseed = hash11(fi * 1.37 + phase * 7.13);
-	float fseed2 = hash11(fi * 4.91 + phase * 2.71);
+	float tt = clamp(color_t + (fseed - 0.5) * 0.04, 0.0, 1.0);
+	vec3 col = mix(root_col, mid_col, smoothstep(0.05, 0.58, tt));
+	col = mix(col, tip_col, smoothstep(0.50, 0.98, tt));
 
-	// Strand cross-section: a bright rounded core with a dark seam on each side.
-	// The narrow profile (0.26..0.62) is what makes neighbouring filaments read
-	// as separate hairs rather than one continuous surface.
-	float prof = 1.0 - smoothstep(0.30, 0.68, abs(ff - 0.5));
-
-	// ------------------------------------------------------- longitudinal ramp
-	float tt = clamp(t + (fseed - 0.5) * 0.05, 0.0, 1.0);
-	vec3 col = mix(root_col, mid_col, smoothstep(0.02, 0.58, tt));
-	col = mix(col, tip_col, smoothstep(0.46, 1.0, tt));
-
-	// per-lock value bands (Chtholly's hair shows clear lock-to-lock bands)
-	float lock_lift = mix(-0.18, 0.14, bias);
+	float lock_lift = mix(-0.06, 0.06, bias);
 	col *= 1.0 + lock_lift;
-	col *= 0.94 + 0.12 * fseed;
+	col *= 0.94 + 0.10 * fseed;
 
-	// deep grooves between filaments
-	col = mix(col, shade_col, (1.0 - prof) * 0.62);
-
-	// ------------------------------------------------------------- soft sheen
-	// Long, soft near-white highlight down the middle of each filament plus the
-	// pale "angel ring" near the crown.
-	float halo_pos = 0.24 + 0.035 * sin(phase * 2.0 + ufold * 6.28318);
-	float halo = exp(-pow((t - halo_pos) / 0.115, 2.0));
-	float long_sheen = prof * (0.10 + 0.55 * halo) * (0.55 + 0.45 * fseed2);
-	col = mix(col, sheen_col, clamp(long_sheen * 0.22, 0.0, 0.34));
-
-	float sheen2 = exp(-pow((t - 0.62) / 0.16, 2.0)) * prof * 0.10;
-	col = mix(col, sheen_col, sheen2);
-
-	vec3 N = normalize(NORMAL);
-	vec3 V = normalize(VIEW);
-	float ndv = clamp(dot(N, V), 0.0, 1.0);
-	float fres = pow(1.0 - ndv, 3.0);
+	// Subtle fiber grooves for silky separation without harsh dark striping
+	col = mix(shade_col, col, mix(0.62, 1.0, fiber_ridge));
 
 	vec3 base = col * vcol;
-	base *= mix(0.88, 1.04, smoothstep(0.0, 0.35, t));
+	base *= mix(0.95, 1.03, smoothstep(0.0, 0.45, color_t));
 
 	ALBEDO = base * 0.56;
 	METALLIC = 0.02;
-	ROUGHNESS = mix(0.60, 0.46, smoothstep(0.0, 0.8, t));
-	SPECULAR = 0.20;
+	ROUGHNESS = mix(0.48, 0.38, smoothstep(0.0, 0.8, color_t));
+	SPECULAR = 0.16;
+	EMISSION = base * energy;
 
-	vec3 emit = base * energy;
-	emit += sheen_col * (fres * 0.04);
-	EMISSION = emit;
+	ALPHA = alpha_out;
+	ALPHA_SCISSOR_THRESHOLD = 0.30;
+	ALPHA_ANTIALIASING_EDGE = 0.22;
+}
 
-	// ------------------------------------------------------------- ragged hem
-	// The under-sheet is a real slab (front + back, 7.6 mm apart) but its lower
-	// edge is cut into strand tips with ALPHA SCISSOR: a hard discard, never a
-	// paper-thin translucent film.  Tip depth varies in low-frequency clumps.
-	float sheet_alpha = 1.0;
-	if (is_sheet > 0.5) {
-		float clump = 0.5 + 0.5 * sin(ufold * 9.5 + phase * 0.35);
-		float clump2 = 0.5 + 0.5 * sin(ufold * 27.0 + 1.7 + phase * 0.2);
-		float tip_rnd = hash11(floor(ufold * 62.0) + phase * 4.7);
-		float hem_t = 0.46 + 0.16 * clump + 0.07 * clump2 + 0.05 * tip_rnd;
-		sheet_alpha = 1.0 - smoothstep(hem_t - 0.006, hem_t + 0.006, t);
-	}
-	ALPHA = sheet_alpha;
-	ALPHA_SCISSOR_THRESHOLD = 0.5;
+void light() {
+	vec3 T = normalize(v_tangent);
+	vec3 N = normalize(NORMAL);
+	vec3 L = normalize(LIGHT);
+	vec3 V = normalize(VIEW);
+	vec3 H = normalize(L + V);
+
+	// Per-fiber tangent jitter breaks flat card specular bands into fine silky glint
+	float u_cell = floor(UV.x * (is_scalp ? 160.0 : 32.0));
+	float f_jit = hash11(u_cell * 2.71 + UV2.x * 7.13) - 0.5;
+	vec3 T1 = normalize(T + N * (-0.07 + f_jit * 0.10));
+	vec3 T2 = normalize(T + N * (0.11 + f_jit * 0.14));
+
+	float dotTH1 = dot(T1, H);
+	float dotTH2 = dot(T2, H);
+	float sinTH1 = sqrt(clamp(1.0 - dotTH1 * dotTH1, 0.0, 1.0));
+	float sinTH2 = sqrt(clamp(1.0 - dotTH2 * dotTH2, 0.0, 1.0));
+
+	float NdotL = dot(N, L);
+	float spec_mask = smoothstep(-0.22, 0.30, NdotL);
+	float spec1 = pow(sinTH1, 110.0) * spec_mask;
+	float spec2 = pow(sinTH2, 30.0) * spec_mask;
+
+	// Wrapped fibrous diffuse + subtle translucent tip rim
+	float wrapped = clamp((NdotL + 0.56) / 1.62, 0.0, 1.0);
+	float backlit = pow(clamp(dot(V, -L), 0.0, 1.0), 3.2) * smoothstep(0.35, 0.95, UV.y) * 0.14;
+
+	float scalp_spec = is_scalp ? 0.28 : 1.0;
+	DIFFUSE_LIGHT += ALBEDO * (wrapped * 0.74 + backlit) * LIGHT_COLOR * ATTENUATION;
+	SPECULAR_LIGHT += (sheen_primary * spec1 * 0.06 + sheen_secondary * spec2 * 0.06) * scalp_spec * LIGHT_COLOR * ATTENUATION;
 }

@@ -172,7 +172,10 @@ func _run() -> void:
 	_ok(left["along"] >= 1.2 and left["side"] >= 1.2, "left dash", "along %.2f side %.2f" % [left["along"], left["side"]])
 	var right := await _dash_test(Vector3(1, 0, 0), "right")
 	_ok(right["along"] >= 1.2 and right["side"] >= 1.2, "right dash", "along %.2f side %.2f" % [right["along"], right["side"]])
-	report["dash"] = {"fwd": fwd, "left": left, "right": right}
+	var back_d := await _dash_test(Vector3(0, 0, 1), "back")
+	_ok(back_d["along"] >= 1.2, "back dash distance", "%.2f m" % back_d["along"])
+	_ok(float(back_d["min_fwd_dot"]) > 0.85, "dual thrusters swivel forward on back dash", "min dot %.3f" % back_d["min_fwd_dot"])
+	report["dash"] = {"fwd": fwd, "left": left, "right": right, "back": back_d}
 
 	# ---------------- jump crouch + apex
 	rig.reset_demo(Vector3.ZERO, 0.0)
@@ -248,10 +251,21 @@ func _dash_test(local_dir: Vector3, _label: String) -> Dictionary:
 	rig.reset_demo(Vector3.ZERO, 0.0)
 	var p0: Vector3 = rig.global_position
 	rig.request_dash(local_dir)
+	var min_fwd_dot := -1.0
 	for i in 40:
 		rig.advance(1.0 / 60.0)
+		if i == 11:
+			var rig_fwd: Vector3 = -rig.global_transform.basis.z.normalized()
+			min_fwd_dot = 1.0
+			for tn in rig.thruster_nodes:
+				var exhaust_dir: Vector3 = (tn as Node3D).global_transform.basis.z.normalized()
+				min_fwd_dot = minf(min_fwd_dot, exhaust_dir.dot(rig_fwd))
 	var d: Vector3 = rig.global_position - p0
-	return {"along": d.length(), "side": absf(d.x) if absf(local_dir.x) > 0.5 else absf(d.z)}
+	return {
+		"along": d.length(),
+		"side": absf(d.x) if absf(local_dir.x) > 0.5 else absf(d.z),
+		"min_fwd_dot": min_fwd_dot,
+	}
 
 
 func _finish() -> void:

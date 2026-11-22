@@ -113,9 +113,9 @@ func _body_parts(r) -> Array:
 		var sh: Vector3 = arm["shoulder"].global_position
 		var el: Vector3 = arm["elbow"].global_position
 		var wr: Vector3 = arm["wrist"].global_position
-		out.append(_cap("arm%s_up" % side, sh, el, 0.069 * UPPER_S))
-		out.append(_cap("arm%s_fore" % side, el, wr, 0.051 * UPPER_S))
-		out.append(_cap("arm%s_hand" % side, wr, wr + (wr - el).normalized() * 0.07, 0.040 * UPPER_S))
+		out.append(_cap("arm%s_up" % side, sh, el, 0.055 * UPPER_S))
+		out.append(_cap("arm%s_fore" % side, el, wr, 0.043 * UPPER_S))
+		out.append(_cap("arm%s_hand" % side, wr, wr + (wr - el).normalized() * 0.07, 0.036 * UPPER_S))
 	for i in r.legs.size():
 		var leg: Dictionary = r.legs[i]
 		var hip: Vector3 = leg["hip"].global_position
