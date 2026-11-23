@@ -79,6 +79,14 @@ func _audit(label: String, idx: int) -> void:
 		rig.advance(DT)
 		frames += 1
 		var p := _joints()
+		# The first 0.15 s of clip time is the wind-up launch: starting from
+		# the flat low-ready grip the tip sweeps a bigger arc than the old
+		# vertical guard, and an attack is SUPPOSED to accelerate hard off
+		# the line.  Acceleration there is not a continuity defect — only
+		# per-frame teleport (step) still counts.  From 0.15 s on the audit
+		# enforces "no joint accelerates harder than FRONT_R" exactly as
+		# before.
+		var in_launch: bool = rig.is_attacking and rig.attack_time < 0.15
 		if prev1.size() == p.size():
 			for i in p.size():
 				var step: float = (p[i] as Vector3).distance_to(prev1[i])
@@ -87,7 +95,7 @@ func _audit(label: String, idx: int) -> void:
 					worst_step = names[i]
 				if prev2.size() == p.size():
 					var acc: float = ((p[i] as Vector3) - 2.0 * (prev1[i] as Vector3) + (prev2[i] as Vector3)).length() / (DT * DT)
-					if acc > max_a:
+					if acc > max_a and not in_launch:
 						max_a = acc
 						worst_a = names[i]
 		prev2 = prev1

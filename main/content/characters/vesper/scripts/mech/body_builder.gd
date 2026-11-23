@@ -16,7 +16,7 @@ const P := {
 	# Arm cross-section scale: refined slender profile (~26% slimmer than old 0.62 build).
 	"arm_w": 0.74,
 	"shoulder": Vector3(0.295, 0.38, -0.02),
-	"blade_y0": 0.28, "blade_len": 1.25,
+	"blade_y0": 0.28, "blade_len": 1.28,
 	"leg_az": [45.0, 135.0, 225.0, 315.0],
 }
 
@@ -737,8 +737,10 @@ static func _build_weapon(rig: Node3D) -> void:
 	var torso: Node3D = rig.torso
 	var root := Node3D.new()
 	root.name = "Greatsword"
-	root.position = Vector3(0.20, 0.20, -0.40)
-	root.rotation = Vector3(-0.05, 0.0, 0.10)
+	# Static build-time pose must match mech_rig.BASE_POSE (low-ready grip,
+	# hilt ~20 deg above horizontal) or the very first frame pops.
+	root.position = Vector3(0.18, 0.15, -0.40)
+	root.rotation = Vector3(-1.222, 0.0, 0.08)
 	root.scale = Vector3.ONE / (float(P["torso_scale"]) * float(P["upper_scale"]))
 	torso.add_child(root)
 	rig.weapon_root = root
@@ -797,16 +799,16 @@ static func _build_weapon(rig: Node3D) -> void:
 	MK.add(spin, MK.smooth_lathe([[0.0, 0.026], [0.012, 0.024]], 24, "y"),
 		MAT.emissive(Color(0.18, 0.52, 0.98), 1.4), Vector3(0, 0.236, 0))
 
-	# 脉冲蓝色等离子主剑刃：4层结构
-	MK.add(spin, MK.energy_blade(blade_len, 0.205, 0.036, 0.78, 28), MAT.blade_core(), Vector3(0, blade_y0, 0))
-	MK.add(spin, MK.energy_blade(blade_len, 0.260, 0.052, 0.78, 28), MAT.blade_glow(),
+	# 脉冲蓝色等离子主剑刃：4层结构（刃宽减半 ~0.10 m，细长西洋剑轮廓）
+	MK.add(spin, MK.energy_blade(blade_len, 0.105, 0.022, 0.78, 28), MAT.blade_core(), Vector3(0, blade_y0, 0))
+	MK.add(spin, MK.energy_blade(blade_len, 0.135, 0.030, 0.78, 28), MAT.blade_glow(),
 		Vector3(0, blade_y0, 0), Vector3.ZERO, Vector3(1.06, 1.0, 1.10), "BladeGlow1")
 	var aura_mat: ShaderMaterial = (MAT.blade_glow() as ShaderMaterial).duplicate()
 	aura_mat.set_shader_parameter("strength", 0.42)
 	aura_mat.set_shader_parameter("color", Color(0.10, 0.40, 1.0))
-	MK.add(spin, MK.energy_blade(blade_len * 1.01, 0.365, 0.078, 0.78, 26), aura_mat,
+	MK.add(spin, MK.energy_blade(blade_len * 1.01, 0.185, 0.042, 0.78, 26), aura_mat,
 		Vector3(0, blade_y0, 0), Vector3.ZERO, Vector3(1.0, 1.0, 1.0), "BladeAura")
-	MK.add(spin, MK.energy_blade(blade_len * 0.94, 0.044, 0.028, 0.24, 20),
+	MK.add(spin, MK.energy_blade(blade_len * 0.94, 0.024, 0.016, 0.24, 20),
 		MAT.emissive(Color(0.85, 0.96, 1.0), 2.6), Vector3(0, blade_y0 + 0.006, 0))
 
 	var base := Marker3D.new()

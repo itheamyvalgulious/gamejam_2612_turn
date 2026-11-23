@@ -44,7 +44,7 @@ const UPPER := 0.452
 const FORE := 0.422
 const GRIP := 0.16
 const BLADE_Y0 := 0.28
-const BLADE_LEN := 1.25
+const BLADE_LEN := 1.28
 
 const WALK_SPEED := 2.2
 const RUN_SPEED := 5.6
@@ -67,8 +67,10 @@ const LEG_AZ := [45.0, 135.0, 225.0, 315.0]
 const BASE_POSE := {
 	"ty": 0.0, "tx": 0.0, "tz": 0.0, "hy": 0.04, "hx": -0.02,
 	"crouch": 0.0, "lean": 0.0, "offhand": 0.0, "left_raise": 0.0,
-	"wpx": 0.18, "wpy": 0.17, "wpz": -0.37,
-	"wrx": -0.26, "wry": 0.0, "wrz": 0.08,
+	# Low-ready guard: hilt ~20 deg above horizontal, blade pointing forward.
+	# wrx -1.222 rad puts hilt_y at (0, sin 20deg, -cos 20deg).
+	"wpx": 0.18, "wpy": 0.15, "wpz": -0.40,
+	"wrx": -1.222, "wry": 0.0, "wrz": 0.08,
 }
 
 ## Elbow "pole" overrides (torso space, direction only).  Only the two side
@@ -80,7 +82,7 @@ const BASE_POSE := {
 ## the clearance to the other forearm / hand, the chest and the blade.
 const CROSS_POLES := {
 	"SIDE_THRUST_R": {
-		"L": Vector3(-1.00, 1.60, -0.60), "R": Vector3(1.60, -0.60, -0.60),
+		"L": Vector3(-1.10, 1.90, -0.85), "R": Vector3(1.60, -0.60, -0.60),
 	},
 	"SIDE_THRUST_L": {
 		"L": Vector3(-1.95, 0.10, -0.30), "R": Vector3(1.90, -0.55, -0.35),
@@ -345,6 +347,19 @@ func _begin_attack(data: Dictionary, heavy: bool) -> void:
 	is_attacking = true
 	attack_name = String(data["name"])
 	attack_time = 0.0
+	# Prepend the LIVE smoothed pose as the clip's first key.  The flat
+	# low-ready idle sits far from authored key-0 poses (side thrusts ~0.3 m
+	# on the tip), so blending "idle -> clip" at rate 110 used to launch the
+	# blade through a whip (tip accel ~4000 vs the 3315 reference).  With the
+	# first key = where the body actually is, the clip's own PCHIP starts at
+	# zero velocity and the transition is authored, bounded and C1-smooth.
+	_attack = data.duplicate()
+	var keys: Array = _attack.get("keys", []).duplicate(true)
+	if not keys.is_empty():
+		var snap: Dictionary = _smooth_pose.duplicate() if not _smooth_pose.is_empty() else BASE_POSE.duplicate()
+		snap.merge(keys[0].get("p", {}), true)   # authored t0 channels still win
+		keys[0] = {"t": 0.0, "p": snap}
+		_attack["keys"] = keys
 	_attack_style = String(data.get("style", "twohand"))
 	_special = attack_name
 	_onehand = 1.0 if _attack_style == "side_r" else 0.0
@@ -487,9 +502,12 @@ func advance(dt: float) -> void:
 			_left_raise = 0.0
 
 	# Special IK poles fade in/out with the clip: switching them instantly at
-	# clip start/end snapped the elbow by up to 0.6 m in one frame.
+	# clip start/end snapped the elbow by up to 0.6 m in one frame.  The two
+	# side thrusts rely on their CROSS_POLES being nearly in place before the
+	# hilt reaches full extension, so they converge a bit faster.
 	var sp_target := 1.0 if (is_attacking and _special != "") else 0.0
-	_special_w = lerpf(_special_w, sp_target, 1.0 - exp(-9.0 * dt))
+	var sp_rate := 13.0 if CROSS_POLES.has(_special) else 9.0
+	_special_w = lerpf(_special_w, sp_target, 1.0 - exp(-sp_rate * dt))
 
 	# ---------------- body mechanics
 	var lean_speed := clampf(speed / RUN_SPEED, 0.0, 1.2) * 0.17
@@ -580,12 +598,14 @@ func _current_pose(dt: float) -> Dictionary:
 	pose["wrz"] = float(pose["wrz"]) + sin(time * 0.9) * 0.010
 	if _carry_w > 0.01 and not is_attacking:
 		var w := clampf(_carry_w, 0.0, 1.0)
-		pose["wpx"] = lerpf(0.20, 0.18, w)
-		pose["wpy"] = lerpf(0.20, 0.25, w) + sin(gait_phase * TAU) * 0.012 * w
+		# Carry = the low-ready grip, bobbing with the gait.  The hilt stays
+		# ~20 deg above horizontal; hands ride up a touch while moving.
+		pose["wpx"] = lerpf(0.18, 0.18, w)
+		pose["wpy"] = lerpf(0.15, 0.20, w) + sin(gait_phase * TAU) * 0.012 * w
 		pose["wpz"] = lerpf(-0.40, -0.44, w)
-		pose["wrx"] = lerpf(-0.05, 0.10, w)
+		pose["wrx"] = lerpf(-1.222, -1.15, w)
 		pose["wry"] = lerpf(0.0, -0.10, w)
-		pose["wrz"] = lerpf(0.10, 0.02, w)
+		pose["wrz"] = lerpf(0.08, 0.02, w)
 		pose["ty"] = float(pose["ty"]) + sin(gait_phase * TAU) * 0.05 * w
 		pose["tx"] = float(pose["tx"]) + 0.04 * w
 	if dash_time > 0.0:
@@ -608,7 +628,7 @@ func _current_pose(dt: float) -> Dictionary:
 		pose["ty"] = -0.06
 		pose["hy"] = 0.02
 		pose["wpx"] = 0.16
-		pose["wpy"] = 0.26 + 0.02 * sin(air_time * 5.0)
+		pose["wpy"] = 0.22 + 0.02 * sin(air_time * 5.0)
 		pose["wpz"] = -0.42
 		pose["wrx"] = -1.05 + 0.18 * fall
 		pose["wry"] = 0.06
@@ -620,12 +640,12 @@ func _current_pose(dt: float) -> Dictionary:
 		pose["crouch"] = float(pose["crouch"]) + 0.30 * c2
 		pose["tx"] = float(pose["tx"]) - 0.26 * c2
 		pose["lean"] = float(pose["lean"]) + 0.09 * c2
-		pose["wpx"] = lerpf(0.16, 0.20, u2)
-		pose["wpy"] = lerpf(0.26, 0.20, u2)
+		pose["wpx"] = lerpf(0.16, 0.18, u2)
+		pose["wpy"] = lerpf(0.22, 0.15, u2)
 		pose["wpz"] = lerpf(-0.42, -0.40, u2)
-		pose["wrx"] = lerpf(-1.05, -0.05, u2)
+		pose["wrx"] = lerpf(-1.05, -1.222, u2)
 		pose["wry"] = lerpf(0.06, 0.0, u2)
-		pose["wrz"] = lerpf(0.16, 0.10, u2)
+		pose["wrz"] = lerpf(0.16, 0.08, u2)
 	if is_attacking:
 		var kp := _evaluate_keys(attack_time)
 		for k in kp.keys():
@@ -640,6 +660,13 @@ func _current_pose(dt: float) -> Dictionary:
 
 	# Continuous pose blend.  No action may teleport the hands or the hilt
 	# between states; attacks use a fast blend, idle/jump a softer one.
+	#
+	# Attack ENTRY: the flat low-ready idle sits far from some clips' first
+	# keys (side thrusts ~0.3 m on the tip), so a constant-rate exponential
+	# converge launches the tip at err*rate in one step — a whip that pushed
+	# blade-tip accel past the FRONT_R reference.  While the error is large
+	# the effective rate is capped so the launch speed stays under ~10 u/s;
+	# the cap releases automatically as the pose closes in on the clip.
 	if _smooth_pose.is_empty():
 		_smooth_pose = pose.duplicate()
 	else:
@@ -818,8 +845,18 @@ func _solve_arm(arm: Dictionary, target: Vector3, hilt_y: Vector3, hilt_x: Vecto
 	var delta := target - S
 	var dist := clampf(delta.length(), 0.10, upper + fore - 0.006)
 	var dir := delta.normalized()
-	var pole := Vector3(side * 0.95, -0.85 if side > 0.0 else 0.45, -0.25 if side > 0.0 else 0.05)
 	var sw := clampf(_special_w, 0.0, 1.0)
+	var pole: Vector3
+	if side > 0.0:
+		pole = Vector3(0.95, -0.85, -0.25)
+	else:
+		# Left elbow hangs low AND far outward for the idle low-ready grip
+		# (-0.95,-0.55,-0.30), then blends to the authored flared pole
+		# (+0.45 y) as _special_w ramps.  Pulling the idle pole out to -0.30 z
+		# (backward) keeps the elbow clear of the right fist during the brief
+		# mid-blend window of the side thrusts (measured -0.030 contact at
+		# (-0.95,-0.55,-0.10) vs pass at -0.30).
+		pole = Vector3(-0.95, lerpf(-0.55, 0.45, sw), lerpf(-0.30, 0.05, sw))
 	# Per-clip elbow poles (see CROSS_POLES).  The weight ramps with _special_w,
 	# so the elbow glides into and out of these directions instead of snapping.
 	if CROSS_POLES.has(_special):
@@ -1170,7 +1207,40 @@ func _update_fx(dt: float) -> void:
 		chest_light.light_energy = 0.06 + 0.015 * sin(time * 3.2)
 
 
+# ----------------------------------------------------------- FPS body hide
+## FPS camera view: hide everything that is NOT the arms or the greatsword —
+## legs/pelvis, torso shells, head+hair, backpack, pauldrons, contact shadow.
+## Only the named subtrees toggle; the IK maths keeps running untouched.
+## The exact nodes hidden are recorded so restore is lossless (a node that was
+## already invisible stays invisible).
+var _fp_hidden: Array = []
+
+func set_body_hidden(hidden: bool) -> void:
+	if hidden:
+		_fp_hidden.clear()
+		var cand: Array = []
+		if lower_body != null:
+			cand.append(lower_body)
+		if contact_shadow != null:
+			cand.append(contact_shadow)
+		if torso != null:
+			for c in torso.get_children():
+				if c is Node3D and c != weapon_root \
+						and not String(c.name).begins_with("Shoulder"):
+					cand.append(c)
+		for c in cand:
+			if c.visible:
+				c.visible = false
+				_fp_hidden.append(c)
+	else:
+		for c in _fp_hidden:
+			if is_instance_valid(c):
+				c.visible = true
+		_fp_hidden.clear()
+
+
 func reset_demo(pos: Vector3, new_heading: float) -> void:
+	set_body_hidden(false)
 	position = pos
 	heading = new_heading
 	rotation.y = new_heading

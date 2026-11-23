@@ -171,7 +171,7 @@ func _parts() -> Array:
 	var guard_a := wx * Vector3(-0.220, 0.198, 0)
 	var guard_b := wx * Vector3(0.220, 0.198, 0)
 	var blade_a := wx * Vector3(0, 0.55, 0)
-	var blade_b := wx * Vector3(0, 1.53, 0)
+	var blade_b := wx * Vector3(0, 1.56, 0)
 	out.append(_cap("weapon_pommel", "weapon", pommel_a, pommel_b, 0.038))
 	out.append(_cap("weapon_hilt", "weapon", hilt_a, hilt_b, 0.033))
 	out.append(_cap("weapon_guard", "weapon", guard_a, guard_b, 0.026))

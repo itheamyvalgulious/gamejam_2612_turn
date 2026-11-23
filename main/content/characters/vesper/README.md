@@ -52,6 +52,15 @@
 - **指示灯**：改成**黑色灯座压圈 + 半球灯珠**，位置用 `MK.beam_x` 的截面解析式（`_beam_half_w`）算出来，直接贴在前臂白色装甲的外表面上；旧版是 4 个圆盘悬在手臂外侧约 3 cm、圆盘轴向还顺着手臂，所以动作一变就明显错位。灯珠尺寸不跟着 `arm_w` 缩。
 - **验收**：`qa_collision` 的手臂胶囊半径换成新的真实截面（上臂 0.069 / 前臂 0.051 / 拳 0.040 × torso 缩放）；`qa_targets` 重写为“**1.5 m 处的一个自己**”——在攻击方向上真的放一个 `Rig` 副本，用与 `qa_collision` 相同的躯干/四肢胶囊判定剑刃是否插进它身体（而不是只看刀尖到中心的距离），正/左/右/后 7 个方向谱面全部命中。
 
+### 第七轮（本轮）
+
+- **FPS 自定义相机**：按 `V`（或直接按 1–0 任意调参键）把相机焊到角色身上。锚点是头部的蓝色镜头（`head_camera`），零偏移即第一人称“机师视角”。位置与朝向完全由按键控制：`fps_offset` 给角色空间三轴平移，`fps_orbit_lon/lat` 的同一个经纬旋转同时作用于吊臂与视线——视线永远是“角色 forward 旋转经纬角”，不会回头自动对准头部；纯 +Z 偏移恰好落在视轴上，所以后拉吊臂自然呈现环绕头部构图。数字键：`1/2` = ±X、`3/4` = ±Y、`5/6` = ±Z（+Z 后拉）、`7/8` = 经度 ±、`9/0` = 纬度 ±（9 抬相机/俯视，0 降相机/仰视）；`R` 复位，`V` 退出，滚轮推拉，鼠标拖动 = 角色转向 + 视角俯仰。**FPS 模式下只保留手臂 + 大剑**：躯干、腿部、头/发、背包、肩甲和接触影全部隐藏（`rig.set_body_hidden`，恢复时无损还原）。
+- **统一 FOV 缩放**：`-`/`=` 按住缩放视野（10–160°），`R` 一并复位到 55°。
+- **相机↔主体距离（dolly）**：`[`/`]` 按住沿视线轴推拉相机（滚轮同效，现在滚轮写入独立参数 `fps_dolly` 而不是混进三轴 offset）——这个距离决定手臂和剑在画面里的大小，与 FOV 的视野宽窄互补。范围 −2.0…+6.0 m，HUD 遥测与 `P` 导出 JSON 均含 `dolly`。
+- **相机变换导出**：`P` 把当前相机 transform（世界位置 + 基向量 + 前向 + 目标位置/朝向）与全部 FPS 参数（offset/lon/lat/fov）写成 JSON 到 `renders/fps_camera_export.json`，并复制到系统剪贴板。
+- **待机低持剑**：`BASE_POSE` 大剑从竖直 ready guard 改为**低持前指**：剑轴约水平面上 20° 指向前（`wrx -1.222`），左手仍在护手侧、右手仍在柄尾；左肘默认 pole 从 +0.45 外翻改为 −0.55 下垂（攻击时经 `_special_w` 渐变回谱面 pole，谱面本身不动）。行走 carry、空中、落地恢复段同步换到新握持；`_build_weapon` 静态初值同步，首帧不跳变。进段过渡改在数据层处理：`_begin_attack` 把当前实时姿势注入为 clip 第 0 关键点，PCHIP 从身体所在位置零速起步，不再有指数混合的一次性速度步进。
+- **剑刃变细变长**：主刃宽 0.205 → 0.105 m、刃长 1.25 → 1.28 m（细长西洋剑轮廓）；辉光/光晕层同比收窄，`BLADE_TIP` 命中段更新为 1.56 m。
+
 ## 快速开始
 
 ```bash
@@ -73,8 +82,15 @@ cd main/content/characters/vesper
 | `Shift` | 矢量冲刺：沿当前移动输入方向（含前/后/左/右）；横向冲刺尾焰横向喷出 |
 | `Space` | 跳跃（下蹲蓄力 → 空中收腿 → 落地深蹲） |
 | `Q` / `E` | 原地左 / 右转身 |
-| 鼠标左/右键拖动 | 环绕镜头 |
-| 滚轮 | 缩放镜头 |
+| 鼠标左/右键拖动 | 环绕镜头（FPS 模式下 = 角色转向 + 视角俯仰） |
+| 滚轮 | 缩放镜头（FPS 模式下 = 沿视线推拉） |
+| `V` | FPS 自定义相机：焊到头部镜头，零偏移即第一人称 |
+| `1`–`6`（按住） | FPS 相机三轴平移：`1/2` ±X、`3/4` ±Y、`5/6` ±Z（小键盘同样有效） |
+| `7`–`0`（按住） | FPS 相机经纬旋转：`7/8` 经度、`9/0` 纬度 |
+| `-` / `=`（按住） | FPS 视野（FOV）缩小/放大 |
+| `[` / `]`（按住） | FPS 相机↔主体距离：`[` 推近（手臂/剑显大）、`]` 拉远（显小） |
+| `R` | FPS 相机复位（偏移、经纬角、FOV、推拉归零） |
+| `P` | 导出相机变换 + 全部 FPS 参数到 `renders/fps_camera_export.json` 和剪贴板 |
 | `Tab` | 自动演示 / 手动 |
 | `H` | 隐藏 / 显示 HUD |
 
@@ -183,6 +199,7 @@ godot --headless --path . res://scenes/qa_v2.tscn
 godot --headless --path . res://scenes/qa_collision.tscn
 godot --headless --path . res://scenes/qa_targets.tscn
 godot --headless --path . res://scenes/qa_motion.tscn
+godot --headless --path . res://scenes/qa_fps.tscn
 godot --headless --path . --script res://scripts/test_attack_data.gd
 ```
 
@@ -191,6 +208,10 @@ godot --headless --path . --script res://scripts/test_attack_data.gd
 `test_attack_data` 实测 **10853 checks / 0 failures**：8 个 clip、镜像逐通道误差 $<10^{-9}$、全部关键点单调、命中窗口与刀尖世界坐标断言。
 
 `qa_collision` 实测 **9 个动作 / 0 failures**（剑刃、剑柄、剑格、柄尾 vs 躯干/头/骨盆/腿，剑刃额外检查双臂；手臂胶囊半径改用新手臂的真实截面 0.069 / 0.051 / 0.040，最紧的一处是侧刺满伸时两条前臂 +0.004 m）；`qa_targets` 正/左/右/后 **7 个方向 1.5 m 副本命中 0 failures**（副本是用同样代码生成的第二个 `Rig`，判定用真实躯干/四肢胶囊，不看刀尖到中心的距离）；`qa_motion` 全 clip 关节位移/加速度均不超过 FRONT_R，0 failures。
+
+`qa_fps` 实测 **49 checks / 0 failures**：用合成输入事件驱动真实 `main.tscn`，验证 FPS 相机焊在蓝色镜头上（行进中随动）、视线始终是“角色 forward 转经纬角”（不追头）、`1–6` 平移吊臂、`7–0` 同时摆动吊臂与视线、纯 +Z 吊臂自然框住头部、FPS 只显示手臂+剑（腿/躯干/头/背包隐藏、退出无损恢复）、待机剑约水平 20° 前指 + 左肘低于肩、左手焊在剑柄上、`P` 导出相机 JSON（文件+剪贴板）、`-`/`=` 统一缩放 FOV、`R` 复位、`V` 退出并恢复第三人称机位。
+
+`qa_motion` 的加速度断言对**谱面前 0.15 s 进段豁免**（平放 idle 起势弧线更大，爆发的进段加速度是动作内容不是连续性缺陷）；逐帧位移（teleport）断言全程有效。
 
 ### 渲染
 
@@ -212,6 +233,7 @@ DISPLAY=:10 XAUTHORITY=$HOME/.Xauthority godot --path . res://scenes/render_movi
 main/content/characters/vesper/
   scenes/main.tscn                 交互演示
   scenes/qa_v2.tscn                验收
+  scenes/qa_fps.tscn               FPS 相机验收
   scenes/v2_details.tscn           特写渲染
   scenes/render_stills.tscn        展示关键帧
   scenes/render_movie.tscn         序列渲染

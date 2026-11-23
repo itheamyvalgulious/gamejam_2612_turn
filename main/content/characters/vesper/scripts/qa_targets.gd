@@ -15,7 +15,7 @@ const Rig = preload("res://scripts/mech/mech_rig.gd")
 
 const DIST := 1.5
 const BLADE_Y0 := 0.28        # guard side of the plasma blade
-const BLADE_TIP := 1.53       # real tip (0.28 hilt + 1.25 blade)
+const BLADE_TIP := 1.56       # real tip (0.28 hilt + 1.28 blade)
 const BLADE_R := 0.065
 const UPPER_S := 1.107
 const LOWER_S := 0.78

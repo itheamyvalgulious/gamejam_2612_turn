@@ -9,6 +9,7 @@ const FAINT := Color(0.23, 0.27, 0.32)
 const CYAN := Color(0.33, 0.64, 1.0)
 
 var rig
+var cam
 var auto_mode := true
 var phase_text := "CALIBRATION"
 var overlay: ColorRect
@@ -44,6 +45,10 @@ func _ready() -> void:
 
 func set_rig(r) -> void:
 	rig = r
+
+
+func set_cam(c) -> void:
+	cam = c
 
 
 func show_intro(seconds: float) -> void:
@@ -160,11 +165,25 @@ func _draw() -> void:
 			status = "AUTO DEMO // MOVE TO TAKE CONTROL" if auto_mode else "MANUAL CONTROL // READY"
 			_tracked(status, Vector2(mx, by + 124 * s), 9.0 * s, DIM, 1.4 * s)
 
+	# FPS camera telemetry (char-space offset + boom orbit angles)
+	if cam != null and cam.fps_mode:
+		var o: Vector3 = cam.fps_offset
+		_tracked("FPS CAM", Vector2(mx, by + 144 * s), 8.5 * s, Color(0.62, 0.82, 1.0), 1.6 * s)
+		_tracked("XYZ %+0.2f  %+0.2f  %+0.2f M" % [o.x, o.y, o.z],
+			Vector2(mx, by + 160 * s), 8.5 * s, DIM, 1.2 * s)
+		_tracked("LON %+05.1f°  LAT %+05.1f°" % [rad_to_deg(cam.fps_orbit_lon), rad_to_deg(cam.fps_orbit_lat)],
+			Vector2(mx, by + 175 * s), 8.5 * s, DIM, 1.2 * s)
+		_tracked("FOV %05.1f°" % cam.fps_fov,
+			Vector2(mx, by + 190 * s), 8.5 * s, DIM, 1.2 * s)
+		_tracked("DOLLY %+0.2f M" % cam.fps_dolly,
+			Vector2(mx, by + 205 * s), 8.5 * s, DIM, 1.2 * s)
+
 	# bottom right controls
 	var cx := w - mx
 	var cy := h - 246 * s
+	var fps_on: bool = cam != null and cam.fps_mode
 	var lines := [
-		["MOUSE", "ORBIT / WHEEL ZOOM"],
+		["MOUSE", "STEER + PITCH" if fps_on else "ORBIT / WHEEL ZOOM"],
 		["WASD", "MOVE / STRAFE"],
 		["Q / E", "TURN"],
 		["CTRL", "SPRINT"],
@@ -175,11 +194,23 @@ func _draw() -> void:
 		["I", "BACK THRUST"],
 		["K", "GUILLOTINE"],
 		["L", "HELIX STORM"],
-		["TAB", "AUTO DEMO"],
-		["H", "HUD"],
 	]
+	if fps_on:
+		lines.append(["1..6", "CAM +-X +-Y +-Z"])
+		lines.append(["7..0", "CAM LON / LAT"])
+		lines.append(["- / =", "FOV ZOOM -/+"])
+		lines.append(["[ / ]", "CAM DIST NEAR/FAR"])
+		lines.append(["P", "EXPORT CAM JSON"])
+		lines.append(["V", "EXIT FPS CAM"])
+		lines.append(["R", "FPS RESET"])
+	else:
+		lines.append(["V", "FPS CAM MODE"])
+	lines.append(["P", "EXPORT CAM JSON"])
+	lines.append(["TAB", "AUTO DEMO"])
+	lines.append(["H", "HUD"])
+	var step := 12.0 * s if fps_on else 14.0 * s
 	for i in lines.size():
-		var yy := cy + i * 14.0 * s
+		var yy := cy + i * step
 		var key: String = lines[i][0]
 		var label: String = lines[i][1]
 		_tracked(key, Vector2(cx - 218 * s, yy), 9.0 * s, Color(0.62, 0.82, 1.0), 1.0 * s)
