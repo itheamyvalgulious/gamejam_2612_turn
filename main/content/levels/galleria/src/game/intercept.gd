@@ -22,7 +22,8 @@ const COVER := 0.62
 static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	if player == null or enemy == null or not player.alive or not enemy.alive:
 		return {"ok": false}
-	var rig = enemy.rig
+	# An encounter adapter can supply the weapon trajectory for a custom rig.
+	var rig = enemy if enemy.has_method("predict_weapon_xf") else enemy.rig
 	var prig = player.rig
 	if rig == null or prig == null or not rig.has_method("predict_weapon_xf") or not rig.is_attacking:
 		return {"ok": false}

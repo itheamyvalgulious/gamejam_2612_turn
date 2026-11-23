@@ -7,6 +7,8 @@ const ArenaKit = preload("res://src/arena/arena.gd")
 
 var start := Vector3.ZERO
 var end := Vector3.ZERO
+var direction := Vector3.FORWARD
+var obstruction_distance := INF
 var radius := 0.55
 
 var _glow: MeshInstance3D
@@ -24,14 +26,21 @@ var _lane_material: ShaderMaterial
 var _ring_material: StandardMaterial3D
 
 
-func configure(origin: Vector3, limit: Vector3, width: float) -> void:
+func configure(origin: Vector3, forward: Vector3, width: float, arena: Dictionary) -> void:
 	start = origin
-	end = limit
+	direction = forward.normalized()
 	radius = width
+	obstruction_distance = trace_obstruction(start, direction, arena)
+	var camera := get_viewport().get_camera_3d()
+	var camera_far := camera.far if camera != null else 500.0
+	var bounds: AABB = arena.get("bounds", AABB())
+	# With an open ray, draw past the camera's far plane from anywhere in the arena.
+	var visible_distance := camera_far * 2.0 + bounds.size.length()
+	end = start + direction * (obstruction_distance if is_finite(obstruction_distance) else visible_distance)
 	var distance := maxf(start.distance_to(end), 0.01)
 	global_position = start
-	if start.distance_squared_to(end) > 0.0001:
-		look_at(end)
+	var up := Vector3.FORWARD if absf(direction.y) > 0.999 else Vector3.UP
+	look_at(start + direction, up)
 
 	_core_material = _tube_material(Color("fff5cb"), 0.0)
 	_sheath_material = _tube_material(Color("ffae3e"), 0.58)
@@ -49,7 +58,7 @@ func configure(origin: Vector3, limit: Vector3, width: float) -> void:
 	_lane_material.set_shader_parameter("length_world", flat.length())
 	_lane = _mesh(floor_strip, _lane_material)
 	_lane.top_level = true
-	_lane.global_position = Vector3((start.x + end.x) * 0.5, 0.056, (start.z + end.z) * 0.5)
+	_lane.global_position = Vector3((start.x + end.x) * 0.5, float(arena.get("floor_y", 0.0)) + 0.056, (start.z + end.z) * 0.5)
 	_lane.global_rotation.y = atan2(-flat.x, -flat.z)
 
 	var core_ball := SphereMesh.new()
@@ -158,48 +167,74 @@ func _tube_material(color: Color, detail: float) -> ShaderMaterial:
 	return mat
 
 
-static func clip_end(origin: Vector3, target: Vector3, arena: Dictionary) -> Vector3:
-	var from := Vector2(origin.x, origin.z)
-	var to := Vector2(target.x, target.z)
-	var delta := to - from
-	var closest := 1.0
-	var distance := origin.distance_to(target)
+## Distance to the first arena surface along a normalized ray. An open ray returns INF.
+static func trace_obstruction(origin: Vector3, forward: Vector3, arena: Dictionary) -> float:
+	var closest := INF
 	for solid: AABB in arena.get("solids", []):
-		var entry: Variant = solid.intersects_segment(origin, target)
-		if entry != null and distance > 0.0001:
-			closest = minf(closest, origin.distance_to(entry) / distance)
-	if delta.length_squared() < 0.0001:
-		return origin.lerp(target, closest)
+		if solid.has_point(origin):
+			return 0.0
+		var point: Variant = solid.intersects_ray(origin, forward)
+		if point != null:
+			var distance := ((point as Vector3) - origin).dot(forward)
+			if distance >= 0.0:
+				closest = minf(closest, distance)
+
+	var floor_y := float(arena.get("floor_y", 0.0))
+	if arena.has("floor_y") and forward.y < 0.0 and origin.y >= floor_y:
+		var distance := (floor_y - origin.y) / forward.y
+		var landing := origin + forward * distance
+		var bounds: AABB = arena.get("bounds", AABB())
+		if not bounds.has_surface() or (landing.x >= bounds.position.x and landing.x <= bounds.end.x
+			and landing.z >= bounds.position.z and landing.z <= bounds.end.z):
+			closest = minf(closest, distance)
+
+	var origin_xz := Vector2(origin.x, origin.z)
+	var forward_xz := Vector2(forward.x, forward.z)
 	for wall: Dictionary in arena.get("walls", []):
-		var cross = Geometry2D.segment_intersects_segment(from, to, wall["a"], wall["b"])
-		if cross == null:
+		var edge: Vector2 = wall["b"] - wall["a"]
+		var determinant := forward_xz.cross(edge)
+		if determinant == 0.0:
 			continue
-		var portion: float = (cross - from).dot(delta) / delta.length_squared()
-		var height := lerpf(origin.y, target.y, portion)
-		if height >= 0.0 and height <= float(wall["h"]):
-			closest = minf(closest, portion)
+		var offset: Vector2 = wall["a"] - origin_xz
+		var distance := offset.cross(edge) / determinant
+		var along_wall := offset.cross(forward_xz) / determinant
+		var height := origin.y + forward.y * distance
+		if distance >= 0.0 and along_wall >= 0.0 and along_wall <= 1.0 \
+				and height >= floor_y and height <= floor_y + float(wall["h"]):
+			closest = minf(closest, distance)
+
 	for object: Dictionary in arena.get("cover", []):
 		var bottom: Vector3 = object["c"]
-		var circle := Vector2(bottom.x, bottom.z)
 		var size := maxf(0.01, float(object["r"]) - ArenaKit.BALL)
-		var entry := Geometry2D.segment_intersects_circle(from, to, circle, size)
-		if from.distance_squared_to(circle) <= size * size:
-			entry = 0.0
-		if entry < 0.0:
-			continue
-		var reverse_entry := Geometry2D.segment_intersects_circle(to, from, circle, size)
-		var exit := 1.0 - maxf(0.0, reverse_entry)
-		if to.distance_squared_to(circle) <= size * size:
-			exit = 1.0
-		var height := lerpf(origin.y, target.y, entry)
-		var top: float = bottom.y + float(object["h"])
-		if height > top and target.y < top:
-			entry = inverse_lerp(origin.y, target.y, top)
-			height = top
-		elif height < bottom.y and target.y > bottom.y:
-			entry = inverse_lerp(origin.y, target.y, bottom.y)
-			height = bottom.y
-		if entry <= exit and height >= bottom.y and height <= top:
-			closest = minf(closest, entry)
-	# Keep the terminal glow out of the wall instead of extending behind it.
-	return origin.lerp(target, maxf(0.0, closest - (0.025 / origin.distance_to(target) if closest < 1.0 else 0.0)))
+		var distance := _cylinder_entry(origin - bottom, forward, size, float(object["h"]))
+		closest = minf(closest, distance)
+	return closest
+
+
+static func _cylinder_entry(offset: Vector3, forward: Vector3, width: float, height: float) -> float:
+	# Intersect the horizontal disk and the vertical interval, including the caps.
+	var radial := Vector2(offset.x, offset.z)
+	var horizontal := Vector2(forward.x, forward.z)
+	var speed_squared := horizontal.length_squared()
+	var outside := radial.length_squared() - width * width
+	var entry := 0.0
+	var leave := INF
+	if speed_squared > 0.0:
+		var approach := radial.dot(horizontal)
+		var discriminant := approach * approach - speed_squared * outside
+		if discriminant < 0.0:
+			return INF
+		var half_span := sqrt(discriminant)
+		entry = maxf(entry, (-approach - half_span) / speed_squared)
+		leave = (-approach + half_span) / speed_squared
+	elif outside > 0.0:
+		return INF
+
+	if forward.y != 0.0:
+		var lower := -offset.y / forward.y
+		var upper := (height - offset.y) / forward.y
+		entry = maxf(entry, minf(lower, upper))
+		leave = minf(leave, maxf(lower, upper))
+	elif offset.y < 0.0 or offset.y > height:
+		return INF
+	return entry if entry <= leave else INF

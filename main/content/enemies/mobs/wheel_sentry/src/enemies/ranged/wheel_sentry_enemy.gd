@@ -10,7 +10,6 @@ enum Phase { PATROL, BRAKE, LIGHT, CHARGE, FIRING, RECOVERY }
 const BEAM_CHARGE := 1.85
 const BEAM_DURATION := 0.76
 const BEAM_RADIUS := 0.84
-const BEAM_RANGE := 76.0
 const BEAM_COOLDOWN := 2.65
 const LIGHTS_PER_BEAM := 2
 const BRAKE_DURATION := 0.37
@@ -349,10 +348,9 @@ func _begin_beam() -> void:
 	_locked_wheel_yaw = rig.wheel_frame.rotation.y
 	var start := fire_origin()
 	var direction: Vector3 = -rig.turret.global_basis.z.normalized()
-	var stop: Vector3 = Beam.clip_end(start, start + direction * BEAM_RANGE, arena)
 	beam = Beam.new()
 	add_child(beam)
-	beam.configure(start, stop, BEAM_RADIUS)
+	beam.configure(start, direction, BEAM_RADIUS, arena)
 	_beam_hit = false
 	_enter(Phase.CHARGE)
 	_update_charge_sound(0.0, true)
@@ -375,7 +373,7 @@ func _charge_beam(dt: float) -> void:
 	stop_charge_sound()
 	_light_count = 0
 	_enter(Phase.FIRING)
-	var direction: Vector3 = (beam.end - beam.start).normalized()
+	var direction: Vector3 = beam.direction
 	Fx.spark(beam.start, direction, 1.85)
 	Fx.impact_ring(rig.global_position, 2.0, 1.7)
 	Fx.shake(1.42)
@@ -394,10 +392,28 @@ func _fire_beam() -> void:
 	if _beam_hit or not player.alive or player.invuln > 0.0:
 		return
 	var cap := player.capsule()
-	var impact := Hit.sweep_sphere(beam.start, beam.end, beam.radius, cap["a"], cap["b"], cap["r"])
-	if impact.get("hit", false):
-		_beam_hit = true
-		player.hurt(P.getf("archer.arrow_damage"), impact.get("normal", Vector3.UP), "被长激光束击中")
+	var from: Vector3 = beam.start
+	var direction: Vector3 = beam.direction
+	var limit: float = beam.obstruction_distance
+	if limit <= 0.0:
+		return
+	var end_at: Vector3 = beam.end
+	if not is_finite(limit):
+		# Test far enough to cover the target capsule, even past the visual mesh.
+		var a: Vector3 = cap["a"]
+		var b: Vector3 = cap["b"]
+		var reach := maxf((a - from).dot(direction), (b - from).dot(direction))
+		end_at = from + direction * maxf(reach, 0.0)
+	var impact := Hit.sweep_sphere(from, end_at, beam.radius, cap["a"], cap["b"], cap["r"])
+	if not impact.get("hit", false):
+		return
+	var contact: Vector3 = impact["point"]
+	# The rounded sweep can still touch a capsule just behind a wall.
+	var distance := (contact - from).dot(direction)
+	if distance < 0.0 or distance > limit:
+		return
+	_beam_hit = true
+	player.hurt(P.getf("archer.arrow_damage"), impact.get("normal", Vector3.UP), "被长激光束击中")
 
 
 func _hold_beam_pose() -> void:

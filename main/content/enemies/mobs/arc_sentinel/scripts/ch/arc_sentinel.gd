@@ -121,8 +121,7 @@ func _process(dt: float) -> void:
 		_apply_now(_t)
 		_check_impact()
 		if _fade_t > 0.0 and not _fade_from.is_empty():
-			var k: float = smoothstep(0.0, 1.0, 1.0 - _fade_t / FADE_TIME)
-			_pose = _blend_pose(_fade_from, _pose, k)
+			_pose = _blend_entry(_pose, _fade_t)
 			rig.apply_pose(_pose)
 			_track_lens()
 	_drive_tracks(dt)
@@ -198,6 +197,16 @@ func set_anim_time(t: float) -> void:
 
 func anim_duration() -> float:
 	return anim.duration(current_anim)
+
+
+func predict_blade_pose(time: float) -> Dictionary:
+	var pose := _eval(time)
+	var fade_left := _fade_t - (time - _t) / _speed
+	if fade_left > 0.0 and not _fade_from.is_empty():
+		pose = _blend_entry(pose, fade_left)
+	var joints := kin.arm_fk(pose)
+	var pivot := kin.root_basis(pose)
+	return {"tool": pivot * joints["tool"], "tip": pivot * joints["tip"]}
 
 
 func set_anim_speed(v: float) -> void:
@@ -566,8 +575,9 @@ func _apply_now(t: float) -> void:
 	_update_anim_fx()
 
 
-func _blend_pose(a: Dictionary, b: Dictionary, k: float) -> Dictionary:
-	return ArcKin3.blend_pose(a, b, k)
+func _blend_entry(pose: Dictionary, fade_left: float) -> Dictionary:
+	var weight := smoothstep(0.0, 1.0, 1.0 - fade_left / FADE_TIME)
+	return ArcKin3.blend_pose(_fade_from, pose, weight)
 
 
 func _update_anim_fx() -> void:
