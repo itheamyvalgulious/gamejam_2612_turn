@@ -276,6 +276,9 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 	var res: Dictionary = rig.plan_blade_intercept(point, best["axis"], best["normal"],
 		P.getf("parry.torso_turn"), dur, P.getf("parry.plan_speed"))
 	if res.is_empty():
+		# 规划失败也要保持架着并立刻重试；否则刀停在上一帧的落点，
+		# 会眼睁睁看着敌刀从旁边擦过去（_intercept_on 已是 true）。
+		_plan_left = 0.0
 		return
 	_intercept_on = true
 	_intercept_kind = String(best["kind"])

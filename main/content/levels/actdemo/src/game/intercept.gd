@@ -66,6 +66,9 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	var blade_pt: Vector3 = near["blade_pt"]
 	var body_pt: Vector3 = near["body_pt"]
 	var y: float = near["y"]
+	# 落点必须压住敌刀本身：直接从「敌刀表面点」往「离我方向」退一点，
+	# 而不是从我方表面往外让 —— 后者会在敌刀间隙(gap)>0 时把刀架在敌刀后面，
+	# 出现「刀举上去了、也在路径上，但没挡住」的漏判。
 	var out_dir: Vector3 = blade_pt - body_pt
 	out_dir.y *= 0.45                      # 别为了架头顶/脚下的刀把机体拧断
 	if out_dir.length_squared() < 0.0001:
@@ -73,8 +76,9 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	if out_dir.length_squared() < 0.0001:
 		out_dir = -prig.global_transform.basis.z
 	out_dir = out_dir.normalized()
-	# 落点：机体表面再往外让一点 —— 敌人还没打到我
-	var ip: Vector3 = body_pt + out_dir * clampf(float(near["gap"]) * 0.6, 0.18, margin)
+	# 拦截点 = 敌刀接触点稍微往我这边挪（保持在敌刀一侧，让两把刀真的交上）
+	var rr: float = 0.24 * rig.weapon_scale + 0.14
+	var ip: Vector3 = blade_pt - out_dir * clampf(rr, 0.05, margin)
 	# 那一刻敌人的刀在往哪走 → 刀轴横在它前面
 	var step := maxf(rig.last_dt, 1.0 / 120.0)
 	var p0: Vector3 = rig.predict_weapon_xf(e_hit) * Vector3(0.0, y, 0.0)
