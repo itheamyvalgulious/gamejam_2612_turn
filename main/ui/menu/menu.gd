@@ -16,6 +16,10 @@ var _rows: Array[Button] = []
 var _selected := 0
 
 func _ready() -> void:
+	if "--bench" in OS.get_cmdline_user_args():
+		var bench := preload("res://tools/bench.gd").new()
+		bench.name = "BenchDriver"
+		get_tree().root.add_child.call_deferred(bench)
 	theme = Style.theme()
 	ThemeDB.fallback_font = theme.default_font
 	_selected = TurnSession.selected_level_index

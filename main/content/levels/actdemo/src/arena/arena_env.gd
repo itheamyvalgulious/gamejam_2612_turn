@@ -121,7 +121,7 @@ static func lights(parent: Node3D, pal: Dictionary) -> void:
 	key.rotation_degrees = pal["key_rot"]
 	key.shadow_enabled = pal["key_shadow"]
 	key.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	key.directional_shadow_max_distance = pal["shadow_dist"]
+	key.directional_shadow_max_distance = minf(pal["shadow_dist"], 60.0)
 	key.shadow_bias = 0.05
 	key.shadow_normal_bias = 1.6
 	parent.add_child(key)

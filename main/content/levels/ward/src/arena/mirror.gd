@@ -35,7 +35,7 @@ func setup(w: float, h: float, res := Vector2i(640, 360)) -> void:
 	vp = SubViewport.new()
 	vp.name = "MirrorViewport"
 	vp.size = res
-	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	vp.msaa_3d = Viewport.MSAA_DISABLED
 	add_child(vp)
 
@@ -52,7 +52,13 @@ func setup(w: float, h: float, res := Vector2i(640, 360)) -> void:
 	mat.set_shader_parameter("mirror_matrix", Projection.IDENTITY)
 
 
-func _process(_dt: float) -> void:
+var _last_cam_xf := Transform3D.IDENTITY
+var _accum := 0.0
+
+const UPDATE_HZ := 30.0
+
+
+func _process(dt: float) -> void:
 	if vp == null:
 		return
 	var host := get_viewport()
@@ -65,6 +71,18 @@ func _process(_dt: float) -> void:
 		_main = host.get_camera_3d()
 		if _main == null:
 			return
+
+	# 镜子每帧把整间房重渲一遍，是最贵的部件之一。
+	# 相机没动且距上次渲染够近时跳过重渲（UPDATE_ONCE 的按需版）：
+	# 相机静止时仍保 30Hz，跟随场内角色移动。
+	_accum += dt
+	var cam_moved: bool = _last_cam_xf != _main.global_transform
+	if not cam_moved and _accum < 1.0 / UPDATE_HZ:
+		return
+	_accum = 0.0
+	_last_cam_xf = _main.global_transform
+	# UPDATE_ONCE 渲染完一帧后会自动回到 DISABLED，需要刷新时再触发一次
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 	var n: Vector3 = (global_transform.basis * Vector3(0.0, 0.0, 1.0)).normalized()
 	var origin: Vector3 = global_position

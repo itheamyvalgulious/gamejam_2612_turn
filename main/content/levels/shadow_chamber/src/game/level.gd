@@ -9,6 +9,7 @@ class_name LevelUnit
 const ArenaKit = preload("res://src/arena/arena.gd")
 const Fold = preload("res://src/game/enemy_phase_boss.gd")
 const WallShadow = preload("res://src/fx/wall_shadow.gd")
+const StaticBatch = preload("res://core/static_batch.gd")
 const FOLD_EYE_RISE := 0.33 # Matches the duelist arena's eye-height offset in world units.
 
 const PAL_MOB := {"tag": "mob", "accent": Color(0.30, 1.0, 0.72), "tint": Color(0.80, 0.92, 1.02),
@@ -50,6 +51,7 @@ func start_level(idx: int) -> void:
 	arena = ArenaKit.build(String(LEVELS[index]["kind"]), Vector3.ZERO)
 	arena_node = arena["node"]
 	add_child(arena_node)
+	StaticBatch.apply(arena_node)
 	if shadow != null and is_instance_valid(shadow):
 		shadow.queue_free()
 	shadow = null

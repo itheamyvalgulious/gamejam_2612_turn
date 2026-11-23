@@ -126,8 +126,49 @@ func _ready() -> void:
 	_cb2.resize(CB2)
 	_ap1.resize(AP1)
 	process_priority = 127
-	for k in ["step", "swing_light", "arrow_whistle", "clang", "arrow_hit", "hit"]:
+	_start_prewarm()
+
+
+# ------------------------------------------------------------------ 波形预热
+## 合成是逐样本的纯数学（~50–350ms/变体），在游戏里首次触发某个变体会卡帧。
+## 在后台线程里把全部 kind × VARIANTS 预先合成好；主线程只收结果。
+## 声部播放时若缓存还没好，就用已经合完的其它变体顶上，绝不在帧内合成。
+var _prewarm_thread: Thread = null
+var _prewarm_result: Dictionary = {}
+var _prewarm_kinds: Array = ["step", "swing_light", "swing_heavy", "arrow_whistle",
+	"arrow_hit", "clang", "parry", "hit", "qi", "qi_loop", "sentry_charge",
+	"laser", "slam", "death", "player_death", "chime", "ping"]
+
+
+func _start_prewarm() -> void:
+	for k in ["step", "swing_light", "hit", "clang"]:
 		_wave(k, 0)
+	_prewarm_thread = Thread.new()
+	_prewarm_thread.start(_prewarm_worker)
+
+
+func _prewarm_worker() -> void:
+	var out: Dictionary = {}
+	for k in _prewarm_kinds:
+		for v in VARIANTS:
+			out["%s#%d" % [k, v]] = SynthKit.samples(k, v)
+	_prewarm_result = out
+
+
+func _collect_prewarm() -> void:
+	if _prewarm_thread != null and not _prewarm_thread.is_alive():
+		_prewarm_thread.wait_to_finish()
+		_prewarm_thread = null
+		for key in _prewarm_result:
+			_cache[key] = _prewarm_result[key]
+		_prewarm_result.clear()
+		print("[snd] prewarm done: %d waves cached" % _cache.size())
+
+
+func _exit_tree() -> void:
+	if _prewarm_thread != null:
+		_prewarm_thread.wait_to_finish()
+		_prewarm_thread = null
 
 
 func set_arena(arena: Dictionary) -> void:
@@ -151,6 +192,15 @@ func _wave(kind: String, variant: int) -> PackedFloat32Array:
 	var key := "%s#%d" % [kind, variant]
 	if _cache.has(key):
 		return _cache[key]
+	for v in VARIANTS:
+		var alt := "%s#%d" % [kind, v]
+		if _cache.has(alt):
+			_cache[key] = _cache[alt]
+			return _cache[alt]
+	if _prewarm_thread != null:
+		var silent := PackedFloat32Array()
+		silent.resize(64)
+		return silent
 	var buf: PackedFloat32Array = SynthKit.samples(kind, variant)
 	_cache[key] = buf
 	return buf
@@ -260,6 +310,8 @@ func _alloc(kind: String, opts: Dictionary) -> V:
 
 # ------------------------------------------------------------------ 主循环
 func _process(delta: float) -> void:
+	if _prewarm_thread != null:
+		_collect_prewarm()
 	if _pb == null or muted:
 		return
 	var t0 := Time.get_ticks_usec()

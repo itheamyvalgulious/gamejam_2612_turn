@@ -10,6 +10,7 @@ const Sentinel = preload("res://src/game/arc_encounter.gd")
 const Sentry = preload("res://src/game/wheel_encounter.gd")
 const ArenaKit = preload("res://src/arena/arena.gd")
 const WallShadow = preload("res://src/fx/wall_shadow.gd")
+const StaticBatch = preload("res://core/static_batch.gd")
 
 
 const LEVELS := [
@@ -46,6 +47,7 @@ func start_level(idx: int) -> void:
 	arena = ArenaKit.build(String(LEVELS[index]["kind"]), Vector3.ZERO)
 	arena_node = arena["node"]
 	add_child(arena_node)
+	StaticBatch.apply(arena_node)
 	if shadow != null and is_instance_valid(shadow):
 		shadow.queue_free()
 	shadow = null

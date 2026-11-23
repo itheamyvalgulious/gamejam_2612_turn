@@ -5,6 +5,7 @@ class_name LevelUnit
 ## 玩家可见的数值一律走 P.getm()（真实米）。
 
 const WallShadow = preload("res://src/fx/wall_shadow.gd")
+const StaticBatch = preload("res://core/static_batch.gd")
 
 
 var index: int
@@ -38,6 +39,7 @@ func start_level() -> void:
 	arena = _arena_builder.build(Vector3.ZERO)
 	arena_node = arena["node"]
 	add_child(arena_node)
+	StaticBatch.apply(arena_node)
 	if shadow != null and is_instance_valid(shadow):
 		shadow.queue_free()
 	shadow = null

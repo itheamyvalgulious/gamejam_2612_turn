@@ -113,6 +113,9 @@ def content_path(episode, relative):
 def relocate_resources(text, episode, relative, destinations):
     def relocate(match):
         original = match[1]
+        if original.startswith(("core/", "ui/", "assets/")):
+            # Project-level files live outside runtime/ and already resolve.
+            return "res://" + original
         if original == "src/game/hud.gd" and relative.as_posix() == "src/main.gd":
             return "res://ui/hud/combat_hud.gd"
         if original.startswith("team/vesper/"):
