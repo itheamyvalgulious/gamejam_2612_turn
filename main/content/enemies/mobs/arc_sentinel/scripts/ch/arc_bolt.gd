@@ -1,81 +1,7 @@
-class_name ArcBolt2
-extends MeshInstance3D
+extends RefCounted
+## Packs unit-scale arc segments into one surface for the offline bake.
 
-# ---------------------------------------------------------------------------
-# One stochastic arc bolt, rendered as camera-facing screen-space ribbons.
-# Ported from weapon_electricity_sword/src/arc_bolt3d.gd.
-#
-# The mesh only stores segment endpoints and per-edge parameters; the shader
-# expands every segment into a screen-space quad so the arcs keep a stable
-# pixel width at any distance.
-# ---------------------------------------------------------------------------
-
-const ARC_SHADER: Shader = preload("res://shaders/arc_ribbon.gdshader")
-
-## Optional uniform scale for segment jaggedness. Set this to the same value as
-## ArcField2.blade_scale before setup() so the wiggle stays proportional to a
-## scaled blade. 1.0 reproduces the original 2.24 m source behaviour.
-var spatial_scale := 1.0
-
-var life := 0.1
-var age := 0.0
-var strength := 1.0
-var instant := false
-var _fade := 1.0
-var _material: ShaderMaterial
-
-func _ready() -> void:
-	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	extra_cull_margin = 3.0
-	_ensure_material()
-	_update_screen_size()
-	set_process(true)
-
-func _ensure_material() -> void:
-	if _material != null:
-		return
-	_material = ShaderMaterial.new()
-	_material.shader = ARC_SHADER
-	material_override = _material
-
-func _update_screen_size() -> void:
-	if _material != null and is_inside_tree():
-		_material.set_shader_parameter("screen_size", get_viewport().get_visible_rect().size)
-
-func setup(edges: Array, rng: RandomNumberGenerator, lifetime: float, bolt_strength: float, energy: float, instant_mode := false) -> void:
-	life = lifetime
-	strength = bolt_strength
-	instant = instant_mode
-	age = 0.0
-	_ensure_material()
-	mesh = _build_mesh(edges, rng)
-	# Blade bolts start invisible so a newly added bolt is not rendered at
-	# full brightness for one frame before its first fade-in tick.
-	# Escape bolts are intentionally instant: they appear at full strength
-	# and vanish abruptly, like real restriking arcs.
-	_material.set_shader_parameter("fade", strength if instant else 0.0)
-	_material.set_shader_parameter("intensity", energy)
-	_update_screen_size()
-	set_process(true)
-
-func _process(delta: float) -> void:
-	age += delta
-	if age >= life:
-		queue_free()
-		return
-	if instant:
-		_fade = strength
-		if _material != null:
-			_material.set_shader_parameter("fade", strength)
-		return
-	var t := age / life
-	var fade_in := smoothstep(0.0, 0.20, t)
-	var fade_out := 1.0 - smoothstep(0.64, 1.0, t)
-	_fade = fade_in * fade_out * strength
-	if _material != null:
-		_material.set_shader_parameter("fade", _fade)
-
-func _build_mesh(edges: Array, rng: RandomNumberGenerator) -> ArrayMesh:
+func build(edges: Array, rng: RandomNumberGenerator) -> ArrayMesh:
 	var verts := PackedVector3Array()
 	var uvs := PackedVector2Array()
 	var custom0 := PackedFloat32Array()
@@ -92,7 +18,7 @@ func _build_mesh(edges: Array, rng: RandomNumberGenerator) -> ArrayMesh:
 		var leader: bool = edge.get("leader", false)
 		var leader_flag := 1.0 if leader else 0.0
 
-		var pts := _jagged(a, b, width, energy, rng)
+		var pts := _jagged(a, b, width, rng)
 		for i in range(pts.size() - 1):
 			_add_segment(pts[i], pts[i + 1], width, energy, hue, phase, leader_flag, verts, uvs, custom0, custom1, indices)
 
@@ -112,7 +38,7 @@ func _build_mesh(edges: Array, rng: RandomNumberGenerator) -> ArrayMesh:
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, flags)
 	return mesh
 
-func _jagged(a: Vector3, b: Vector3, width: float, energy: float, rng: RandomNumberGenerator) -> PackedVector3Array:
+func _jagged(a: Vector3, b: Vector3, width: float, rng: RandomNumberGenerator) -> PackedVector3Array:
 	var d := b - a
 	var length := d.length()
 	var pts := PackedVector3Array()
@@ -130,12 +56,12 @@ func _jagged(a: Vector3, b: Vector3, width: float, energy: float, rng: RandomNum
 
 	# Amplitudes stay small relative to the step, so branch endpoints still
 	# join cleanly while the body of each channel visibly snakes in 3D.
-	var amp := clampf(length * 0.065, 0.0018, 0.0075) * spatial_scale
-	amp *= lerpf(1.15, 0.8, clampf(width / (0.052 * spatial_scale), 0.0, 1.0))
+	var amp := clampf(length * 0.065, 0.0018, 0.0075)
+	amp *= lerpf(1.15, 0.8, clampf(width / (0.052), 0.0, 1.0))
 	var bow_a := rng.randf_range(-1.0, 1.0) * amp * 1.15
 	var bow_b := rng.randf_range(-1.0, 1.0) * amp * 1.15
 
-	var steps := clampi(roundi(length / (0.068 * spatial_scale)), 2, 4)
+	var steps := clampi(roundi(length / (0.068)), 2, 4)
 	for i in range(1, steps):
 		var t := float(i) / float(steps)
 		var env := sin(t * PI)

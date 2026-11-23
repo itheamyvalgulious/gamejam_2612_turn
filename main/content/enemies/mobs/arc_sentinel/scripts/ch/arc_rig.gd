@@ -1046,14 +1046,9 @@ func _build_arm() -> void:
 # ================================================================== blade FX
 
 func _build_blade_fx() -> void:
-	var fx_script = null
-	if ResourceLoader.exists("res://scripts/ch/arc_sword_fx.gd"):
-		fx_script = load("res://scripts/ch/arc_sword_fx.gd")
-	if fx_script != null:
-		var fx := Node3D.new()
-		fx.set_script(fx_script)
-		fx.name = "ArcSwordFX"
-		blade_fx.add_child(fx)
+	var fx := preload("res://scripts/ch/arc_sword_fx.gd").new()
+	fx.name = "ArcSwordFX"
+	blade_fx.add_child(fx)
 	blade_light = OmniLight3D.new()
 	blade_light.light_color = Color(1.0, 0.32, 0.06)
 	blade_light.light_energy = 1.1

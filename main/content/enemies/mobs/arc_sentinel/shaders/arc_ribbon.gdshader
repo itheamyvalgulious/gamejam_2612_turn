@@ -4,20 +4,20 @@ render_mode unshaded, cull_disabled, depth_draw_never, blend_add, fog_disabled, 
 // Camera-facing arc ribbons. Ported from the Voltaic Edge sword shader, with a
 // deep orange-red aura and a white-hot orange core instead of pale gold.
 
-uniform vec2 screen_size = vec2(1280.0, 720.0);
-uniform float fade : hint_range(0.0, 1.5) = 1.0;
-uniform float intensity : hint_range(0.0, 3.0) = 1.0;
+instance uniform float arc_intensity = 1.0;
+instance uniform float arc_phase = 0.0;
+instance uniform float arc_mesh_scale = 1.0;
 uniform float atten_ref_dist : hint_range(0.5, 20.0) = 3.0;
 uniform float atten_soft_dist : hint_range(0.5, 20.0) = 5.5;
 
 varying vec2 v_uv;
 varying vec4 v_params;
-varying float v_fade;
+varying float v_world_y;
 varying float v_dist_atten;
 
 void vertex() {
 	vec3 other = CUSTOM0.xyz;
-	float half_world = CUSTOM0.w;
+	vec2 screen_size = max(VIEWPORT_SIZE, vec2(1.0));
 
 	vec4 va = MODELVIEW_MATRIX * vec4(VERTEX, 1.0);
 	vec4 vb = MODELVIEW_MATRIX * vec4(other, 1.0);
@@ -43,7 +43,7 @@ void vertex() {
 	vec2 perp = vec2(-dir.y, dir.x);
 
 	float model_scale = max(length(MODEL_MATRIX[1].xyz), 0.0001);
-	float dist = length(va.xyz) / model_scale;
+	float dist = length(va.xyz) * arc_mesh_scale / model_scale;
 	float atten_num = atten_ref_dist * atten_ref_dist + atten_soft_dist * atten_soft_dist;
 	v_dist_atten = min(1.25, atten_num / (dist * dist + atten_soft_dist * atten_soft_dist));
 
@@ -64,7 +64,7 @@ void vertex() {
 
 	v_uv = UV;
 	v_params = CUSTOM1;
-	v_fade = fade;
+	v_world_y = (MODEL_MATRIX * vec4(VERTEX, 1.0)).y;
 }
 
 void fragment() {
@@ -76,7 +76,8 @@ void fragment() {
 	float core = smoothstep(core_edge, 0.0, d);
 	float halo = pow(max(1.0 - d, 0.0), 1.9);
 
-	float energy = v_params.x * v_fade * intensity;
+	float flicker = 0.75 + 0.25 * sin(TIME * 32.0 + v_params.z + arc_phase);
+	float energy = v_params.x * arc_intensity * flicker;
 
 	vec3 gold = vec3(1.00, 0.040, 0.002);                      // deep orange-red aura
 	vec3 hot = mix(vec3(2.45, 0.58, 0.035), vec3(1.55, 0.24, 0.010), v_params.y);
@@ -85,5 +86,5 @@ void fragment() {
 	vec3 col = gold * halo * 1.80 + hot * core;
 	ALBEDO = col * v_dist_atten;
 	float a = (halo * 0.30 + core * 0.78) * energy;
-	ALPHA = clamp(a, 0.0, 1.0);
+	ALPHA = clamp(a, 0.0, 1.0) * smoothstep(0.035, 0.065, v_world_y);
 }
