@@ -4,13 +4,13 @@
 
 ## 文件结构
 
+[查看 main 的分层目录说明](main/docs/project_layout.md)。
+
 | 目录 | 内容 |
 | --- | --- |
 | `main/content/levels/` | 霓虹窄巷、雨夜广场、灯墙之厅、货舱 02、霓虹街区、坠击中庭、仓库、回廊实验舱和病房的源文件 |
-| `main/content/enemies/melee/` | [人形刀客](main/content/enemies/melee/mech_duelist/README.md)、[ARC Sentinel](main/content/enemies/melee/arc_sentinel/README.md) |
-| `main/content/enemies/ranged/` | [单轮巡射机甲](main/content/enemies/ranged/wheel_sentry/README.md) |
-| `main/content/enemies/phase/` | [Shard Phantom](main/content/enemies/phase/shard_phantom/README.md) |
-| `main/content/enemies/boss/` | [折相](main/content/enemies/boss/phase_boss/README.md)、[Leviathan](main/content/enemies/boss/leviathan/README.md) |
+| `main/content/enemies/mobs/` | [人形刀客](main/content/enemies/mobs/mech_duelist/README.md)、[ARC Sentinel](main/content/enemies/mobs/arc_sentinel/README.md)、[单轮巡射机甲](main/content/enemies/mobs/wheel_sentry/README.md)、[Shard Phantom](main/content/enemies/mobs/shard_phantom/README.md) |
+| `main/content/enemies/bosses/` | [折相](main/content/enemies/bosses/phase_boss/README.md)、[Leviathan](main/content/enemies/bosses/leviathan/README.md) |
 | `main/content/characters/` | [VESPER 主角](main/content/characters/vesper/README.md) |
 | `main/content/weapons/` | [电弧剑](main/content/weapons/electric_sword/README.md) |
 | `main/content/maps/` | [城市、地形、飞船地图实验](main/content/maps/README.md)及 `_baseline/` 历史初稿 |
@@ -55,7 +55,7 @@
 | 要提交的内容 | 放置位置 |
 | --- | --- |
 | 可玩的关卡、布光、碰撞、出生点和刷怪配置 | `main/content/levels/<关卡名>/` |
-| 近战、远程、位移敌人或 Boss | `main/content/enemies/melee/`、`ranged/`、`phase/`、`boss/` 下对应敌人的目录 |
+| 普通或精英敌人、Boss | 小兵和精英放 `main/content/enemies/mobs/`，Boss 放 `main/content/enemies/bosses/`，每个敌人占一个目录 |
 | 多个敌人共用的战斗接口或工具脚本 | `main/content/enemies/shared/` |
 | 主角模型、骨架、动作与材质 | `main/content/characters/<角色名>/` |
 | 独立武器的模型、动作和特效 | `main/content/weapons/<武器名>/` |

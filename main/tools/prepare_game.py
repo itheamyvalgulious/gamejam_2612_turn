@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 import re
 
-from encounter_roster import adapt_host, adapt_wheel, adapters, pack_designs
+from encounter_roster import adapt_host, adapt_wheel, adapters, design_path, pack_designs
 
 MAIN = Path(__file__).resolve().parents[1]
 REPO = MAIN.parent
@@ -28,19 +28,19 @@ ROOM_AUTOLOADS = {
 TEXT = {".gd", ".tscn", ".tres", ".gdshader", ".gdshaderinc"}
 ASSETS = {".ttf", ".otf", ".wav", ".ogg", ".png", ".jpg", ".webp", ".svg", ".obj", ".glb"}
 FOLDERS = ("src", "assets", "gfx", "scripts", "shaders")
-ENEMY_TYPES = {
-    "encounter_unit.gd": "common",
-    "arc_encounter.gd": "melee",
-    "wheel_encounter.gd": "ranged",
-    "shard_encounter.gd": "phase",
-    "enemy_phase_boss.gd": "boss",
-    "enemy_base.gd": "common",
-    "enemy_mob.gd": "melee",
-    "basic_enemy.gd": "melee",
-    "enemy_archer.gd": "ranged",
-    "archer_enemy.gd": "ranged",
-    "phase_enemy.gd": "phase",
-    "enemy_boss.gd": "boss",
+ENEMY_PACKAGES = {
+    "encounter_unit.gd": "shared",
+    "arc_encounter.gd": "mobs/arc_sentinel",
+    "wheel_encounter.gd": "mobs/wheel_sentry",
+    "shard_encounter.gd": "mobs/shard_phantom",
+    "enemy_phase_boss.gd": "bosses/phase_boss",
+    "enemy_base.gd": "shared",
+    "enemy_mob.gd": "mobs",
+    "basic_enemy.gd": "mobs",
+    "enemy_archer.gd": "mobs",
+    "archer_enemy.gd": "mobs",
+    "phase_enemy.gd": "mobs",
+    "enemy_boss.gd": "bosses",
 }
 PLAYER_FILES = {"camera.gd", "fp_viewmodel.gd", "player.gd"}
 RESOURCE_PATH = re.compile(r'''(?<=["'])res://([^"'\s]+)(?=["'])''')
@@ -89,8 +89,8 @@ def content_path(episode, relative):
 
     folder = parts[1]
     remainder = Path(*parts[2:])
-    if name in ENEMY_TYPES:
-        return Path("enemies") / ENEMY_TYPES[name] / episode / remainder
+    if name in ENEMY_PACKAGES:
+        return Path("enemies") / ENEMY_PACKAGES[name] / "encounters" / episode / remainder
     if folder == "fx" or name == "phase_fx.gd":
         return Path("vfx") / episode / remainder
     if folder == "ui" or name in {"hud.gd", "fp_mask.gd"}:
@@ -112,7 +112,8 @@ def relocate_resources(text, episode, relative, destinations):
     def relocate(match):
         original = match[1]
         if original.startswith("team/"):
-            return "res://runtime/enemies/designs/" + original.removeprefix("team/")
+            design, path = original.removeprefix("team/").split("/", 1)
+            return "res://runtime/" + design_path(design, path).as_posix()
         destination = destinations.get(original)
         if destination is not None:
             return "res://runtime/" + destination.as_posix()

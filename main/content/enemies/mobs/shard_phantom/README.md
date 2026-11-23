@@ -10,7 +10,7 @@ no imported models, textures, fonts or audio.
 - **Companion docs**: `README_kit.md` (generic studio contract), `renders/ACCEPTANCE.md`
 
 ```bash
-cd main/content/enemies/phase/shard_phantom
+cd main/content/enemies/mobs/shard_phantom
 ./run.sh                                  # interactive studio
 DISPLAY=:10 godot --path . res://scenes/shots.tscn   # kit contact sheet
 DISPLAY=:10 godot --path . res://scenes/perf.tscn    # fps probe (prints avg)

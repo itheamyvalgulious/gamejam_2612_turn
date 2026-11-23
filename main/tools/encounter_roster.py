@@ -4,10 +4,10 @@ from pathlib import Path
 import re
 
 ROOTS = {
-    "fold": ("boss/phase_boss", ["src/enemies/phase_boss/phase_boss_combat.gd"]),
-    "arc": ("melee/arc_sentinel", ["scripts/ch/arc_sentinel.gd"]),
-    "shard": ("phase/shard_phantom", ["scripts/character.gd", "scripts/phantom/energy_shuriken.gd"]),
-    "wheel": ("ranged/wheel_sentry", ["scenes/ranged/wheel_sentry_model.tscn", "src/enemies/ranged/wheel_sentry_beam.gd"]),
+    "fold": ("bosses/phase_boss", ["src/enemies/phase_boss/phase_boss_combat.gd"]),
+    "arc": ("mobs/arc_sentinel", ["scripts/ch/arc_sentinel.gd"]),
+    "shard": ("mobs/shard_phantom", ["scripts/character.gd", "scripts/phantom/energy_shuriken.gd"]),
+    "wheel": ("mobs/wheel_sentry", ["scenes/ranged/wheel_sentry_model.tscn", "src/enemies/ranged/wheel_sentry_beam.gd"]),
 }
 PATHS = re.compile(r'''(?<=["'])res://([^"'\s]+)(?=["'])''')
 
@@ -34,13 +34,17 @@ def dependencies(directory, roots):
         yield item, text if text is not None else file.read_bytes()
 
 
+def design_path(design, relative):
+    return Path("enemies") / ROOTS[design][0] / "design" / relative
+
+
 def pack_designs(enemies):
     generated = {}
     for design, (directory, roots) in ROOTS.items():
         for path, value in dependencies(enemies / directory, roots):
-            dest = Path("enemies/designs") / design / path
+            dest = design_path(design, path)
             if isinstance(value, str):
-                value = PATHS.sub(lambda m: "res://runtime/enemies/designs/" + design + "/" + m[1], value)
+                value = PATHS.sub(lambda m: "res://runtime/" + design_path(design, m[1]).as_posix(), value)
                 if dest.suffix in {".tscn", ".tres"}:
                     value = re.sub(r'\s+uid="uid://[^"]+"', "", value)
                 value = value.encode("utf-8")
@@ -53,12 +57,12 @@ def adapters(episode, enemies):
         return {}
     bindings = {
         "src/game/encounter_unit.gd": "shared/encounter_unit.gd",
-        "src/game/arc_encounter.gd": "melee/arc_encounter.gd",
+        "src/game/arc_encounter.gd": "mobs/arc_sentinel/integration/arc_encounter.gd",
     }
     if episode in {"act", "city", "galleria"}:
-        bindings["src/game/wheel_encounter.gd"] = "ranged/wheel_sentry/src/enemies/ranged/wheel_sentry_enemy.gd"
+        bindings["src/game/wheel_encounter.gd"] = "mobs/wheel_sentry/src/enemies/ranged/wheel_sentry_enemy.gd"
     if episode in {"cargo", "city"}:
-        bindings["src/game/shard_encounter.gd"] = "phase/shard_encounter.gd"
+        bindings["src/game/shard_encounter.gd"] = "mobs/shard_phantom/integration/shard_encounter.gd"
     return {path: (enemies / source).read_text(encoding="utf-8-sig") for path, source in bindings.items()}
 
 
@@ -87,7 +91,7 @@ func spawn_shard(pos: Vector3, direction: Vector3, speed: float, damage: float) 
 """.replace("    ", "\t")
     if episode not in {"act", "city", "galleria"}:
         return text
-    wheel = enemies / "ranged/wheel_sentry"
+    wheel = enemies / "mobs/wheel_sentry"
     relative = relative.as_posix()
     additions = {
         "src/fx/vfx.gd": ["sentry_bolt_flash"],

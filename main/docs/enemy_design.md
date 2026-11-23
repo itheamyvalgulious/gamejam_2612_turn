@@ -6,9 +6,9 @@
 
 | 目录 | 角色 | 定位 | 动画 | 视觉核心 |
 | --- | --- | --- | --- | --- |
-| [arc_sentinel](../content/enemies/melee/arc_sentinel/README.md) | **ARC // SENTINEL v3** | 普通近战小怪 · 三角履带炮塔 | idle / run / attack1 / attack2 / block | 两条钝角三角履带夹 0.52 m 立方体炮塔、半径=边长 1/3 的红色摄像头（内球旋转、外壳固定）、眼下一排闪烁状态灯、单条顶置三关节机械臂、黑色发射器 + 电弧闪电剑 |
-| [shard_phantom](../content/enemies/phase/shard_phantom/README.md) | **SHARD // PHANTOM** | 位移敌人 · 模块化悬浮人形 | idle / walk / attack / disperse / reform | 大型相机镜头头、90 个独立模块与橙红推进器（背部/小腿/脚底悬浮喷口）、爆散重组、掌心手里剑 |
-| [boss](../content/enemies/boss/leviathan/README.md) | **LEVIATHAN // ABYSSAL WARDEN** | 最终 Boss · 机械章鱼 | 8 条独立链式触手 · idle / support / attack1-3 / laser / 两阶段 | 2 m 半径装甲球、8 片滑动虹膜壳 + 连续孔径环、红色大摄像头眼、红色能量核心与透明约束层、20 m 低空 360° 横扫 |
+| [arc_sentinel](../content/enemies/mobs/arc_sentinel/README.md) | **ARC // SENTINEL v3** | 普通近战小怪 · 三角履带炮塔 | idle / run / attack1 / attack2 / block | 两条钝角三角履带夹 0.52 m 立方体炮塔、半径=边长 1/3 的红色摄像头（内球旋转、外壳固定）、眼下一排闪烁状态灯、单条顶置三关节机械臂、黑色发射器 + 电弧闪电剑 |
+| [shard_phantom](../content/enemies/mobs/shard_phantom/README.md) | **SHARD // PHANTOM** | 位移敌人 · 模块化悬浮人形 | idle / walk / attack / disperse / reform | 大型相机镜头头、90 个独立模块与橙红推进器（背部/小腿/脚底悬浮喷口）、爆散重组、掌心手里剑 |
+| [boss](../content/enemies/bosses/leviathan/README.md) | **LEVIATHAN // ABYSSAL WARDEN** | 最终 Boss · 机械章鱼 | 8 条独立链式触手 · idle / support / attack1-3 / laser / 两阶段 | 2 m 半径装甲球、8 片滑动虹膜壳 + 连续孔径环、红色大摄像头眼、红色能量核心与透明约束层、20 m 低空 360° 横扫 |
 
 三个工程共享同一套「暗黑舞台 + 霓虹轮廓光 + ACES/Bloom/SSAO + 扫描线暗角」
 的呈现体系，与 [ACT](../content/levels/actdemo/README.md)、[VESPER](../content/characters/vesper/README.md) 同一画风家族。
@@ -19,9 +19,9 @@
 
 | 工程 | 内容 |
 | --- | --- |
-| [人形机甲刀客](../content/enemies/melee/mech_duelist/README.md) | 近战精英，含持刀踱步、开场蓄力二连斩、三套普攻和实战判定 |
-| [单轮巡射机甲](../content/enemies/ranged/wheel_sentry/README.md) | 远程机甲，含轮组展台、走位、小束和长束的单怪实战 |
-| [折相 Boss](../content/enemies/boss/phase_boss/README.md) | 重型四足机甲，含模型与动作展台、视野充能与虚化、侧跳后撤反击和实战演示关 |
+| [人形机甲刀客](../content/enemies/mobs/mech_duelist/README.md) | 近战精英，含持刀踱步、开场蓄力二连斩、三套普攻和实战判定 |
+| [单轮巡射机甲](../content/enemies/mobs/wheel_sentry/README.md) | 远程机甲，含轮组展台、走位、小束和长束的单怪实战 |
+| [折相 Boss](../content/enemies/bosses/phase_boss/README.md) | 重型四足机甲，含模型与动作展台、视野充能与虚化、侧跳后撤反击和实战演示关 |
 
 ---
 
@@ -30,9 +30,9 @@
 以下命令从仓库根目录执行，需要 **Godot 4.7.2**。本机 `DISPLAY=:10` 是可用 X 服务，Vulkan/Forward+ 正常。
 
 ```bash
-cd main/content/enemies/melee/arc_sentinel   && ./run.sh      # 或 godot --path .
-cd main/content/enemies/phase/shard_phantom  && ./run.sh
-cd main/content/enemies/boss/leviathan           && ./run.sh
+cd main/content/enemies/mobs/arc_sentinel   && ./run.sh      # 或 godot --path .
+cd main/content/enemies/mobs/shard_phantom  && ./run.sh
+cd main/content/enemies/bosses/leviathan           && ./run.sh
 ```
 
 三个工程的默认主场景都是 `res://scenes/studio.tscn`。首次打开若出现
@@ -107,7 +107,7 @@ block 的威胁方向改变时会现场规划：候选拦截位姿 → 解析 sw
 
 ### 验收
 
-`cd main/content/enemies/melee/arc_sentinel && godot --headless --path . res://scenes/qa.tscn` → **PASS（0 failures）**：
+`cd main/content/enemies/mobs/arc_sentinel && godot --headless --path . res://scenes/qa.tscn` → **PASS（0 failures）**：
 5 个 clip 逐帧自碰撞 + 地面、全部可达转场、attack1/attack2 姿态与扫掠角、
 8 个威胁方向的 block（命中 / 刀面 / 净空 / 规划耗时）、光球追踪 0.00°、
 外壳不转、履带-车轮物理耦合 / 差速 / 3 m/s 上限 / 与 body clip 解耦、
@@ -173,15 +173,15 @@ block 的威胁方向改变时会现场规划：候选拦截位姿 → 解析 sw
   整段远端放低到 **1.0 m**，绕身体 **360°** 横扫，与其他腿完全独立。
 - 切割：从尖端开始逐节爆炸（火花/碎片/短暂闪光/白热断口），一路烧到根部后消失；
   爆炸池全部会自行过期，不会在旧根部留下持久特效。
-- 验收：`cd main/content/enemies/boss/leviathan && godot --headless --path . res://scenes/qa.tscn` →
+- 验收：`cd main/content/enemies/bosses/leviathan && godot --headless --path . res://scenes/qa.tscn` →
   **61/61 PASS**，0 failures；idle 互穿间隙 +0.706 m，support +1.051 m，
   attack3 357.8°/21.4 m/1.0 m，support 补位与坠落攻击、cut 顺序/无残留均通过，
   模拟 8.2 ms/60 Hz step。
-- 视觉验收：直接运行主程序（`cd main/content/enemies/boss/leviathan && ./run.sh`）用右侧面板操作；本构建
+- 视觉验收：直接运行主程序（`cd main/content/enemies/bosses/leviathan && ./run.sh`）用右侧面板操作；本构建
   不再生成/附带成堆的验收图片。
 
 ```bash
-cd main/content/enemies/boss/leviathan
+cd main/content/enemies/bosses/leviathan
 godot --headless --path . --import
 godot --headless --path . res://scenes/qa.tscn
 ```
@@ -276,13 +276,13 @@ shard_phantom/
 
 ```bash
 # Sentinel v3
-cd main/content/enemies/melee/arc_sentinel
+cd main/content/enemies/mobs/arc_sentinel
 godot --headless --path . res://scenes/qa.tscn
 DISPLAY=:10 godot --path . res://scenes/v3_shots.tscn
 DISPLAY=:10 godot --path . res://scenes/v3_details.tscn
 
 # Shard
-cd main/content/enemies/phase/shard_phantom
+cd main/content/enemies/mobs/shard_phantom
 DISPLAY=:10 godot --path . res://scenes/perf.tscn
 godot --headless --path . --script res://scripts/contract_test.gd
 godot --headless --path . --script res://scripts/loop_soak_test.gd
