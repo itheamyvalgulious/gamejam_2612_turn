@@ -28,7 +28,7 @@ const DEFS := [
 	{"id": "tuning", "label": "手感参数面板", "group": "系统", "ev": [{"t": "key", "k": KEY_QUOTELEFT}]},
 	{"id": "pause", "label": "暂停 / 按键绑定", "group": "系统", "ev": [{"t": "key", "k": KEY_ESCAPE}]},
 	{"id": "restart", "label": "重开本关", "group": "系统", "ev": [{"t": "key", "k": KEY_R}]},
-	{"id": "next_level", "label": "下一关（调试）", "group": "系统", "ev": [{"t": "key", "k": KEY_N}]},
+	{"id": "next_level", "label": "继续", "group": "系统", "ev": [{"t": "key", "k": KEY_N}]},
 	{"id": "hud_toggle", "label": "隐藏 / 显示 HUD", "group": "系统", "ev": [{"t": "key", "k": KEY_F1}]},
 	{"id": "audio_test", "label": "听声辨位测试（8 方位）", "group": "系统",
 		"ev": [{"t": "key", "k": KEY_F2}]},

@@ -14,7 +14,7 @@ static var _surf: Shader = null
 
 static func _surface() -> Shader:
 	if _surf == null:
-		_surf = load("res://gfx/warehouse/surface.gdshader")
+		_surf = load("res://gfx/surface_mesh.gdshader")
 	return _surf
 
 static func std(color: Color, rough := 0.7, metal := 0.0, opts := {}) -> ShaderMaterial:

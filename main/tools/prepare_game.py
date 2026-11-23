@@ -16,7 +16,14 @@ MODULES = {
     "city": ("main/content/levels/city", "City"),
     "galleria": ("main/content/levels/galleria", "Galleria"),
     "shadow_chamber": ("main/content/levels/shadow_chamber", "Fold"),
-    "lab": ("main/content/levels/scene_lab", "Lab"),
+    "room_shared": ("main/content/levels/shared", "Room"),
+}
+ROOM_LEVELS = ("warehouse", "panopticon", "ward")
+ROOM_AUTOLOADS = {
+    "P": "src/core/params.gd",
+    "B": "src/core/binds.gd",
+    "Fx": "src/fx/vfx.gd",
+    "Snd": "src/audio/audio.gd",
 }
 TEXT = {".gd", ".tscn", ".tres", ".gdshader", ".gdshaderinc"}
 ASSETS = {".ttf", ".otf", ".wav", ".ogg", ".png", ".jpg", ".webp", ".svg", ".obj", ".glb"}
@@ -44,8 +51,8 @@ TOKEN = re.compile(r'#[^\n]*|""".*?"""|' + "'''.*?'''" +
                    re.DOTALL)
 
 
-def source_files(root, entry):
-    paths = {root / entry}
+def source_files(root, entry=None):
+    paths = {root / entry} if entry is not None else set()
     if (root / "main.tscn").is_file():
         paths.add(root / "main.tscn")
     for subdir in FOLDERS:
@@ -142,9 +149,11 @@ def scene_text(text, episode, names, autoloads, relative, destinations):
     text = text.replace("OS.get_cmdline_user_args()", "TurnSession.level_arguments()")
     text = text.replace("get_tree().quit()", "TurnSession.return_to_menu()")
     text = text.replace("退出游戏", "返回关卡选择")
-    save_id = "fold" if episode == "shadow_chamber" else episode
+    save_id = {"shadow_chamber": "fold", "room_shared": "lab"}.get(episode, episode)
     text = text.replace("user://actdemo_params.json", f"user://turn_{save_id}_params.json")
     if autoloads and relative.as_posix() == "src/main.gd":
+        text = text.replace("hud.set_level(i,", "hud.set_level(TurnSession.active_level_index(),")
+        text = text.replace('"第 %d 关" % (i + 1)', '"第 %d 关" % (TurnSession.active_level_index() + 1)')
         text, count = re.subn(
             r"(?m)^func next_level\(\) -> void:\n(?:\t[^\n]*(?:\n|$))+",
             "func next_level() -> void:\n\tTurnSession.advance_level()\n",
@@ -185,32 +194,42 @@ def build():
     generated: dict[Path, bytes] = pack_designs(ENEMIES)
     for episode, (directory, prefix) in MODULES.items():
         root = REPO / directory
-        project = (root / "project.godot").read_text(encoding="utf-8-sig")
-        entry = re.search(r'(?m)^run/main_scene="res://([^"]+)"', project)[1]
+        if episode == "room_shared":
+            autoloads = ROOM_AUTOLOADS
+            sources = {path.relative_to(root): path for path in source_files(root)}
+            for room in ROOM_LEVELS:
+                room_root = root.parent / room
+                for path in source_files(room_root, "main.tscn"):
+                    sources[Path(room) / path.relative_to(room_root)] = path
+        else:
+            project = (root / "project.godot").read_text(encoding="utf-8-sig")
+            entry = re.search(r'(?m)^run/main_scene="res://([^"]+)"', project)[1]
+            autoloads = dict(AUTOLOADS.findall(project))
+            sources = {path.relative_to(root): path for path in source_files(root, entry)}
         supplied = adapters(episode, ENEMIES)
-        candidates = list(source_files(root, entry))
-        candidates.extend(root / path for path in supplied)
-        autoloads = dict(AUTOLOADS.findall(project))
+        sources.update((Path(path), root / path) for path in supplied)
         assert set(autoloads) == {"P", "B", "Fx", "Snd"}, (episode, autoloads)
         def read(relative):
             if relative.as_posix() in supplied:
                 value = supplied[relative.as_posix()]
                 return adapt_wheel(value) if relative.name == "wheel_encounter.gd" else value
-            return (root / relative).read_text(encoding="utf-8-sig")
+            return sources[relative].read_text(encoding="utf-8-sig")
 
         names = {}
-        for path in candidates:
-            if path.suffix == ".gd":
-                for name in CLASS.findall(read(path.relative_to(root))):
+        for relative in sources:
+            if relative.suffix == ".gd":
+                for name in CLASS.findall(read(relative)):
                     if name in names:
                         raise ValueError(f"Duplicate class in {episode}: {name}")
                     names[name] = f"Turn{prefix}{name}"
-        destinations = {
-            path.relative_to(root).as_posix(): content_path(episode, path.relative_to(root))
-            for path in candidates
-        }
-        for path in candidates:
-            relative = path.relative_to(root)
+        destinations = {}
+        for relative in sources:
+            first, *rest = relative.parts
+            if episode == "room_shared" and first in ROOM_LEVELS:
+                destinations[relative.as_posix()] = content_path(first, Path(*rest))
+            else:
+                destinations[relative.as_posix()] = content_path(episode, relative)
+        for relative, path in sources.items():
             destination = destinations[relative.as_posix()]
             if path.suffix in TEXT:
                 source = adapt_host(episode, relative, read(relative), ENEMIES)
@@ -241,7 +260,7 @@ def build():
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(raw)
     manifest.write_text(json.dumps(sorted(path.as_posix() for path in generated)), encoding="utf-8")
-    print(f"Prepared {len(MODULES)} projects and {len(generated)} resources.")
+    print(f"Prepared {len(MODULES) - 1 + len(ROOM_LEVELS)} scene modules and {len(generated)} resources.")
 
 
 if __name__ == "__main__":

@@ -200,19 +200,20 @@ func _draw_stats(vp: Vector2) -> void:
 	_canvas.draw_string(_font, Vector2(p.x + 16, p.y + 24), "关卡 %d" % (_level_idx + 1),
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, C_DIM)
 	_glow(Vector2(p.x + 16, p.y + 54), _level_name, HORIZONTAL_ALIGNMENT_LEFT, w - 30.0, 22, C_ORANGE, 1.5)
-	# 敌人计数
-	var alive_col := C_RED if _alive > 0 else C_GREEN
-	_canvas.draw_string(_font, Vector2(p.x + 16, p.y + 84), "敌人",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, C_DIM)
-	_canvas.draw_string(_font, Vector2(p.x + 60, p.y + 84), "%d / %d" % [_alive, _total],
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, alive_col)
-	# 击杀进度条
-	var bar := Rect2(p.x + w - 128.0, p.y + 74.0, 112.0, 6.0)
-	_canvas.draw_rect(bar, Color(0.1, 0.13, 0.18, 0.9))
-	var killed := maxi(0, _total - _alive)
-	var fr := float(killed) / float(maxi(1, _total))
-	_canvas.draw_rect(Rect2(bar.position, Vector2(bar.size.x * fr, 6.0)), C_GREEN)
-	_canvas.draw_rect(bar, Color(0.3, 0.6, 0.75, 0.4), false, 1.0)
+	if _total == 0:
+		_canvas.draw_string(_font, Vector2(p.x + 16, p.y + 84), "暂无敌人",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, C_DIM)
+	else:
+		var alive_col := C_RED if _alive > 0 else C_GREEN
+		_canvas.draw_string(_font, Vector2(p.x + 16, p.y + 84), "敌人",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, C_DIM)
+		_canvas.draw_string(_font, Vector2(p.x + 60, p.y + 84), "%d / %d" % [_alive, _total],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, alive_col)
+		var bar := Rect2(p.x + w - 128.0, p.y + 74.0, 112.0, 6.0)
+		_canvas.draw_rect(bar, Color(0.1, 0.13, 0.18, 0.9))
+		var fr := float(maxi(0, _total - _alive)) / float(_total)
+		_canvas.draw_rect(Rect2(bar.position, Vector2(bar.size.x * fr, 6.0)), C_GREEN)
+		_canvas.draw_rect(bar, Color(0.3, 0.6, 0.75, 0.4), false, 1.0)
 	if _state != "":
 		_canvas.draw_string(_font, Vector2(p.x + 16, p.y + 103), _state,
 			HORIZONTAL_ALIGNMENT_LEFT, w - 30.0, 13, C_CYAN)

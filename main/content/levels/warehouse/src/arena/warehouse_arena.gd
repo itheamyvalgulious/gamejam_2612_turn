@@ -2,7 +2,7 @@ extends RefCounted
 ## 仓库关卡：56 × 36 × 10 m，按 ArenaKit 契约交付。
 ## 几何直接用 actdemo 的世界单位（1 u = 0.547 m）建，避免再出现“4.57 u 当成米”的错误。
 
-const Kit := preload("res://src/warehouse/kit.gd")
+const Kit := preload("res://src/arena/kit.gd")
 
 const U := 1.0 / 0.547
 const BALL := 1.2
@@ -219,7 +219,7 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 	var over := 3.0 / U - WALL_PAD
 	var bounds := AABB(Vector3((-HALF_X - over) * U, 0.0, (-HALF_Z - over) * U),
 		Vector3((HALF_X + over) * 2.0 * U, H * U, (HALF_Z + over) * 2.0 * U))
-	var occ = preload("res://src/warehouse/occlusion.gd").new()
+	var occ = preload("res://warehouse/src/arena/occlusion.gd").new()
 	occ.name = "Occlusion"
 	occ.setup(root.get_node("Shell"), HALF_X * U, HALF_Z * U, H * U)
 	root.add_child(occ)
@@ -342,7 +342,7 @@ static func _environment(root: Node3D) -> void:
 # ------------------------------------------------------------------ 外壳
 static func _shell(root: Node3D) -> void:
 	var floor_mat := ShaderMaterial.new()
-	floor_mat.shader = load("res://gfx/warehouse/floor.gdshader")
+	floor_mat.shader = load("res://warehouse/gfx/floor.gdshader")
 	floor_mat.set_shader_parameter("base_col", Vector3(0.040, 0.047, 0.058))
 	floor_mat.set_shader_parameter("grout_col", Vector3(0.016, 0.021, 0.028))
 	floor_mat.set_shader_parameter("tile", 2.0)

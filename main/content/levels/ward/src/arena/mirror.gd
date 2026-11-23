@@ -6,7 +6,7 @@ extends Node3D
 ##   * 镜子自己 + 挂着镜子的那面墙不参与反射渲染（layer 3），否则镜像相机会被墙挡住；
 ##   * 镜像相机与主相机共用同一个 World3D，所以看到的确实是当前场景。
 
-const MIRROR_SHADER := preload("res://gfx/ward/mirror.gdshader")
+const MIRROR_SHADER := preload("res://ward/gfx/mirror.gdshader")
 const NO_MIRROR_LAYER := 3          # 这一层的物体不进入镜子
 
 var quad: MeshInstance3D

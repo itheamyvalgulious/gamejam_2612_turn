@@ -4,7 +4,7 @@ extends RefCounted
 ## 中间是 R=13 m 的玻璃罐，实验体泡在液体里；玩家只能沿罐体外圈跑（回字长廊）。
 ## 纯场景，不放敌人（近战会打破玻璃）。
 
-const Kit := preload("res://src/warehouse/kit.gd")
+const Kit := preload("res://src/arena/kit.gd")
 
 const U := 1.0 / 0.547
 const BALL := 1.2
@@ -186,7 +186,7 @@ static func _env(root: Node3D) -> void:
 # ------------------------------------------------------------------ 圆形外壳
 static func _shell(root: Node3D) -> void:
 	var floor_mat := ShaderMaterial.new()
-	floor_mat.shader = load("res://gfx/panopticon/floor.gdshader")
+	floor_mat.shader = load("res://gfx/tile_floor.gdshader")
 	match FLOOR_STYLE:
 		"wet":
 			floor_mat.set_shader_parameter("base_col", Vector3(0.042, 0.056, 0.058))
@@ -283,7 +283,7 @@ static func _tank(root: Node3D) -> void:
 
 	# 液体
 	var liq := ShaderMaterial.new()
-	liq.shader = load("res://gfx/panopticon/liquid.gdshader")
+	liq.shader = load("res://panopticon/gfx/liquid.gdshader")
 	liq.set_shader_parameter("top_col", Color(0.10, 0.42, 0.38))
 	liq.set_shader_parameter("deep_col", Color(0.02, 0.12, 0.13))
 	liq.set_shader_parameter("alpha", 0.46)

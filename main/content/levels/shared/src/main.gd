@@ -10,6 +10,10 @@ const ReplayScene = preload("res://src/game/replay.gd")
 const Tuning = preload("res://src/ui/tuning.gd")
 const BindsPanel = preload("res://src/ui/binds_panel.gd")
 
+@export var arena_builder: Script
+@export var camera_distance := 20.0
+@export var camera_height := -1.0
+
 var player: PlayerUnit
 var cam: GameCam
 var level: LevelUnit
@@ -32,7 +36,6 @@ var _mouse_capture_enabled := DisplayServer.get_name() != "headless" and "--no-m
 
 
 func _ready() -> void:
-	get_window().title = "ACT // 四足刀客"
 	proj = Projectiles.new()
 	proj.name = "Projectiles"
 	add_child(proj)
@@ -48,12 +51,16 @@ func _ready() -> void:
 	player.projectiles = proj
 	cam.set_rig(player.rig)
 	cam.pitch = -0.16
-	cam.set_first_person(P.gets("cam.mode") == "first")
+	P.set_value("cam.mode", "third")
+	P.set_value("cam.distance", camera_distance)
+	if camera_height >= 0.0:
+		P.set_value("cam.height", camera_height)
+	cam.set_first_person(false)
 
 	level = LevelUnit.new()
 	level.name = "Level"
 	add_child(level)
-	level.setup(player, proj, cam)
+	level.setup(player, proj, cam, arena_builder)
 
 	hud = GameHudScene.new()
 	hud.name = "Hud"
@@ -67,13 +74,8 @@ func _ready() -> void:
 	binds.name = "Binds"
 	add_child(binds)
 
-	level.on_level_changed = func(i: int, name_cn: String, _hint: String) -> void:
-		var h := "它在你画面里就打不动：按 V 切第一人称"
-		if i == 1:
-			h = "右键弹反远程箭；别正对它弹"
-		elif i == 2:
-			h = "直视大怪即死：看墙上的影子"
-		hud.set_level(i, name_cn, h)
+	level.on_level_changed = func(i: int, name_cn: String, hint: String) -> void:
+		hud.set_level(i, name_cn, hint)
 		hud.show_banner("第 %d 关" % (i + 1), name_cn, P.getf("rules.banner_time"))
 		hud.clear_death()
 	hud.set_hint("左键攻击 · 配合 A/D/S 出方向斩 · 右键弹反 · V 视角 · Tab 第一人称视野 · ~ 参数 · Esc 暂停")
@@ -94,25 +96,7 @@ func _ready() -> void:
 	add_child(replay)
 	replay.setup(player, level, proj)
 
-	if "--ward" in OS.get_cmdline_user_args():
-		P.set_value("cam.mode", "third")
-		P.set_value("cam.distance", 8.5)
-		P.set_value("cam.height", 1.8)
-		level.start_level(5)
-		cam.set_first_person(false)
-	elif "--panopticon" in OS.get_cmdline_user_args():
-		P.set_value("cam.mode", "third")
-		P.set_value("cam.distance", 20.0)
-		level.start_level(4)
-		cam.set_first_person(false)
-	elif "--warehouse" in OS.get_cmdline_user_args():
-		P.set_value("cam.mode", "third")
-		P.set_value("cam.distance", 20.0)
-		level.start_level(3)
-		cam.set_first_person(false)
-	else:
-		level.start_level(3)
-	Snd.set_arena(level.arena)
+	level.start_level()
 	get_window().focus_exited.connect(_release_mouse)
 	if _mouse_capture_enabled:
 		hud.set_hint("点击游戏画面控制视角 · Esc 暂停")
@@ -298,6 +282,8 @@ func _process(delta: float) -> void:
 		hud.set_state("⚠ 画面里 %d 个敌人在格挡 —— 转开视线 / 按 V" % blocking)
 	elif player.rig.is_attacking:
 		hud.set_state("出刀中 · %s" % player.rig.attack_name)
+	elif level.total_enemies == 0:
+		hud.set_state("按 %s 继续" % B.event_text("next_level"))
 	else:
 		hud.set_state("")
 
@@ -381,13 +367,9 @@ func _on_projectile_event(ev: Dictionary) -> void:
 
 
 func restart_level() -> void:
-	level.start_level(level.index)
+	level.start_level()
 	hitstop = 0.0
 
 
 func next_level() -> void:
-	if level.index + 1 < LevelUnit.LEVELS.size():
-		level.start_level(level.index + 1)
-	else:
-		level.start_level(3)
-	hitstop = 0.0
+	TurnSession.advance_level()

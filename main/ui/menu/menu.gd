@@ -94,16 +94,6 @@ func _show_catalog() -> void:
 	_frame(48, 29, 48, 29)
 	_header("关卡选择", "返回主菜单", _go.bind(TurnSession.MenuPage.HOME))
 
-	var modes := HBoxContainer.new()
-	modes.add_theme_constant_override("separation", 9)
-	_column.add_child(modes)
-	var battle := _button("战斗关卡", _select_mode.bind(false), not TurnSession.exploration_mode)
-	var explore := _button("探索场景", _select_mode.bind(true), TurnSession.exploration_mode)
-	for tab in [battle, explore]:
-		tab.custom_minimum_size = Vector2(132, 40)
-		modes.add_child(tab)
-	var focus := explore if TurnSession.exploration_mode else battle
-
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -116,13 +106,9 @@ func _show_catalog() -> void:
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(grid)
 
-	var first: int = Catalog.BATTLE.size() if TurnSession.exploration_mode else 0
-	var end: int = Catalog.level_count() if TurnSession.exploration_mode else Catalog.BATTLE.size()
-	for index in range(first, end):
+	for index in Catalog.level_count():
 		grid.add_child(_card(index, TurnSession.open_level.bind(index)))
-	if TurnSession.consume_completion():
-		_show_status("全部战斗关卡已完成。")
-	focus.grab_focus()
+	grid.get_child(0).grab_focus()
 
 
 func _frame(left: int, top: int, right: int, bottom: int) -> void:
@@ -261,11 +247,6 @@ func _menu_theme() -> Theme:
 
 func _go(page: int) -> void:
 	TurnSession.menu_page = page
-	_show_page()
-
-
-func _select_mode(explore: bool) -> void:
-	TurnSession.exploration_mode = explore
 	_show_page()
 
 

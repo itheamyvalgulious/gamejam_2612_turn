@@ -6,12 +6,10 @@ const Catalog = preload("res://core/level_catalog.gd")
 enum MenuPage { HOME, LEVELS }
 
 var menu_page := MenuPage.HOME
-var exploration_mode := false
 var _active := -1
 var _changing := false
 var _services: Script
 var _arguments := PackedStringArray()
-var _levels_finished := false
 
 
 func open_level(index: int) -> void:
@@ -34,22 +32,17 @@ func level_arguments() -> PackedStringArray:
 	return result
 
 
+func active_level_index() -> int:
+	return _active
+
+
 func advance_level() -> void:
-	if _active < 0 or _active >= Catalog.level_count():
+	if _active < 0:
 		return
-	if _active == Catalog.BATTLE.size() - 1:
-		_levels_finished = true
+	if _active == Catalog.level_count() - 1:
 		return_to_menu()
-	elif _active == Catalog.level_count() - 1:
-		open_level(Catalog.BATTLE.size())
 	else:
 		open_level(_active + 1)
-
-
-func consume_completion() -> bool:
-	var completed := _levels_finished
-	_levels_finished = false
-	return completed
 
 
 func _input(event: InputEvent) -> void:
@@ -66,7 +59,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(_delta: float) -> void:
-	if _changing or _active < 0 or _active >= Catalog.BATTLE.size():
+	if _changing or _active < 0:
 		return
 	var current := get_tree().current_scene
 	if is_instance_valid(current):
@@ -83,7 +76,7 @@ func _switch(index: int) -> void:
 		var episode := String(entry[2])
 		var entry_scene := String(entry[3])
 		scene_path = "res://runtime/levels/%s/%s" % [episode, "main.tscn" if entry_scene.is_empty() else entry_scene]
-		next_services = load("res://runtime/systems/%s/services.gd" % episode) as Script
+		next_services = load("res://runtime/systems/%s/services.gd" % Catalog.services_for(index)) as Script
 		if next_services == null:
 			_switch_failed(scene_path)
 			return
@@ -106,7 +99,6 @@ func _switch(index: int) -> void:
 	_services = next_services
 	if index >= 0:
 		menu_page = MenuPage.LEVELS
-		exploration_mode = index >= Catalog.BATTLE.size()
 		_arguments = PackedStringArray(Catalog.get_entry(index)[4])
 		if DisplayServer.get_name() == "headless":
 			_arguments.append("--no-mouse-capture")

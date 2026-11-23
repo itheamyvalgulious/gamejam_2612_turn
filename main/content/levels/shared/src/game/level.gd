@@ -1,25 +1,14 @@
 extends Node3D
 class_name LevelUnit
-## 关卡流程 + 敌人编排 + 第三关的四面墙影子。
-##
-## 三关：窄巷(1 小怪) → 广场(3 小怪 + 1 远程) → 灯墙厅(1 大怪，×2 体型)
+## 共用的关卡流程，地图由各关卡场景传入。
 ## 尺度：本文件里的硬编码距离 / 速度都是**世界单位**（1 u = 0.547 m，见 src/core/units.gd）；
 ## 玩家可见的数值一律走 P.getm()（真实米）。
 
-const ArenaKit = preload("res://src/arena/arena.gd")
 const WallShadow = preload("res://src/fx/wall_shadow.gd")
 
 
-const LEVELS := [
-	{"kind": "alley", "enemies": ["mob"]},
-	{"kind": "plaza", "enemies": ["mob", "mob", "mob", "archer"]},
-	{"kind": "chamber", "enemies": ["boss"]},
-	{"kind": "warehouse", "enemies": []},
-	{"kind": "panopticon", "enemies": []},
-	{"kind": "ward", "enemies": []},
-]
-
-var index := 0
+var index: int
+var _arena_builder: Script
 var arena: Dictionary = {}
 var arena_node: Node3D
 var enemies: Array = []
@@ -35,17 +24,18 @@ var total_enemies := 0
 var on_level_changed: Callable = Callable()
 
 
-func setup(p_player: PlayerUnit, p_proj: Projectiles, p_cam: GameCam) -> void:
+func setup(p_player: PlayerUnit, p_proj: Projectiles, p_cam: GameCam, arena_builder: Script) -> void:
 	player = p_player
 	projectiles = p_proj
 	cam = p_cam
+	_arena_builder = arena_builder
+	index = TurnSession.active_level_index()
 
 
-func start_level(idx: int) -> void:
-	index = clampi(idx, 0, LEVELS.size() - 1)
+func start_level() -> void:
 	_clear_arena()
 	_clear_enemies()
-	arena = ArenaKit.build(String(LEVELS[index]["kind"]), Vector3.ZERO)
+	arena = _arena_builder.build(Vector3.ZERO)
 	arena_node = arena["node"]
 	add_child(arena_node)
 	if shadow != null and is_instance_valid(shadow):
@@ -158,14 +148,11 @@ func step(dt: float, ctx: Dictionary) -> void:
 			pass
 		"clear":
 			if state_t > P.getf("rules.banner_time"):
-				if index + 1 < LEVELS.size():
-					start_level(index + 1)
-				else:
-					state = "finished"
-					state_t = 0.0
+				state = "finished"
+				state_t = 0.0
 		"dead":
 			if state_t > P.getf("rules.death_delay"):
-				start_level(index)
+				start_level()
 		"finished":
 			pass
 

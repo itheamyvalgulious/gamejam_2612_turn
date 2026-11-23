@@ -5,7 +5,7 @@ extends RefCounted
 ## 两组岛式床之间是一道 1.30 m 的实体隔墙（不是帘子），墙顶可以站上去。
 ## 病床 0.59 / 床头柜 0.75 / 护士站 1.05 / 处置柜 1.30 / 隔墙 1.30 m，全部可跳上。
 
-const Kit := preload("res://src/warehouse/kit.gd")
+const Kit := preload("res://src/arena/kit.gd")
 
 const U := 1.0 / 0.547
 const BALL := 1.2
@@ -197,7 +197,7 @@ static func _env(root: Node3D) -> void:
 # ------------------------------------------------------------------ 外壳
 static func _shell(root: Node3D) -> void:
 	var floor_mat := ShaderMaterial.new()
-	floor_mat.shader = load("res://gfx/panopticon/floor.gdshader")
+	floor_mat.shader = load("res://gfx/tile_floor.gdshader")
 	floor_mat.set_shader_parameter("base_col", Vector3(0.152, 0.158, 0.146))
 	floor_mat.set_shader_parameter("grout_col", Vector3(0.050, 0.052, 0.045))
 	floor_mat.set_shader_parameter("stain_col", Vector3(0.080, 0.086, 0.042))
@@ -304,7 +304,7 @@ static func _tint_layers(root: Node3D, specs: Array, mat: Material, skip_idx: in
 # ------------------------------------------------------------------ 镜子
 ## 东门对面（西墙）整面镜子。
 static func _mirror(root: Node3D) -> void:
-	var m = load("res://src/ward/mirror.gd").new()
+	var m = load("res://ward/src/arena/mirror.gd").new()
 	m.name = "WestMirror"
 	m.position = P(-19.78, 2.86, 0.0)
 	m.basis = Basis(Vector3.UP, PI * 0.5)

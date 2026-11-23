@@ -6,7 +6,7 @@
 
 | 目录 | 内容 |
 | --- | --- |
-| `main/content/levels/` | 霓虹窄巷、雨夜广场、灯墙之厅、货舱 02、霓虹街区、坠击中庭和三个探索场景的源文件 |
+| `main/content/levels/` | 霓虹窄巷、雨夜广场、灯墙之厅、货舱 02、霓虹街区、坠击中庭、仓库、回廊实验舱和病房的源文件 |
 | `main/content/enemies/melee/` | [人形刀客](main/content/enemies/melee/mech_duelist/README.md)、[ARC Sentinel](main/content/enemies/melee/arc_sentinel/README.md) |
 | `main/content/enemies/ranged/` | [单轮巡射机甲](main/content/enemies/ranged/wheel_sentry/README.md) |
 | `main/content/enemies/phase/` | [Shard Phantom](main/content/enemies/phase/shard_phantom/README.md) |
@@ -29,7 +29,11 @@
 | 货舱 02 | [levels/cargo_hold2](main/content/levels/cargo_hold2/README.md) |
 | 霓虹街区 | [levels/city](main/content/levels/city/README.md) |
 | 坠击中庭 | [levels/galleria](main/content/levels/galleria/README.md) |
-| 仓库、回廊实验舱、病房 | [levels/scene_lab](main/content/levels/scene_lab/README.md) |
+| 仓库 | [levels/warehouse](main/content/levels/warehouse/README.md) |
+| 回廊实验舱 | [levels/panopticon](main/content/levels/panopticon/README.md) |
+| 病房 · 夜班 | [levels/ward](main/content/levels/ward/README.md) |
+
+仓库、回廊实验舱和病房的玩家控制、界面与公用材质工具放在 [levels/shared](main/content/levels/shared/README.md)。九个关卡都从「关卡选择」进入。仓库、回廊实验舱和病房暂未配置敌人，可停留走动，按 **N** 继续到下一关，或按 **F1** 返回选关。
 
 各关卡自带的合成音效源码在对应关卡的 `src/audio/`，构建时归到 `main/runtime/audio/`。编辑请从 `main/content/` 的原件开始。正式关卡使用 `main/project.godot` 启动。敌人与其他独立素材可以用各自的 `project.godot` 预览。
 
