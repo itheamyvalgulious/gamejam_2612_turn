@@ -3,6 +3,7 @@ extends Node
 const MENU := "res://ui/menu/menu.tscn"
 const Catalog = preload("res://core/level_catalog.gd")
 const LevelProgress = preload("res://core/level_progress.gd")
+const LevelLoading = preload("res://ui/loading/level_loading.gd")
 const PauseMenu = preload("res://ui/pause/pause_menu.gd")
 const OPTIONS_PATH := "user://turn_options.cfg"
 
@@ -22,6 +23,7 @@ var _hud_was_visible := true
 var _resume_mouse := false
 var _home_settings: PauseMenu
 var _home_focus: Control
+var _loading: LevelLoading
 
 
 func _ready() -> void:
@@ -114,6 +116,9 @@ func _update_save_status(result: Error) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if is_instance_valid(_loading):
+		get_viewport().set_input_as_handled()
+		return
 	if not event.is_pressed() or event.is_echo():
 		return
 	var key: Key = KEY_NONE
@@ -261,24 +266,40 @@ func _process(_delta: float) -> void:
 
 func _switch(index: int) -> void:
 	var scene_path := MENU
-	var next_services: Script
+	var services_path := ""
+	var tree := get_tree()
+	var old := tree.current_scene
+	var old_mode := Node.PROCESS_MODE_INHERIT if old == null else old.process_mode
+	var recapture := false
 	if index >= 0:
 		var entry := Catalog.get_entry(index)
 		var episode := String(entry[2])
 		var entry_scene := String(entry[3])
 		scene_path = "res://runtime/levels/%s/%s" % [episode, "main.tscn" if entry_scene.is_empty() else entry_scene]
-		next_services = load("res://runtime/systems/%s/services.gd" % Catalog.services_for(index)) as Script
-		if next_services == null:
-			_switch_failed(scene_path)
-			return
-	var packed := load(scene_path) as PackedScene
-	if packed == null:
+		services_path = "res://runtime/systems/%s/services.gd" % Catalog.services_for(index)
+		if DisplayServer.get_name() != "headless":
+			if is_instance_valid(old):
+				old.process_mode = Node.PROCESS_MODE_DISABLED
+				if _active >= 0 and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+					recapture = true
+					old.call("_release_mouse")
+			_loading = LevelLoading.new()
+			_loading.level_title = entry[0]
+			add_child(_loading)
+			await RenderingServer.frame_post_draw
+
+	var packed := await _load_scene(scene_path)
+	var next_services := load(services_path) as Script if not services_path.is_empty() else null
+	if packed == null or (index >= 0 and next_services == null):
+		_end_loading()
+		if is_instance_valid(old):
+			old.process_mode = old_mode
+			if recapture:
+				old.call("_capture_mouse")
 		_switch_failed(scene_path)
 		return
 
 	_close_pause()
-	var tree := get_tree()
-	var old := tree.current_scene
 	tree.current_scene = null
 	if is_instance_valid(old):
 		old.free()
@@ -299,12 +320,40 @@ func _switch(index: int) -> void:
 		_apply_level_options()
 	var current := packed.instantiate()
 	_update_save_status(progress.visit(index) if index >= 0 else progress.flush())
+	var current_mode := current.process_mode
+	if is_instance_valid(_loading):
+		current.process_mode = Node.PROCESS_MODE_DISABLED
 	tree.root.add_child(current)
 	tree.current_scene = current
 	if index < 0:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	tree.root.title = "TURN" if index < 0 else "TURN · " + String(Catalog.get_entry(index)[0])
+	if is_instance_valid(_loading):
+		await RenderingServer.frame_post_draw
+		_end_loading()
+		current.process_mode = current_mode
 	_changing = false
+
+
+func _load_scene(path: String) -> PackedScene:
+	if not is_instance_valid(_loading):
+		return load(path) as PackedScene
+	if ResourceLoader.load_threaded_request(path, "PackedScene") != OK:
+		return null
+	var status := ResourceLoader.load_threaded_get_status(path)
+	while status == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+		await get_tree().process_frame
+		status = ResourceLoader.load_threaded_get_status(path)
+	if status != ResourceLoader.THREAD_LOAD_LOADED:
+		return null
+	return ResourceLoader.load_threaded_get(path) as PackedScene
+
+
+func _end_loading() -> void:
+	if is_instance_valid(_loading):
+		_loading.hide()
+		_loading.queue_free()
+		_loading = null
 
 
 func _switch_failed(path: String) -> void:

@@ -3,7 +3,7 @@ extends CanvasLayer
 const Style = preload("res://ui/turn_style.gd")
 const Catalog = preload("res://core/level_catalog.gd")
 const RETICLE_COLOR := Color(0.91, 0.97, 0.98, 0.68)
-const TRACK := Color("#192630")
+const TRACK := Color("#2b263a")
 
 var _canvas: Control
 var _font: Font
@@ -103,10 +103,10 @@ func flash_block() -> void:
 		_tutorial_left = 2.3
 
 func flash_parry() -> void:
-	_feedback("架住", Style.FOCUS)
+	_feedback("架住", Style.BATTLE_CUE)
 
 func flash_reflect() -> void:
-	_feedback("弹反", Style.FOCUS)
+	_feedback("弹反", Style.BATTLE_CUE)
 
 func flash_immune() -> void:
 	_feedback("虚化免伤", Style.PHASE)
@@ -254,7 +254,7 @@ func _draw_boss(size: Vector2) -> void:
 	var edge := center - width * 0.5
 	_meter(Rect2(edge, 62, width, 7), _boss_hp / _boss_max, Style.DANGER)
 	if not _phase.is_empty():
-		var tint := Style.PHASE if _phase_active else Style.FOCUS
+		var tint := Style.PHASE if _phase_active else Style.BATTLE_CUE
 		_meter(Rect2(edge, 76, width, 3), _phase_fill, tint)
 		_chip(_phase, Vector2(center, 99), 13, tint)
 
@@ -277,7 +277,12 @@ func _draw_edge(size: Vector2, direction: Vector2) -> void:
 func _chip(value: String, center: Vector2, font_size: int, color: Color) -> void:
 	var width := _font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 	var origin := Vector2(center.x - width * 0.5, center.y)
-	_canvas.draw_rect(Rect2(origin + Vector2(-9, -font_size), Vector2(width + 18, font_size + 9)), Color(Style.INK, 0.79 * color.a))
+	var top := origin + Vector2(-12, -font_size)
+	var bottom := origin + Vector2(width + 12, 9)
+	_canvas.draw_colored_polygon(PackedVector2Array([
+		top + Vector2(6, 0), Vector2(bottom.x, top.y),
+		bottom - Vector2(6, 0), Vector2(top.x, bottom.y),
+	]), Color(Style.INK, 0.79 * color.a))
 	_text(value, origin, font_size, color)
 
 func _text(value: String, origin: Vector2, font_size: int, color: Color) -> void:

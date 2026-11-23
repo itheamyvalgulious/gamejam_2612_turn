@@ -62,25 +62,14 @@ func _ready() -> void:
 
 func _add_background() -> void:
 	var scrim := ColorRect.new()
-	scrim.color = Color(0.007, 0.015, 0.025, 0.44)
+	scrim.color = Color("#120c264f")
 	scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	scrim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_root.add_child(scrim)
 
-	var gradient := Gradient.new()
-	gradient.offsets = PackedFloat32Array([0.0, 0.65, 1.0])
-	gradient.colors = PackedColorArray([
-		Color(0.023, 0.040, 0.057, 0.99),
-		Color(0.026, 0.046, 0.063, 0.98),
-		Color(0.026, 0.046, 0.063, 0.0),
-	])
-	var shade := GradientTexture2D.new()
-	shade.gradient = gradient
-	shade.fill_to = Vector2.RIGHT
-	var texture := TextureRect.new()
-	texture.texture = shade
-	texture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	texture.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var texture := Style.shade(
+		PackedColorArray([Color("#160f24fa"), Color("#191325f2"), Color("#26163700")]),
+		PackedFloat32Array([0.0, 0.61, 1.0]))
 	texture.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
 	texture.offset_right = PANEL_WIDTH + 168
 	_root.add_child(texture)
@@ -182,9 +171,15 @@ func _show_page() -> void:
 
 func _pause_actions() -> void:
 	_focus = _add_action(_body, "继续游戏", resume_requested.emit)
+	_focus.custom_minimum_size.y = 58
+	_focus.add_theme_stylebox_override("normal", Style.primary_surface())
+	_focus.add_theme_font_size_override("font_size", 22)
 	_add_action(_body, "重新开始本关", _request_transition.bind(false))
-	_add_action(_body, "设置", _open_settings)
-	_add_action(_body, "操作说明", _show.bind(Page.HELP))
+	var utilities := HBoxContainer.new()
+	utilities.add_theme_constant_override("separation", 11)
+	_body.add_child(utilities)
+	_add_action(utilities, "设置", _open_settings).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_add_action(utilities, "操作说明", _show.bind(Page.HELP)).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var gap := Control.new()
 	gap.custom_minimum_size.y = 9
 	_body.add_child(gap)
@@ -232,7 +227,7 @@ func _settings() -> void:
 		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if section == _section:
 			tab.add_theme_color_override("font_color", FOCUS)
-			tab.add_theme_stylebox_override("normal", Style.surface(Color("#102934"), FOCUS))
+			tab.add_theme_stylebox_override("normal", Style.active_surface())
 			_focus = tab
 	match _section:
 		Section.DISPLAY:
@@ -422,11 +417,8 @@ func _label(text: String, size: int, color := TEXT) -> Label:
 
 
 func _add_action(parent: Container, title: String, callback: Callable) -> Button:
-	var button := Button.new()
-	button.text = title
-	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	var button := Style.button(title, callback)
 	button.custom_minimum_size.y = 43
-	button.pressed.connect(callback)
 	parent.add_child(button)
 	return button
 

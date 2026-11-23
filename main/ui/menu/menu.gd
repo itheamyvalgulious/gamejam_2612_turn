@@ -2,7 +2,8 @@ extends Control
 
 const Catalog = preload("res://core/level_catalog.gd")
 const Style = preload("res://ui/turn_style.gd")
-const COVER = preload("res://assets/ui/backgrounds/neon_alley.webp")
+const Wordmark = preload("res://ui/menu/wordmark.gd")
+const COVER = preload("res://assets/ui/level_previews/rain_plaza.webp")
 
 var _page: Control
 var _status: Label
@@ -19,6 +20,21 @@ func _ready() -> void:
 	ThemeDB.fallback_font = theme.default_font
 	_selected = TurnSession.selected_level_index
 	_show_page()
+	_signal_startup_ready()
+
+
+func _signal_startup_ready() -> void:
+	var ready_file := OS.get_environment("TURN_STARTUP_READY_FILE")
+	if ready_file.is_empty():
+		return
+	OS.unset_environment("TURN_STARTUP_READY_FILE")
+	if DisplayServer.get_name() == "headless":
+		await get_tree().process_frame
+	else:
+		await RenderingServer.frame_post_draw
+	var file := FileAccess.open(ready_file, FileAccess.WRITE)
+	if file != null:
+		file.store_8(1)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _back != null and event.is_action_pressed("ui_cancel"):
@@ -42,49 +58,63 @@ func _show_page() -> void:
 
 func _show_home() -> void:
 	_add_backdrop(true)
-	var column := _inset(72, 80, 64, 54)
-	var title := Style.label("TURN", 133)
-	var display := FontVariation.new()
-	display.base_font = theme.default_font
-	display.variation_embolden = 1.7
-	display.spacing_glyph = -4
-	title.add_theme_font_override("font", display)
-	title.add_theme_color_override("font_shadow_color", Color(0.05, 0.33, 0.44, 0.55))
-	title.add_theme_constant_override("shadow_offset_y", 4)
-	column.add_child(title)
-
-	var divider := ColorRect.new()
-	divider.color = Style.FOCUS
-	divider.custom_minimum_size = Vector2(72, 2)
+	var column := _inset(79, 84, 58, 58)
+	column.add_child(Wordmark.new())
+	var divider := Style.shade(
+		PackedColorArray([Style.FOCUS, Color("#a671cc"), Color("#a671cc00")]),
+		PackedFloat32Array([0.0, 0.38, 1.0]))
+	divider.custom_minimum_size = Vector2(300, 2)
 	divider.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(divider)
+	var space := Control.new()
+	space.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	space.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(space)
 
-	var actions := VBoxContainer.new()
-	actions.custom_minimum_size.x = 278
+	var actions := Control.new()
+	actions.custom_minimum_size = Vector2(440, 232)
 	actions.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	actions.add_theme_constant_override("separation", 7)
 	column.add_child(actions)
 	var progress := TurnSession.progress
 	var checkpoint := progress.resume_index()
 	var level_select := Style.button("关卡选择", _go.bind(TurnSession.MenuPage.LEVELS))
 	var primary: Button
+	var checkpoint_text := ""
 	if progress.cleared_count() == Catalog.level_count():
-		actions.add_child(Style.label("全部关卡已通关", 16, Style.FOCUS))
 		primary = level_select
+		checkpoint_text = "全部关卡已通关"
 	else:
 		var caption := "继续游戏" if checkpoint >= 0 else "开始游戏"
 		primary = Style.button(caption, TurnSession.open_level.bind(maxi(checkpoint, 0)))
-		actions.add_child(primary)
 		if checkpoint >= 0:
-			actions.add_child(Style.label("存档 · %s" % Catalog.get_entry(checkpoint)[0], 16, Style.MUTED))
-	actions.add_child(level_select)
-	primary.add_theme_stylebox_override("normal", Style.surface(Color("#173540"), Style.FOCUS))
+			checkpoint_text = "存档 · %s" % Catalog.get_entry(checkpoint)[0]
+	_place_action(actions, primary, Rect2(0, 0, 359, 68))
+	if primary != level_select:
+		_place_action(actions, level_select, Rect2(28, 105, 203, 49))
+	primary.add_theme_font_size_override("font_size", 23)
+	primary.add_theme_stylebox_override("normal", Style.primary_surface())
+	if not checkpoint_text.is_empty():
+		var checkpoint_label := Style.label(checkpoint_text, 15, Style.MUTED)
+		checkpoint_label.position = Vector2(27, 73)
+		actions.add_child(checkpoint_label)
 	var settings := Style.button("设置", TurnSession.open_home_settings)
-	actions.add_child(settings)
-	actions.add_child(Style.button("退出游戏", get_tree().quit))
+	var exit := Style.button("退出游戏", get_tree().quit)
+	var settings_box := Rect2(244, 117, 130, 49) if primary != level_select else Rect2(28, 105, 154, 49)
+	_place_action(actions, settings, settings_box)
+	_place_action(actions, exit, Rect2(56, 174, 155, 47))
+	primary.focus_neighbor_bottom = primary.get_path_to(settings if primary == level_select else level_select)
+	if primary != level_select:
+		level_select.focus_neighbor_top = level_select.get_path_to(primary)
+		level_select.focus_neighbor_right = level_select.get_path_to(settings)
+		settings.focus_neighbor_left = settings.get_path_to(level_select)
+		level_select.focus_neighbor_bottom = level_select.get_path_to(exit)
 	_add_status(column)
 	primary.grab_focus()
+
+func _place_action(parent: Control, action: Button, bounds: Rect2) -> void:
+	action.position = bounds.position
+	action.size = bounds.size
+	parent.add_child(action)
 
 func _show_catalog() -> void:
 	_add_backdrop(false)
@@ -133,7 +163,7 @@ func _show_catalog() -> void:
 	_picture = _make_picture(COVER)
 	image_frame.add_child(_picture)
 	var fade := Style.shade(
-		PackedColorArray([Color(0, 0, 0, 0), Color(0.015, 0.04, 0.06, 0.8)]),
+		PackedColorArray([Color("#15102100"), Color("#151021ed")]),
 		PackedFloat32Array([0.5, 1.0]), Vector2.DOWN)
 	fade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	image_frame.add_child(fade)
@@ -149,7 +179,7 @@ func _show_catalog() -> void:
 	_enter = Style.button("进入关卡", _enter_level)
 	_enter.custom_minimum_size.x = 176
 	_enter.size_flags_horizontal = Control.SIZE_SHRINK_END
-	_enter.add_theme_stylebox_override("normal", Style.surface(Color("#173540"), Style.FOCUS))
+	_enter.add_theme_stylebox_override("normal", Style.primary_surface())
 	preview.add_child(_enter)
 	for row in _rows:
 		row.focus_neighbor_right = row.get_path_to(_enter)
@@ -166,7 +196,7 @@ func _select(index: int) -> void:
 	_picture.texture = load("res://assets/ui/level_previews/%s.webp" % Catalog.level_id(index))
 	_enter.focus_neighbor_left = _enter.get_path_to(_rows[index])
 	for i in _rows.size():
-		var style := Style.surface(Color("#142b35"), Style.FOCUS) if i == index else Style.surface(Color(Style.INK, 0.55))
+		var style := Style.active_surface() if i == index else Style.surface()
 		_rows[i].add_theme_stylebox_override("normal", style)
 
 func _enter_level() -> void:
@@ -176,14 +206,32 @@ func _add_backdrop(home: bool) -> void:
 	var picture := _make_picture(COVER)
 	_page.add_child(picture)
 	var colors := PackedColorArray([
-		Color(0.022, 0.036, 0.054, 1.0),
-		Color(0.022, 0.036, 0.054, 0.91 if home else 0.95),
-		Color(0.022, 0.036, 0.054, 0.14 if home else 0.89),
-		Color(0.022, 0.036, 0.054, 0.05 if home else 0.83),
+		Color("#221231d9") if home else Color("#13101fec"),
+		Color("#28193991") if home else Color("#171122e8"),
+		Color("#21193612") if home else Color("#171122d9"),
+		Color("#130f270f") if home else Color("#151023ce"),
 	])
 	var overlay := Style.shade(colors, PackedFloat32Array([0.0, 0.29, 0.64, 1.0]))
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_page.add_child(overlay)
+	if home:
+		var floor := Style.shade(
+			PackedColorArray([Color("#100d2200"), Color("#100d2299"), Color("#100d22ed")]),
+			PackedFloat32Array([0.37, 0.72, 1.0]), Vector2.DOWN)
+		floor.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_page.add_child(floor)
+		var edge_marks := Control.new()
+		edge_marks.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		edge_marks.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_page.add_child(edge_marks)
+		edge_marks.draw.connect(func() -> void:
+			edge_marks.draw_line(Vector2(79, 46), Vector2(92, 46), Color("#efa4e5aa"), 2.0)
+			edge_marks.draw_line(Vector2(99, 46), Vector2(133, 46), Color("#b88bd194"), 1.0)
+			var corner := edge_marks.size - Vector2(43, 38)
+			edge_marks.draw_polyline(PackedVector2Array([
+				corner - Vector2(87, 0), corner - Vector2(22, 0), corner - Vector2(0, 18),
+				corner - Vector2(0, 73),
+			]), Color("#b18cd18e"), 1.0, true))
 
 func _make_picture(texture: Texture2D) -> TextureRect:
 	var picture := TextureRect.new()

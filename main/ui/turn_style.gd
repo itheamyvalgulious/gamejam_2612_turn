@@ -1,35 +1,58 @@
 extends RefCounted
 
-const INK := Color("#0b141c")
-const TEXT := Color("#edf4f7")
-const MUTED := Color("#a9b9c4")
-const FOCUS := Color("#71e2de")
+const NeonPanel = preload("res://ui/neon_panel.gd")
+const INK := Color("#100e1d")
+const TEXT := Color("#f1effa")
+const MUTED := Color("#b9b5ce")
+const FOCUS := Color("#efa4e5")
+const BATTLE_CUE := Color("#71e2de")
 const BLOCKED := Color("#ffbd82")
 const DANGER := Color("#ec5364")
 const PHASE := Color("#b4a5ff")
 
 static func theme() -> Theme:
 	var skin := Theme.new()
-	skin.default_font = preload("res://runtime/fonts/act/ui_font.tres")
+	skin.default_font = load("res://runtime/fonts/act/ui_font.tres") as Font
 	skin.default_font_size = 18
-	for state in ["normal", "hover", "pressed", "focus"]:
-		var color_name := "font_color" if state == "normal" else "font_%s_color" % state
-		skin.set_color(color_name, "Button", TEXT if state == "normal" else FOCUS)
-	skin.set_stylebox("normal", "Button", surface(Color(INK, 0.55)))
-	skin.set_stylebox("hover", "Button", surface(Color("#132b34"), FOCUS))
-	skin.set_stylebox("pressed", "Button", surface(Color("#17353e"), FOCUS))
-	skin.set_stylebox("focus", "Button", surface(Color.TRANSPARENT, FOCUS))
+	for control in ["Button", "CheckButton"]:
+		skin.set_color("font_color", control, TEXT)
+		skin.set_color("font_hover_color", control, TEXT)
+		skin.set_color("font_pressed_color", control, TEXT)
+		skin.set_color("font_focus_color", control, TEXT)
+		skin.set_color("font_disabled_color", control, Color("#858195"))
+		skin.set_stylebox("normal", control, surface())
+		skin.set_stylebox("hover", control, surface(Color("#392747"), FOCUS, FOCUS))
+		skin.set_stylebox("pressed", control, surface(Color("#281834"), Color("#ca78c0"), FOCUS))
+		skin.set_stylebox("focus", control, surface(Color.TRANSPARENT, Color("#c47ec4")))
+		skin.set_stylebox("disabled", control, surface(Color("#161421"), Color("#444257")))
+	skin.set_stylebox("slider", "HSlider", _slider_track(Color("#36304b")))
+	skin.set_stylebox("grabber_area", "HSlider", _slider_track(Color("#9d5ca8")))
+	skin.set_stylebox("grabber_area_highlight", "HSlider", _slider_track(FOCUS))
 	return skin
 
-static func surface(fill: Color, accent := Color.TRANSPARENT) -> StyleBoxFlat:
-	var box := StyleBoxFlat.new()
-	box.bg_color = fill
-	box.border_color = accent
-	box.border_width_left = 0 if accent.a == 0.0 else 3
-	box.content_margin_left = 16
-	box.content_margin_right = 16
+static func surface(fill := Color("#171727dc"), rim := Color("#756984ab"),
+		signal_color := Color.TRANSPARENT) -> StyleBox:
+	var box := NeonPanel.new()
+	box.fill = fill
+	box.rim = rim
+	box.signal_color = signal_color
+	box.content_margin_left = 26
+	box.content_margin_right = 23
 	box.content_margin_top = 6
 	box.content_margin_bottom = 6
+	return box
+
+static func active_surface() -> StyleBox:
+	return surface(Color("#30213adb"), Color("#be7cb9"), Color("#d082c4"))
+
+static func primary_surface() -> StyleBox:
+	return surface(Color("#251b32eb"), Color("#9978a7"))
+
+static func _slider_track(fill: Color) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = fill
+	box.content_margin_top = 2
+	box.content_margin_bottom = 2
 	box.set_corner_radius_all(2)
 	return box
 
