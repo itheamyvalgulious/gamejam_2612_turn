@@ -7,10 +7,13 @@ render_mode unshaded, cull_disabled, depth_draw_never, blend_add, fog_disabled, 
 uniform vec2 screen_size = vec2(1280.0, 720.0);
 uniform float fade : hint_range(0.0, 1.5) = 1.0;
 uniform float intensity : hint_range(0.0, 3.0) = 1.0;
+uniform float atten_ref_dist : hint_range(0.5, 20.0) = 3.0;
+uniform float atten_soft_dist : hint_range(0.5, 20.0) = 5.5;
 
 varying vec2 v_uv;
 varying vec4 v_params;
 varying float v_fade;
+varying float v_dist_atten;
 
 void vertex() {
 	vec3 other = CUSTOM0.xyz;
@@ -39,10 +42,17 @@ void vertex() {
 	}
 	vec2 perp = vec2(-dir.y, dir.x);
 
+	float model_scale = max(length(MODEL_MATRIX[1].xyz), 0.0001);
+	float dist = length(va.xyz) / model_scale;
+	float atten_num = atten_ref_dist * atten_ref_dist + atten_soft_dist * atten_soft_dist;
+	v_dist_atten = min(1.25, atten_num / (dist * dist + atten_soft_dist * atten_soft_dist));
+
 	vec4 clip = PROJECTION_MATRIX * va;
-	float half_px = half_world * PROJECTION_MATRIX[1][1] / max(clip.w, 0.001) * screen_size.y * 0.5;
 	float cap = mix(9.0, 11.0, clamp(CUSTOM1.w, 0.0, 1.0));
-	half_px = clamp(half_px, 4.4, cap);
+	float min_half_px = 0.9;
+	float ref_persp = sqrt(max(4.4 * 4.4 - min_half_px * min_half_px, 0.0));
+	float persp_px = ref_persp * (atten_ref_dist / max(dist, 0.25));
+	float half_px = min(cap, sqrt(min_half_px * min_half_px + persp_px * persp_px));
 
 	// Expand perpendicular to the projected segment, then slightly along it
 	// so neighbouring segments overlap and leave no dark cracks at the joints.
@@ -73,7 +83,7 @@ void fragment() {
 	hot = mix(hot, vec3(3.05, 1.20, 0.16), leader * 0.55);     // white-hot orange core
 
 	vec3 col = gold * halo * 1.80 + hot * core;
-	ALBEDO = col;
+	ALBEDO = col * v_dist_atten;
 	float a = (halo * 0.30 + core * 0.78) * energy;
 	ALPHA = clamp(a, 0.0, 1.0);
 }
