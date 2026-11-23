@@ -111,6 +111,8 @@ def content_path(episode, relative):
 def relocate_resources(text, episode, relative, destinations):
     def relocate(match):
         original = match[1]
+        if original == "src/game/hud.gd" and relative.as_posix() == "src/main.gd":
+            return "res://ui/hud/combat_hud.gd"
         if original.startswith("team/"):
             design, path = original.removeprefix("team/").split("/", 1)
             return "res://runtime/" + design_path(design, path).as_posix()
@@ -124,6 +126,83 @@ def relocate_resources(text, episode, relative, destinations):
         raise ValueError(f"Unresolved resource in {episode}/{relative}: {original}")
 
     return RESOURCE_PATH.sub(relocate, text)
+
+
+def campaign_pause(text, binds):
+    # The integrated game handles pause before sending input to the level.
+    text = text.replace(
+        '\telif event is InputEventKey and event.pressed and not event.echo:\n'
+        '\t\tif event.keycode == KEY_ESCAPE:\n\t\t\t_open_pause()\n', "",
+    )
+    text = text.replace(f'\t\tif {binds}.just("pause"):\n\t\t\t_open_pause()\n', "")
+    text, count = re.subn(r"(?m)^func _open_pause\(\) -> void:\n(?:\t[^\n]*\n)+\n\n", "", text)
+    assert count == 1 and "_open_pause()" not in text
+    if "func _capture_mouse()" in text:
+        return text
+
+    # Keep the module's hint and capture flag identical in both click and resume paths.
+    capture = re.search(
+        r'(?m)^\t\t\tInput.mouse_mode = Input.MOUSE_MODE_CAPTURED\n'
+        r'\t\t\t_owns_mouse_capture = true\n\t\t\thud.set_hint\([^\n]*\)\n',
+        text,
+    )
+    assert capture is not None
+    capture_body = capture[0].replace("\t\t\t", "\t")
+    text = text.replace(capture[0], "\t\t\t_capture_mouse()\n", 1)
+    return text.replace(
+        "func _menus_open() -> bool:",
+        "func _capture_mouse() -> void:\n"
+        "\tif not _mouse_capture_enabled or not get_window().has_focus():\n\t\treturn\n"
+        + capture_body + "\n\nfunc _menus_open() -> bool:",
+        1,
+    )
+
+
+def campaign_hud(text, episode, binds):
+    text = re.sub(r'(?m)^\thud\.set_hint\("左键攻击[^\n]*\)\n', '', text)
+    text = re.sub(r'(?m)^(\s*)hud\.set_hint\("左键攻击[^\n]*\)', r'\1hud.set_hint("")', text)
+    text = text.replace('点击游戏画面控制视角 · Esc 暂停', '点击画面控制视角')
+    text = text.replace('点击游戏画面继续 · Esc 暂停', '点击画面控制视角')
+    text = text.replace('hud.set_hint(_level_hint)', 'hud.set_hint("")')
+    text, count = re.subn(
+        r'(?m)^\tlevel\.on_level_changed = func\([^\n]*\) -> void:\n'
+        r'(?:\t{2}[^\n]*\n)*?\t\thud\.set_level\([^\n]*\)\n',
+        '\tlevel.on_level_changed = func(_i: int, _name: String, _hint: String) -> void:\n'
+        '\t\thud.set_level(TurnSession.active_level_index())\n',
+        text, count=1,
+    )
+    assert count == 1, episode
+    text = re.sub(r'(?m)^\t+hud\.show_banner\((?:"第 %d 关"|"CARGO HOLD 02"|level\.arena\[)[^\n]*\n', '', text)
+    text = text.replace('\n\t\telse:\n\t\thud.clear_death()', '\n\t\thud.clear_death()')
+    text = text.replace('hud.show_banner("第一人称视野黑幕", "你已经就在第一人称画面里 —— 按 V 切第三人称再看", 1.8)',
+                        'hud.show_banner("视野遮罩仅用于第三人称", "", 1.4)')
+    text = re.sub(r'(?m)^\telif level\.state == "finished" and _last_state != "finished":\n\t\thud\.show_banner\([^\n]*\)\n', '', text)
+    clear = '\telif level.state == "clear" and _last_state != "clear":\n'
+    assert clear in text, episode
+    text = text.replace(clear, clear + '\t\tTurnSession.record_level_clear()\n', 1)
+    text = re.sub(r'(?m)^var _block_banner_cd := [^\n]*\n|\t_block_banner_cd = [^\n]*\n', '', text)
+    text, count = re.subn(r'(?ms)^\t\t\tif _block_banner_cd <= 0.0:\n.*?(?=^\t\t"\w)',
+                          '', text, count=1)
+    assert count == 1, episode
+    text, count = re.subn(r'(?ms)^\tvar blocking := 0\n.*?^\t\thud\.set_state\(""\)\n',
+                          '\thud.set_state("")\n', text, count=1)
+    assert count == 1, episode
+    text = text.replace('hud.set_markers(level.build_markers())',
+                        'hud.update_threats(level.enemies, proj.items, cam.camera, player)')
+    if episode == "room_shared":
+        marker = '\thud.update_threats(level.enemies, proj.items, cam.camera, player)\n'
+        text = text.replace(marker, marker + f'\thud.set_room_key({binds}.event_text("next_level"))\n', 1)
+    text = text.replace('hud.set_state("弹反成功！")', 'hud.flash_reflect()')
+    text = text.replace('\n\t\t"counter":\n\t\t\thud.set_state("它补射了一箭拦截！")', '')
+    text = text.replace('\t\t"phase_immune":\n', '\t\t"phase_immune":\n\t\t\thud.flash_immune()\n')
+    return text
+
+
+def manual_retry(text, params):
+    delay = f'{params}.getf("rules.death_delay")'
+    text = re.sub(r'\telif state == "dead" and state_t > ' + re.escape(delay) + r':\n\t\tstart_level\(0\)\n', '', text)
+    return re.sub(r'(\t\t"dead":\n)\t\t\tif state_t > ' + re.escape(delay) + r':\n\t\t\t\tstart_level\([^\n]*\)\n',
+                  r'\1\t\t\tpass\n', text)
 
 
 def scene_text(text, episode, names, autoloads, relative, destinations):
@@ -153,14 +232,16 @@ def scene_text(text, episode, names, autoloads, relative, destinations):
     save_id = {"shadow_chamber": "fold", "room_shared": "lab"}.get(episode, episode)
     text = text.replace("user://actdemo_params.json", f"user://turn_{save_id}_params.json")
     if autoloads and relative.as_posix() == "src/main.gd":
-        text = text.replace("hud.set_level(i,", "hud.set_level(TurnSession.active_level_index(),")
-        text = text.replace('"第 %d 关" % (i + 1)', '"第 %d 关" % (TurnSession.active_level_index() + 1)')
+        text = campaign_pause(text, singleton_names["B"])
+        text = campaign_hud(text, episode, singleton_names["B"])
         text, count = re.subn(
             r"(?m)^func next_level\(\) -> void:\n(?:\t[^\n]*(?:\n|$))+",
             "func next_level() -> void:\n\tTurnSession.advance_level()\n",
             text, count=1,
         )
         assert count == 1, (episode, relative)
+    if relative.name == "level.gd":
+        text = manual_retry(text, singleton_names["P"])
     if episode == "act" and relative.as_posix() == "src/game/level.gd":
         local_transition = (
             "\t\t\t\tif index + 1 < LEVELS.size():\n"

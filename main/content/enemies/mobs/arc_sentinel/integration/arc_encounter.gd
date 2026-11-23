@@ -152,3 +152,8 @@ func _blade_transform(base: Vector3, tip: Vector3) -> Transform3D:
 	var reference := Vector3.RIGHT if absf(axis.dot(Vector3.UP)) > 0.97 else Vector3.UP
 	var right := axis.cross(reference).normalized()
 	return Transform3D(Basis(right, axis, right.cross(axis)), base)
+
+
+func hud_alert(target: PlayerUnit) -> bool:
+	return is_attacking and attack_elapsed >= attack_hit_from - 0.26 and attack_elapsed <= attack_hit_to \
+		and ground_position().distance_squared_to(target.rig.global_position) < 4.25 * 4.25

@@ -92,3 +92,10 @@ func step(dt: float, ctx: Dictionary) -> void:
 				projectiles.spawn_shard(origin, (aim - origin).normalized(), P.getf("archer.arrow_speed") * 0.7, P.getf("archer.arrow_damage"))
 				Snd.play_at("swing_light", origin, {"gain": 0.44})
 	rig._process(dt)
+
+
+func hud_alert(target: PlayerUnit) -> bool:
+	if not _shot_pending or rig.current_anim != "attack":
+		return false
+	var aim: Vector3 = target.rig.global_position + Vector3.UP * 1.8
+	return float(rig._attack_moments()[2]) - rig.anim_time() <= 0.28 and level.melee_clear(center(), aim)

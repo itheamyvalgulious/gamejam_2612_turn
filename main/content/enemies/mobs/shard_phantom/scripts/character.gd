@@ -115,7 +115,9 @@ func _ready() -> void:
 	_build_rig_and_field()
 	_build_fx()
 	_build_shurikens()
-	_build_overlay()
+	if not encounter_projectile:
+		_build_overlay()
+	set_process_unhandled_input(not encounter_projectile)
 	_apply_anim_pose(0.0)
 	rig.set_frame_visibility(P["frame_visibility"])
 	set_process(true)

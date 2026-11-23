@@ -1,28 +1,29 @@
 extends Control
 
 const Catalog = preload("res://core/level_catalog.gd")
+const Style = preload("res://ui/turn_style.gd")
 const COVER = preload("res://assets/ui/backgrounds/neon_alley.webp")
-const ACCENT := Color("#71f2ea")
-const INK := Color("#08121d")
-const WHITE := Color("#effdff")
 
 var _page: Control
-var _column: VBoxContainer
 var _status: Label
 var _back: Button
-
+var _picture: TextureRect
+var _title: Label
+var _description: Label
+var _enter: Button
+var _rows: Array[Button] = []
+var _selected := 0
 
 func _ready() -> void:
-	theme = _menu_theme()
+	theme = Style.theme()
 	ThemeDB.fallback_font = theme.default_font
+	_selected = TurnSession.selected_level_index
 	_show_page()
-
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _back != null and event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
 		_back.pressed.emit()
-
 
 func _show_page() -> void:
 	if is_instance_valid(_page):
@@ -33,85 +34,167 @@ func _show_page() -> void:
 	add_child(_page)
 	_back = null
 	_status = null
-	var at_home := TurnSession.menu_page == TurnSession.MenuPage.HOME
-	_add_backdrop(at_home)
-	if at_home:
+	_rows.clear()
+	if TurnSession.menu_page == TurnSession.MenuPage.HOME:
 		_show_home()
 	else:
 		_show_catalog()
 
-
-func _add_backdrop(at_home: bool) -> void:
-	var picture := _picture(COVER)
-	picture.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_page.add_child(picture)
-	var wash := Gradient.new()
-	wash.colors = PackedColorArray([
-		Color(0.018, 0.036, 0.06, 0.99),
-		Color(0.018, 0.036, 0.06, 0.82 if at_home else 0.95),
-		Color(0.018, 0.036, 0.06, 0.08 if at_home else 0.82),
-		Color(0.018, 0.036, 0.06, 0.13 if at_home else 0.90),
-	])
-	wash.offsets = PackedFloat32Array([0.0, 0.31, 0.79, 1.0])
-	var texture := GradientTexture2D.new()
-	texture.gradient = wash
-	texture.fill_to = Vector2.RIGHT
-	var shadow := _picture(texture)
-	shadow.stretch_mode = TextureRect.STRETCH_SCALE
-	shadow.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_page.add_child(shadow)
-
-
 func _show_home() -> void:
-	_frame(63, 73, 63, 62)
-	var logo := _label("TURN", 116)
-	var display_font := FontVariation.new()
-	display_font.base_font = theme.default_font
-	display_font.variation_embolden = 1.2
-	logo.add_theme_font_override("font", display_font)
-	logo.add_theme_color_override("font_shadow_color", Color(0.05, 0.6, 0.65, 0.35))
-	logo.add_theme_constant_override("shadow_offset_y", 4)
-	logo.add_theme_constant_override("shadow_offset_x", 3)
-	_column.add_child(logo)
-	var space := Control.new()
-	space.custom_minimum_size.y = 18
-	_column.add_child(space)
+	_add_backdrop(true)
+	var column := _inset(72, 80, 64, 54)
+	var title := Style.label("TURN", 133)
+	var display := FontVariation.new()
+	display.base_font = theme.default_font
+	display.variation_embolden = 1.7
+	display.spacing_glyph = -4
+	title.add_theme_font_override("font", display)
+	title.add_theme_color_override("font_shadow_color", Color(0.05, 0.33, 0.44, 0.55))
+	title.add_theme_constant_override("shadow_offset_y", 4)
+	column.add_child(title)
+
+	var divider := ColorRect.new()
+	divider.color = Style.FOCUS
+	divider.custom_minimum_size = Vector2(72, 2)
+	divider.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(divider)
 
 	var actions := VBoxContainer.new()
-	actions.custom_minimum_size.x = 252
+	actions.custom_minimum_size.x = 278
 	actions.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	actions.add_theme_constant_override("separation", 10)
-	_column.add_child(actions)
-	var start := _button("开始游戏", TurnSession.open_level.bind(0), true)
-	actions.add_child(start)
-	actions.add_child(_button("关卡选择", _go.bind(TurnSession.MenuPage.LEVELS)))
-	actions.add_child(_button("退出游戏", get_tree().quit))
-	_column.add_child(_label("F11 全屏 / 窗口", 15, Color("#a9becb")))
-	start.grab_focus()
-
+	actions.add_theme_constant_override("separation", 7)
+	column.add_child(actions)
+	var progress := TurnSession.progress
+	var checkpoint := progress.resume_index()
+	var level_select := Style.button("关卡选择", _go.bind(TurnSession.MenuPage.LEVELS))
+	var primary: Button
+	if progress.cleared_count() == Catalog.level_count():
+		actions.add_child(Style.label("全部关卡已通关", 16, Style.FOCUS))
+		primary = level_select
+	else:
+		var caption := "继续游戏" if checkpoint >= 0 else "开始游戏"
+		primary = Style.button(caption, TurnSession.open_level.bind(maxi(checkpoint, 0)))
+		actions.add_child(primary)
+		if checkpoint >= 0:
+			actions.add_child(Style.label("存档 · %s" % Catalog.get_entry(checkpoint)[0], 16, Style.MUTED))
+	actions.add_child(level_select)
+	primary.add_theme_stylebox_override("normal", Style.surface(Color("#173540"), Style.FOCUS))
+	var settings := Style.button("设置", TurnSession.open_home_settings)
+	actions.add_child(settings)
+	actions.add_child(Style.button("退出游戏", get_tree().quit))
+	_add_status(column)
+	primary.grab_focus()
 
 func _show_catalog() -> void:
-	_frame(48, 29, 48, 29)
-	_header("关卡选择", "返回主菜单", _go.bind(TurnSession.MenuPage.HOME))
+	_add_backdrop(false)
+	var column := _inset(54, 42, 54, 38)
+	var header := HBoxContainer.new()
+	var heading := Style.label("关卡选择", 42)
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(heading)
+	_back = Style.button("返回主菜单", _go.bind(TurnSession.MenuPage.HOME))
+	header.add_child(_back)
+	column.add_child(header)
+
+	var body := HBoxContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", 24)
+	column.add_child(body)
 
 	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size.x = 270
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.follow_focus = true
-	_column.add_child(scroll)
-	var grid := GridContainer.new()
-	grid.columns = 3
-	grid.add_theme_constant_override("h_separation", 14)
-	grid.add_theme_constant_override("v_separation", 12)
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(grid)
-
+	body.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 5)
+	scroll.add_child(list)
 	for index in Catalog.level_count():
-		grid.add_child(_card(index, TurnSession.open_level.bind(index)))
-	grid.get_child(0).grab_focus()
+		var caption := "%02d      %s" % [index + 1, Catalog.get_entry(index)[0]]
+		if TurnSession.progress.is_cleared(index):
+			caption += "  ·  已通关"
+		var row := Style.button(caption)
+		row.pressed.connect(row.grab_focus)
+		row.focus_entered.connect(_select.bind(index))
+		list.add_child(row)
+		_rows.append(row)
 
+	var preview := VBoxContainer.new()
+	preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	preview.add_theme_constant_override("separation", 9)
+	body.add_child(preview)
+	var image_frame := Control.new()
+	image_frame.clip_contents = true
+	image_frame.custom_minimum_size.y = 240
+	image_frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	preview.add_child(image_frame)
+	_picture = _make_picture(COVER)
+	image_frame.add_child(_picture)
+	var fade := Style.shade(
+		PackedColorArray([Color(0, 0, 0, 0), Color(0.015, 0.04, 0.06, 0.8)]),
+		PackedFloat32Array([0.5, 1.0]), Vector2.DOWN)
+	fade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	image_frame.add_child(fade)
+	_title = Style.label("", 38)
+	_title.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	_title.offset_left = 22
+	_title.offset_top = -60
+	image_frame.add_child(_title)
+	_description = Style.label("", 19, Style.MUTED)
+	_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_description.custom_minimum_size.y = 42
+	preview.add_child(_description)
+	_enter = Style.button("进入关卡", _enter_level)
+	_enter.custom_minimum_size.x = 176
+	_enter.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_enter.add_theme_stylebox_override("normal", Style.surface(Color("#173540"), Style.FOCUS))
+	preview.add_child(_enter)
+	for row in _rows:
+		row.focus_neighbor_right = row.get_path_to(_enter)
+	_add_status(column)
+	_select(_selected)
+	_rows[_selected].grab_focus()
 
-func _frame(left: int, top: int, right: int, bottom: int) -> void:
+func _select(index: int) -> void:
+	var entry := Catalog.get_entry(index)
+	_selected = index
+	TurnSession.selected_level_index = index
+	_title.text = entry[0]
+	_description.text = Catalog.play_hint(index)
+	_picture.texture = load("res://assets/ui/level_previews/%s.webp" % Catalog.level_id(index))
+	_enter.focus_neighbor_left = _enter.get_path_to(_rows[index])
+	for i in _rows.size():
+		var style := Style.surface(Color("#142b35"), Style.FOCUS) if i == index else Style.surface(Color(Style.INK, 0.55))
+		_rows[i].add_theme_stylebox_override("normal", style)
+
+func _enter_level() -> void:
+	TurnSession.open_level(_selected)
+
+func _add_backdrop(home: bool) -> void:
+	var picture := _make_picture(COVER)
+	_page.add_child(picture)
+	var colors := PackedColorArray([
+		Color(0.022, 0.036, 0.054, 1.0),
+		Color(0.022, 0.036, 0.054, 0.91 if home else 0.95),
+		Color(0.022, 0.036, 0.054, 0.14 if home else 0.89),
+		Color(0.022, 0.036, 0.054, 0.05 if home else 0.83),
+	])
+	var overlay := Style.shade(colors, PackedFloat32Array([0.0, 0.29, 0.64, 1.0]))
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_page.add_child(overlay)
+
+func _make_picture(texture: Texture2D) -> TextureRect:
+	var picture := TextureRect.new()
+	picture.texture = texture
+	picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	picture.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	return picture
+
+func _inset(left: int, top: int, right: int, bottom: int) -> VBoxContainer:
 	var inset := MarginContainer.new()
 	inset.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	inset.add_theme_constant_override("margin_left", left)
@@ -119,143 +202,22 @@ func _frame(left: int, top: int, right: int, bottom: int) -> void:
 	inset.add_theme_constant_override("margin_right", right)
 	inset.add_theme_constant_override("margin_bottom", bottom)
 	_page.add_child(inset)
-	_column = VBoxContainer.new()
-	_column.add_theme_constant_override("separation", 14)
-	inset.add_child(_column)
-
-
-func _header(title: String, back: String, action: Callable) -> void:
-	var row := HBoxContainer.new()
-	_column.add_child(row)
-	var heading := _label(title, 38)
-	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(heading)
-	_back = _button(back, action, true)
-	_back.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(_back)
-
-
-func _card(index: int, action: Callable) -> Button:
-	var entry := Catalog.get_entry(index)
-	var card := Button.new()
-	card.text = entry[0]
-	card.add_theme_color_override("font_color", Color.TRANSPARENT)
-	card.add_theme_color_override("font_hover_color", Color.TRANSPARENT)
-	card.add_theme_color_override("font_focus_color", Color.TRANSPARENT)
-	card.add_theme_color_override("font_pressed_color", Color.TRANSPARENT)
-	card.custom_minimum_size = Vector2(170, 150)
-	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	card.clip_contents = true
-	card.tooltip_text = entry[1]
-	card.pressed.connect(action)
-	var picture := _picture(_art(entry[5]))
-	picture.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	picture.offset_left = 1
-	picture.offset_right = -1
-	picture.offset_top = 1
-	picture.offset_bottom = -1
-	card.add_child(picture)
-	var caption := ColorRect.new()
-	caption.color = Color(0.018, 0.034, 0.052, 0.94)
-	caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	caption.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	caption.offset_top = -40
-	card.add_child(caption)
-	var title := _label(entry[0], 20)
-	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	title.position = Vector2(13, 4)
-	caption.add_child(title)
-	var outline := Panel.new()
-	outline.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	outline.add_theme_stylebox_override("panel", _surface(Color.TRANSPARENT, ACCENT))
-	outline.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	outline.hide()
-	card.add_child(outline)
-	var highlight := func() -> void:
-		outline.show()
-	var clear := func() -> void:
-		outline.visible = card.has_focus() or card.get_global_rect().has_point(card.get_global_mouse_position())
-	card.mouse_entered.connect(highlight)
-	card.mouse_exited.connect(clear)
-	card.focus_entered.connect(highlight)
-	card.focus_exited.connect(clear)
-	return card
-
-
-func _picture(texture: Texture2D) -> TextureRect:
-	var picture := TextureRect.new()
-	picture.texture = texture
-	picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	return picture
-
-
-func _art(image_name: String) -> Texture2D:
-	var path := "res://assets/ui/level_previews/" + image_name + ".webp"
-	return load(path) as Texture2D if ResourceLoader.exists(path) else COVER
-
-
-func _label(content: String, size: int, color := WHITE) -> Label:
-	var label := Label.new()
-	label.text = content
-	label.add_theme_font_size_override("font_size", size)
-	label.add_theme_color_override("font_color", color)
-	return label
-
-
-func _button(title: String, action: Callable, primary := false) -> Button:
-	var button := Button.new()
-	button.text = title
-	button.custom_minimum_size.y = 46
-	button.pressed.connect(action)
-	if primary:
-		for style: String in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
-			button.add_theme_color_override(style, INK)
-		button.add_theme_stylebox_override("normal", _surface(ACCENT, ACCENT))
-		button.add_theme_stylebox_override("hover", _surface(Color("#d5fffc"), ACCENT))
-		button.add_theme_stylebox_override("pressed", _surface(Color("#43bfb7"), ACCENT))
-	return button
-
-
-func _surface(fill: Color, border: Color) -> StyleBoxFlat:
-	var box := StyleBoxFlat.new()
-	box.bg_color = fill
-	box.border_color = border
-	box.set_border_width_all(1)
-	box.set_corner_radius_all(4)
-	box.content_margin_left = 16
-	box.content_margin_right = 16
-	box.content_margin_top = 4
-	box.content_margin_bottom = 4
-	return box
-
-
-func _menu_theme() -> Theme:
-	var skin := Theme.new()
-	skin.default_font = preload("res://runtime/fonts/act/ui_font.tres")
-	skin.default_font_size = 19
-	skin.set_color("font_color", "Button", Color("#e6f1fa"))
-	skin.set_color("font_hover_color", "Button", Color.WHITE)
-	skin.set_color("font_focus_color", "Button", Color.WHITE)
-	skin.set_stylebox("normal", "Button", _surface(Color(0.04, 0.08, 0.12, 0.76), Color("#365361")))
-	skin.set_stylebox("hover", "Button", _surface(Color("#193641"), ACCENT))
-	skin.set_stylebox("pressed", "Button", _surface(Color("#102a34"), ACCENT))
-	skin.set_stylebox("focus", "Button", _surface(Color.TRANSPARENT, Color("#efffff")))
-	return skin
-
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 20)
+	inset.add_child(column)
+	return column
 
 func _go(page: int) -> void:
 	TurnSession.menu_page = page
 	_show_page()
 
-
-func _show_status(message: String) -> void:
-	if _status == null:
-		_status = _label("", 16, ACCENT)
-		_column.add_child(_status)
-	_status.text = message
-
+func _add_status(parent: Container) -> void:
+	_status = Style.label("", 16, Style.BLOCKED)
+	_status.visible = TurnSession.progress_save_failed
+	if _status.visible:
+		_status.text = "关卡进度暂未保存，请检查存储空间后重试。"
+	parent.add_child(_status)
 
 func show_load_error() -> void:
-	_show_status("载入失败。请重新选择一次。")
+	_status.text = "载入失败，请重试。"
+	_status.show()

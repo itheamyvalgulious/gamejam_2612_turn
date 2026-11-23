@@ -196,3 +196,7 @@ func _trace_arena(start: Vector3, end: Vector3) -> Dictionary:
 		if begin <= finish and finish > 0.0:
 			first = minf(first, begin)
 	return {"position": start.lerp(end, first)} if first < 0.99999 else {}
+
+
+func hud_alert(target: PlayerUnit) -> bool:
+	return not controller.melee_forecast(target.capsule(), 0.12, 0.42).is_empty()

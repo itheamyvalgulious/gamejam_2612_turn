@@ -2,18 +2,70 @@ extends Node
 
 const MENU := "res://ui/menu/menu.tscn"
 const Catalog = preload("res://core/level_catalog.gd")
+const LevelProgress = preload("res://core/level_progress.gd")
+const PauseMenu = preload("res://ui/pause/pause_menu.gd")
+const OPTIONS_PATH := "user://turn_options.cfg"
 
 enum MenuPage { HOME, LEVELS }
 
 var menu_page := MenuPage.HOME
+var selected_level_index := 0
+var progress := LevelProgress.new()
+var progress_save_failed := false
 var _active := -1
 var _changing := false
 var _services: Script
 var _arguments := PackedStringArray()
+var _options := ConfigFile.new()
+var _pause_menu: PauseMenu
+var _hud_was_visible := true
+var _resume_mouse := false
+var _home_settings: PauseMenu
+var _home_focus: Control
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	progress.load_progress()
+	selected_level_index = maxi(0, progress.resume_index())
+	if _options.load(OPTIONS_PATH) == OK and _options.has_section_key("game", "display.fullscreen"):
+		_set_fullscreen(bool(_options.get_value("game", "display.fullscreen")))
+	get_window().focus_exited.connect(_pause_on_focus_loss)
+
+
+func open_home_settings() -> void:
+	if _home_settings != null or _active >= 0 or _changing:
+		return
+	_home_focus = get_viewport().gui_get_focus_owner()
+	var panel := PauseMenu.new()
+	panel.home_settings = true
+	panel.options = {}
+	if _options.has_section("game"):
+		for key in _options.get_section_keys("game"):
+			panel.options[key] = _options.get_value("game", key)
+	panel.binds = preload("res://runtime/systems/act/core/binds.gd").new()
+	panel.add_child(panel.binds)
+	panel.resume_requested.connect(_close_home_settings)
+	panel.setting_changed.connect(_set_option)
+	_home_settings = panel
+	add_child(panel)
+
+
+func _close_home_settings() -> void:
+	_home_settings.hide()
+	_home_settings.queue_free()
+	_home_settings = null
+	InputMap.load_from_project_settings()
+	if is_instance_valid(_home_focus):
+		_home_focus.grab_focus()
+
+
+func binding_label(action: String) -> String:
+	return _services.get("b").event_text(action) if _services != null else "—"
 
 
 func open_level(index: int) -> void:
-	if _changing or index < 0 or index >= Catalog.level_count():
+	if _home_settings != null or _changing or index < 0 or index >= Catalog.level_count():
 		return
 	_changing = true
 	_switch.call_deferred(index)
@@ -37,29 +89,168 @@ func active_level_index() -> int:
 
 
 func advance_level() -> void:
-	if _active < 0:
+	if _active < 0 or _changing:
 		return
+	var current := get_tree().current_scene
+	var level: Node = current.get("level")
+	var player: Node = current.get("player")
+	if level.get("state") in ["clear", "finished"] or (level.get("total_enemies") == 0 and player.get("alive")):
+		record_level_clear()
 	if _active == Catalog.level_count() - 1:
 		return_to_menu()
 	else:
 		open_level(_active + 1)
 
 
+func record_level_clear() -> void:
+	if _active >= 0:
+		_update_save_status(progress.complete(_active))
+
+
+func _update_save_status(result: Error) -> void:
+	progress_save_failed = result != OK
+	if progress_save_failed:
+		push_warning("TURN could not write the level progress: " + error_string(result))
+
+
 func _input(event: InputEvent) -> void:
-	var key := event as InputEventKey
-	if key == null or not key.pressed or key.echo:
+	if not event.is_pressed() or event.is_echo():
 		return
-	if key.keycode == KEY_F11:
+	var key: Key = KEY_NONE
+	if event is InputEventKey:
+		key = event.keycode if event.keycode != 0 else event.physical_keycode
+	if key == KEY_F11:
 		get_viewport().set_input_as_handled()
-		var window := get_window()
-		window.mode = Window.MODE_WINDOWED if window.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
-	elif key.keycode == KEY_F1 and _active >= 0:
+		_set_option("display.fullscreen", not _is_fullscreen())
+	elif key == KEY_ESCAPE and _home_settings != null:
 		get_viewport().set_input_as_handled()
-		return_to_menu()
+		_home_settings.back()
+	elif key == KEY_F1 and _active >= 0:
+		get_viewport().set_input_as_handled()
+		if _pause_menu != null:
+			_pause_menu.request_exit()
+		else:
+			return_to_menu()
+	elif _active >= 0 and not _changing and (key == KEY_ESCAPE or event.is_action_pressed("pause")):
+		if _pause_menu != null:
+			get_viewport().set_input_as_handled()
+			_pause_menu.back()
+		else:
+			var current := get_tree().current_scene
+			if current != null and not bool(current.call("_menus_open")):
+				get_viewport().set_input_as_handled()
+				_open_pause()
+
+
+func _pause_on_focus_loss() -> void:
+	if DisplayServer.get_name() != "headless":
+		_open_pause(true)
+
+
+func _open_pause(from_focus_loss := false) -> void:
+	if _pause_menu != null or _changing or _active < 0:
+		return
+	var current := get_tree().current_scene
+	if current == null or bool(current.call("_menus_open")):
+		return
+	var hud: CanvasLayer = current.get("hud")
+	var level: Node = current.get("level")
+	var entry := Catalog.get_entry(_active)
+	_hud_was_visible = hud.visible
+	_resume_mouse = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED or from_focus_loss
+	current.call("_release_mouse")
+	hud.hide()
+
+	var overlay := PauseMenu.new()
+	overlay.name = "PauseMenu"
+	overlay.level_title = String(entry[0])
+	overlay.level_hint = Catalog.play_hint(_active)
+	overlay.battle_active = int(level.get("total_enemies")) > 0 and level.get("state") in ["fight", "clear"]
+	overlay.params = _services.get("p")
+	overlay.binds = _services.get("b")
+	overlay.resume_requested.connect(func() -> void: _resume_level.call_deferred())
+	overlay.restart_requested.connect(func() -> void: _restart_paused_level.call_deferred())
+	overlay.exit_requested.connect(return_to_menu)
+	overlay.setting_changed.connect(_set_option)
+	_pause_menu = overlay
+	get_tree().paused = true
+	var capture_frame := DisplayServer.get_name() != "headless"
+	overlay.visible = not capture_frame
+	add_child(overlay)
+	if capture_frame:
+		_show_paused_frame(overlay)
+
+
+func _show_paused_frame(overlay: PauseMenu) -> void:
+	# Capture one frame with the combat HUD hidden and before the pause layer is drawn.
+	await RenderingServer.frame_post_draw
+	if is_instance_valid(overlay) and overlay == _pause_menu:
+		overlay.show_frame(get_viewport().get_texture().get_image())
+
+
+func _resume_level() -> void:
+	if _pause_menu == null or _changing:
+		return
+	var current := get_tree().current_scene
+	_close_pause()
+	if _resume_mouse and current != null:
+		current.call("_capture_mouse")
+
+
+func _restart_paused_level() -> void:
+	if _pause_menu == null or _changing:
+		return
+	var current := get_tree().current_scene
+	current.call("restart_level")
+	_resume_level()
+
+
+func _close_pause() -> void:
+	if _pause_menu == null:
+		return
+	_pause_menu.hide()
+	_pause_menu.queue_free()
+	_pause_menu = null
+	var current := get_tree().current_scene
+	if is_instance_valid(current):
+		var hud: CanvasLayer = current.get("hud")
+		hud.visible = _hud_was_visible
+	get_tree().paused = false
+
+
+func _is_fullscreen() -> bool:
+	return get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]
+
+
+func _set_fullscreen(enabled: bool) -> void:
+	get_window().mode = Window.MODE_FULLSCREEN if enabled else Window.MODE_WINDOWED
+	if _pause_menu != null:
+		_pause_menu.sync_window_mode(enabled)
+	if _home_settings != null:
+		_home_settings.sync_window_mode(enabled)
+
+
+func _set_option(key: String, value: Variant) -> void:
+	if key == "display.fullscreen":
+		_set_fullscreen(bool(value))
+	elif _services != null:
+		_services.get("p").set_value(key, value)
+	_options.set_value("game", key, value)
+	var error := _options.save(OPTIONS_PATH)
+	var panel := _pause_menu if _pause_menu != null else _home_settings
+	if error != OK and panel != null:
+		panel.show_error("设置暂未保存")
+
+
+func _apply_level_options() -> void:
+	var parameters: Node = _services.get("p")
+	for key in ["audio.master", "audio.spatial", "cam.shake_scale", "cam.sensitivity"]:
+		if _options.has_section_key("game", key):
+			parameters.set_value(key, _options.get_value("game", key))
 
 
 func _process(_delta: float) -> void:
-	if _changing or _active < 0:
+	if _changing or _active < 0 or get_tree().paused:
 		return
 	var current := get_tree().current_scene
 	if is_instance_valid(current):
@@ -85,6 +276,7 @@ func _switch(index: int) -> void:
 		_switch_failed(scene_path)
 		return
 
+	_close_pause()
 	var tree := get_tree()
 	var old := tree.current_scene
 	tree.current_scene = null
@@ -99,11 +291,14 @@ func _switch(index: int) -> void:
 	_services = next_services
 	if index >= 0:
 		menu_page = MenuPage.LEVELS
+		selected_level_index = index
 		_arguments = PackedStringArray(Catalog.get_entry(index)[4])
 		if DisplayServer.get_name() == "headless":
 			_arguments.append("--no-mouse-capture")
 		_services.call("start", tree.root)
+		_apply_level_options()
 	var current := packed.instantiate()
+	_update_save_status(progress.visit(index) if index >= 0 else progress.flush())
 	tree.root.add_child(current)
 	tree.current_scene = current
 	if index < 0:
@@ -115,6 +310,9 @@ func _switch(index: int) -> void:
 func _switch_failed(path: String) -> void:
 	_changing = false
 	push_error("Unable to load " + path)
+	if _pause_menu != null:
+		_pause_menu.show_error("载入失败，请重试")
+		return
 	var current := get_tree().current_scene
 	if current != null and current.has_method("show_load_error"):
 		current.call("show_load_error")

@@ -477,3 +477,15 @@ func die() -> void:
 
 func _exit_tree() -> void:
 	stop_charge_sound()
+
+
+func hud_alert(target: PlayerUnit) -> bool:
+	if phase != Phase.CHARGE or phase_age < BEAM_CHARGE - 0.55 or not is_instance_valid(beam):
+		return false
+	var cap := target.capsule()
+	var stop: Vector3 = beam.end
+	if not is_finite(beam.obstruction_distance):
+		var edge: Vector3 = cap["b"]
+		stop = beam.start + beam.direction * (edge.distance_to(beam.start) + float(cap["r"]))
+	var hit := Hit.sweep_sphere(beam.start, stop, beam.radius, cap["a"], cap["b"], cap["r"])
+	return hit.get("hit", false)
