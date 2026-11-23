@@ -127,6 +127,9 @@ func _nodes_for(rig) -> Array:
 		return []
 	if _cache.has(rig):
 		return _cache[rig]
+	if rig.has_method("replay_nodes"):
+		_cache[rig] = rig.replay_nodes()
+		return _cache[rig]
 	if not rig.has_method("predict_weapon_xf"):
 		var nodes: Array = [rig]
 		_collect_actor_nodes(rig, nodes)

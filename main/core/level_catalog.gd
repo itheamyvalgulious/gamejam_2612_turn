@@ -10,6 +10,7 @@ const LEVELS := [
 	["仓库", "沿货架、集装箱和环廊穿过装卸区。", "warehouse", "", [], "warehouse", "room_shared"],
 	["回廊实验舱", "绕中央玻璃罐，经环形长廊抵达检修台。", "panopticon", "", [], "panopticon", "room_shared"],
 	["病房 · 夜班", "穿过病床区、中央隔墙和镜面走廊。", "ward", "", [], "night_ward", "room_shared"],
+	["坠击中庭 · 高低差", "上下层各有一台近战机兵和一台巡射机甲。沿右侧阶梯往返，测试追击、近战判定和激光俯仰。", "galleria", "", ["--galleria-height-test"], "galleria_height_test", "galleria", "galleria"],
 ]
 
 static func level_count() -> int:
@@ -38,3 +39,8 @@ static func services_for(index: int) -> String:
 
 static func play_hint(index: int) -> String:
 	return LEVELS[index][1]
+
+
+static func preview_id(index: int) -> String:
+	var entry := get_entry(index)
+	return String(entry[7]) if entry.size() > 7 else level_id(index)

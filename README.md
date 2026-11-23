@@ -28,21 +28,23 @@
 | 灯墙之厅 | [levels/shadow_chamber](main/content/levels/shadow_chamber/README.md) |
 | 货舱 02 | [levels/cargo_hold2](main/content/levels/cargo_hold2/README.md) |
 | 霓虹街区 | [levels/city](main/content/levels/city/README.md) |
-| 坠击中庭 | [levels/galleria](main/content/levels/galleria/README.md) |
+| 坠击中庭、坠击中庭 · 高低差 | [levels/galleria](main/content/levels/galleria/README.md) |
 | 仓库 | [levels/warehouse](main/content/levels/warehouse/README.md) |
 | 回廊实验舱 | [levels/panopticon](main/content/levels/panopticon/README.md) |
 | 病房 · 夜班 | [levels/ward](main/content/levels/ward/README.md) |
 
-仓库、回廊实验舱和病房的玩家控制、界面与公用材质工具放在 [levels/shared](main/content/levels/shared/README.md)。九个关卡都从「关卡选择」进入。仓库、回廊实验舱和病房暂未配置敌人，可停留走动，按 **N** 继续到下一关，或按 **F1** 返回选关。
+仓库、回廊实验舱和病房的玩家控制、界面与公用材质工具放在 [levels/shared](main/content/levels/shared/README.md)。十个关卡都从「关卡选择」进入。仓库、回廊实验舱和病房暂未配置敌人，可停留走动，按 **N** 继续到下一关，或按 **F1** 返回选关。
 
 各关卡自带的合成音效源码在对应关卡的 `src/audio/`，构建时归到 `main/runtime/audio/`。编辑请从 `main/content/` 的原件开始。正式关卡使用 `main/project.godot` 启动。敌人与其他独立素材可以用各自的 `project.godot` 预览。
+
+十个关卡共用 [VESPER v2](main/content/characters/vesper/README.md) 的机体、武器和动作。主角修改提交到 `main/content/characters/vesper/`，关卡自己的按键、相机和战斗参数随该关卡维护。
 
 ## 正式关卡敌人
 
 | 敌人 | 关卡中的数量和用途 |
 | --- | --- |
-| ARC Sentinel | 12，替换原近战小兵 |
-| 单轮巡射机甲 | 5，替换原远程射手 |
+| ARC Sentinel | 14，基础近战小兵 |
+| 单轮巡射机甲 | 7，远程射手 |
 | Shard Phantom | 4，替换货舱和街区的相位位移怪 |
 | 折相 | 1，灯墙之厅首领 |
 

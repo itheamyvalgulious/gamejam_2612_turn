@@ -4,12 +4,14 @@ from pathlib import Path
 import json
 import re
 
-from encounter_roster import adapt_host, adapt_wheel, adapters, design_path, pack_designs
+from encounter_roster import adapt_host, adapt_wheel, adapters, dependencies, design_path, pack_designs
 
 MAIN = Path(__file__).resolve().parents[1]
 REPO = MAIN.parent
 OUTPUT = MAIN / "runtime"
 ENEMIES = MAIN / "content/enemies"
+VESPER = MAIN / "content/characters/vesper"
+VESPER_RUNTIME = Path("characters/vesper/design")
 MODULES = {
     "act": ("main/content/levels/actdemo", "Act"),
     "cargo": ("main/content/levels/cargo_hold2", "Cargo"),
@@ -42,7 +44,7 @@ ENEMY_PACKAGES = {
     "phase_enemy.gd": "mobs",
     "enemy_boss.gd": "bosses",
 }
-PLAYER_FILES = {"camera.gd", "fp_viewmodel.gd", "player.gd"}
+PLAYER_FILES = {"camera.gd", "player.gd"}
 RESOURCE_PATH = re.compile(r'''(?<=["'])res://([^"'\s]+)(?=["'])''')
 CLASS = re.compile(r"(?m)^class_name\s+(\w+)")
 AUTOLOADS = re.compile(r'(?m)^(\w+)="\*res://([^"]+)"')
@@ -113,6 +115,8 @@ def relocate_resources(text, episode, relative, destinations):
         original = match[1]
         if original == "src/game/hud.gd" and relative.as_posix() == "src/main.gd":
             return "res://ui/hud/combat_hud.gd"
+        if original.startswith("team/vesper/"):
+            return "res://runtime/" + (VESPER_RUNTIME / original.removeprefix("team/vesper/")).as_posix()
         if original.startswith("team/"):
             design, path = original.removeprefix("team/").split("/", 1)
             return "res://runtime/" + design_path(design, path).as_posix()
@@ -274,6 +278,13 @@ def services(prefix, autoloads):
 
 def build():
     generated: dict[Path, bytes] = pack_designs(ENEMIES)
+    for relative, data in dependencies(VESPER, ["integration/campaign_rig.gd"]):
+        if isinstance(data, str):
+            data = RESOURCE_PATH.sub(
+                lambda match: "res://runtime/" + (VESPER_RUNTIME / match[1]).as_posix(),
+                data,
+            ).encode("utf-8")
+        generated[VESPER_RUNTIME / relative] = data
     for episode, (directory, prefix) in MODULES.items():
         root = REPO / directory
         if episode == "room_shared":

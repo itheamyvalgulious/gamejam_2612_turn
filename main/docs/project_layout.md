@@ -25,7 +25,7 @@
 | --- | --- |
 | `levels/` | 每个独立地图或关卡模块拥有自己的入口、地图脚本、专用素材和 README |
 | `enemies/` | `mobs/` 收普通和精英敌人，`bosses/` 收 Boss，`shared/` 收多个敌人共用的战斗接口 |
-| `characters/` | `vesper/` 收主角场景、程序化模型、操控脚本和材质 |
+| `characters/` | `vesper/` 收主角场景、程序化模型、骨架动作和材质。`vesper/integration/` 接入正式关卡战斗 |
 | `weapons/` | `electric_sword/` 收电弧剑模型、材质、特效和预览场景 |
 | `maps/` | `t1_city/`、`t2_terrain/`、`t3_spaceship/` 收地图原型，`_baseline/` 收这三组地图的历史初稿 |
 | `templates/` | `enemy_design/` 收敌人制作可复用的场景、脚本和着色器模板 |
@@ -63,7 +63,8 @@
 | `levels/` | 正式关卡入口、运行场景与地图脚本，各独立关卡按所属模块存放 |
 | `enemies/mobs/`、`enemies/bosses/` | 被正式关卡引用的敌人。每个角色的 `design/` 存模型、动作和技能依赖，`encounters/<关卡模块>/` 存接入该模块的脚本 |
 | `enemies/shared/` | 普通敌人共用的战斗接口 |
-| `characters/player/`、`characters/vesper/` | 各关卡使用的玩家控制器、相机、第一人称模型和机体骨架 |
+| `characters/player/` | 各关卡使用的输入、相机和玩家战斗脚本 |
+| `characters/vesper/design/` | 所有关卡共用的 VESPER 主角模型、骨架、招式、材质及接入脚本 |
 | `systems/` | 按关卡模块组织的配置、按键、战斗判定、弹体与公共服务 |
 | `audio/` | 按模块归档的音效入口和合成音源 |
 | `fonts/` | 界面字体资源。其中 `shared/` 收共用字体文件 |

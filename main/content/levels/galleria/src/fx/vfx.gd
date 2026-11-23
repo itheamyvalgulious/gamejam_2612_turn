@@ -19,7 +19,7 @@ const BeamShader := preload("res://gfx/fx_beam.gdshader")
 const SparkShader := preload("res://gfx/fx_spark.gdshader")
 const SmokeShader := preload("res://gfx/fx_smoke.gdshader")
 const FlashShader := preload("res://gfx/fx_flash.gdshader")
-const MK := preload("res://src/vesper/mesh_kit.gd")
+const MK := preload("res://src/fx/mesh_kit.gd")
 
 const MAX_ADD := 420       # 加色粒子池
 const MAX_MIX := 180       # 烟雾粒子池

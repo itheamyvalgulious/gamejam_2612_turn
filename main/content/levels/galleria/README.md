@@ -1,20 +1,10 @@
 # ORION // Galleria 坠击中庭
 
-沿用 `main/content/levels/cargo_hold2` 的 Godot 4.7.2 独立关卡管线。玩家从商业中庭的高台生成，跃入下层战斗区；敌人为 **4 个基础近战 + 2 个远程**。完整工程在本目录，可单独运行。
+玩家从商业中庭的高台生成，跃入下层战斗区。第 6 关配置 **4 个基础近战 + 2 个远程**。本地图也用于第 10 关的高低差测试。
 
 ## 启动
 
-Windows 双击 `run.cmd`。脚本会先导入字体和脚本类，避免首次运行时缺少导入缓存。
-
-```powershell
-.\run.cmd
-.\run.cmd -Editor
-.\run.cmd -ImportOnly
-# 也可手动指定 Godot：
-.\run.ps1 -GodotPath 'D:\Godot\Godot_v4.7.2-stable_win64_console.exe'
-```
-
-也可用 Godot 打开本目录的 `project.godot`，等待导入结束后按 F5。`.godot/` 是缓存目录，不是启动文件。Linux / macOS 使用 `GODOT_BIN=/path/to/godot bash run.sh`。
+Windows 双击仓库根目录的 [启动试玩.cmd](../../../../启动试玩.cmd)，然后选择第 6 或第 10 关。也可先从仓库根目录运行 `python main/tools/prepare_game.py`，再用 Godot 4.7.2 打开 `main/project.godot`。
 
 ## 高台进攻
 
@@ -23,6 +13,10 @@ Windows 双击 `run.cmd`。脚本会先导入字体和脚本类，避免首次�
 3. 坠击需要从至少 6 单位高处起步，并实际下落至少 3 单位；普通原地跳跃不会反复触发冲击伤害。无需按键也可正常落地，继续使用原有方向斩和弹反。
 4. 落地后利用展示台和立柱绕侧，接近后排远程怪。右侧宽阶梯可返回高台，重新选择下落位置。
 5. 清空 6 个敌人通关；R 重开，死亡自动重开。
+
+## 第 10 关 · 高低差
+
+主游戏选关中的「坠击中庭 · 高低差」复用本地图。上层和下层各布置 1 台 ARC Sentinel 和 1 台单轮巡射机甲。玩家从高台生成，可从中央开口跳下，沿右侧阶梯返回，测试敌人跨层追击、隔层近战和激光俯仰与遮挡。按 **R** 恢复初始站位。
 
 ## 操作
 
@@ -49,10 +43,10 @@ Windows 双击 `run.cmd`。脚本会先导入字体和脚本类，避免首次�
 - `src/encounter/arena.gd`：高台、阶梯、展示台、商铺、敌人布局。
 - `src/encounter/art.gd`、`gfx/encounter/`：与货舱一致的实体构件和程序化材质。
 - `src/encounter/level.gd`：高度支撑、扫掠碰撞、坠击、寻路和独立通关流程。
-- `src/vesper/mech_rig.gd`：加入可变地面高度，兼容高台起跳、落地和接触阴影。
+- [共享 VESPER 主角](../../characters/vesper/README.md)：接受关卡传入的地面高度，支持高台起跳、落地和接触阴影。
 - `src/game/projectiles.gd`：三维实体遮挡，箭可越过低掩体，平台也能挡箭。
 - `src/game/camera.gd`：结合关卡三维实体限制相机，避免把矮掩体当作无限高墙。
 
-平台与阶梯的渲染、支撑和碰撞来自同一组尺寸。无场景文字标注，不通向飞船其他房间。保留 `run.cmd`、`run.ps1`、`run.sh` 启动方式；提交时不要加入 `.godot/`、截图、日志和临时测试脚本。
+平台与阶梯的渲染、支撑和碰撞来自同一组尺寸。提交时不要加入 `.godot/`、截图、日志和临时测试脚本。
 
 霓虹照明首次启动时自动生成，缓存存放在 Godot 的 `user://` 用户数据目录；后续启动复用缓存，重开关卡无需重新生成。修改环境或灯管源码后自动更新缓存。照明使用 Forward+ 渲染器。

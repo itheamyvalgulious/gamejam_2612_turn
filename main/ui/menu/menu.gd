@@ -193,7 +193,7 @@ func _select(index: int) -> void:
 	TurnSession.selected_level_index = index
 	_title.text = entry[0]
 	_description.text = Catalog.play_hint(index)
-	_picture.texture = load("res://assets/ui/level_previews/%s.webp" % Catalog.level_id(index))
+	_picture.texture = load("res://assets/ui/level_previews/%s.webp" % Catalog.preview_id(index))
 	_enter.focus_neighbor_left = _enter.get_path_to(_rows[index])
 	for i in _rows.size():
 		var style := Style.active_surface() if i == index else Style.surface()

@@ -2,8 +2,9 @@
 
 程序化四足 ACT 主角 —— Godot 4.7.2 工程。模型、材质、骨骼、动作、长发、刀光、HUD 全部由代码在运行时生成，不依赖任何外部模型、贴图、动画或字体。
 
-> 本工程由 `basic/character`（旧 VESPER）移入 `main/content/characters/vesper` 后重建为 v2。
-> 外部 `/dat/projects/artist2dv2` 与 `main/content/levels/actdemo` 的 vendored 副本保持原样，未被修改。
+本目录是十个正式关卡的 VESPER 源文件。模型、骨架和动作在 `scripts/mech/`，材质在 `shaders/`。
+`integration/campaign_rig.gd` 将各关卡的攻击时序、冲刺参数和格挡规划接入这套骨架。第一人称显示同一套手臂和剑，保留主游戏的视角按键及眼高设置。
+`python main/tools/prepare_game.py` 收集所需脚本和着色器到 `main/runtime/characters/vesper/design/`。
 
 ### 本次调整（v2.1）
 

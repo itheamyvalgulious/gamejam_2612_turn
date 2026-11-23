@@ -1,5 +1,4 @@
 extends RefCounted
-class_name BladePath
 ## 刀位姿过渡规划器 —— 「任意两个刀位姿之间」的过渡。
 ##
 ## 一个刀位姿 = 刀柄位置 + 刀身基（局部 Y = 刀轴，局部 Z = 刀面法线）+ 躯干偏航。
@@ -43,8 +42,8 @@ func plan(from_pos: Vector3, from_basis: Basis, to_pos: Vector3, to_basis: Basis
 	var out := Vector3(mid.x, 0.0, mid.z)
 	if out.length_squared() < 0.0001:
 		out = Vector3(0.0, 0.0, -1.0)
-	_ctl = mid - out.normalized() * 0.16
-	_ctl.z = minf(_ctl.z, -0.90)          # 与 weapon_root 的胸腔净空约束一致
+	_ctl = mid + out.normalized() * 0.06
+	_ctl.z = minf(_ctl.z, -0.30)
 	_from_yaw = from_yaw
 	_to_yaw = to_yaw
 	_dur = maxf(dur, 0.001)

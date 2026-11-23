@@ -37,7 +37,7 @@ func set_rig(r: Node3D) -> void:
 func set_first_person(on: bool) -> void:
 	first_person = on
 	if rig != null and rig.has_method("set_first_person_view"):
-		rig.set_first_person_view(on, P.getb("cam.first_show_weapon"))
+		rig.set_first_person_view(on)
 	_initialized = false
 
 
@@ -68,7 +68,9 @@ func fp_transform() -> Transform3D:
 	if rig == null:
 		return Transform3D.IDENTITY
 	var height := P.getf("cam.first_height") + first_height_offset
-	var eye := rig.global_position + Vector3.UP * height + flat_forward() * 0.30
+	var anchor: Vector3 = rig.head_camera.global_position
+	anchor.y = rig.global_position.y + height
+	var eye := anchor - flat_forward() * 0.22
 	return Transform3D(Basis.looking_at(forward(), Vector3.UP), eye)
 
 

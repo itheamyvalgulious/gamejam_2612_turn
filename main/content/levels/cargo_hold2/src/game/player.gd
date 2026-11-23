@@ -10,20 +10,10 @@ class_name PlayerUnit
 ## 尺度：本文件里的硬编码距离 / 速度都是**世界单位**（1 u = 0.547 m，见 src/core/units.gd）；
 ## 玩家可见的数值一律走 P.getm()（真实米）。
 
-const Rig = preload("res://src/vesper/mech_rig.gd")
-const PAL = preload("res://src/vesper/material_palette.gd")
+const Rig = preload("res://team/vesper/integration/campaign_rig.gd")
+const Units = preload("res://src/core/units.gd")
 # 直接 preload：不依赖全局类缓存，headless / 首次 clone 都能跑
 const InterceptS = preload("res://src/game/intercept.gd")
-
-const PALETTE := {
-	"tag": "hero",
-	"accent": Color(1.0, 0.30, 0.055),
-	"tint": Color(1.0, 1.0, 1.0),
-	"metal_mix": 0.16,
-}
-
-# 每段动画本身的最大前冲量（用于把「前冲距离(m)」参数换算成缩放）
-const LUNGE_MAX := {"light": 1.05, "fang": 1.00, "heavy": 1.15, "spin": 1.30}
 
 var rig
 var cam: GameCam
@@ -65,7 +55,7 @@ func _ready() -> void:
 	rig.name = "Mech"
 	rig.auto_step = false
 	rig.set_process(false)
-	rig.palette = PALETTE
+	rig.scale = Vector3.ONE * Units.to_units(1.0)
 	add_child(rig)
 	rig.footstep.connect(_on_footstep)
 	_sync_params()
@@ -166,9 +156,9 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 	if B.just("attack_light"):
 		_attack_from_input(mv)
 	if B.just("attack_heavy"):
-		_attack("heavy", 0.0)
+		_attack("heavy")
 	if B.just("attack_spin"):
-		_attack("spin", 0.0)
+		_attack("spin")
 
 	# 举刀 / 架招：先把刀规划到威胁的必经之路上（读招 → 落点 → 机械臂过渡）
 	# 窗口内一定在规划；窗口过了只要威胁还在、刀还架着，就继续跟着它走。
@@ -211,7 +201,7 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 	# 挥剑风声：判定窗口打开的那一帧起风
 	var in_win: bool = rig.in_hit_window()
 	if in_win and not _was_in_window:
-		var heavy: bool = rig.attack_name in ["GUILLOTINE", "HELIX STORM"]
+		var heavy: bool = rig.attack_name in ["HEAVY", "SPIN"]
 		var blade: Vector3 = rig.weapon_xf * Vector3(0, 1.4, 0)
 		Snd.play_at("swing_heavy" if heavy else "swing_light", blade,
 			{"gain": 1.0 if heavy else 0.85})
@@ -329,62 +319,19 @@ func _begin_parry() -> void:
 func _attack_from_input(mv: Vector2) -> void:
 	if absf(mv.x) > 0.5 and absf(mv.x) >= absf(mv.y):
 		if mv.x < 0.0:
-			_attack("slash_left", PI * 0.5)
+			_attack("slash_left")
 		else:
-			_attack("slash_right", -PI * 0.5)
+			_attack("slash_right")
 	elif mv.y > 0.5:
-		_attack("slash_back", PI)
+		_attack("slash_back")
 	else:
-		_attack("slash_fwd", 0.0)
+		_attack("slash_fwd")
 
 
-func _attack(move_id: String, yaw_off: float) -> void:
-	if not alive:
+func _attack(move_id: String) -> void:
+	if not alive or rig.is_attacking or rig.jump_state != "GROUND":
 		return
-	if rig.is_attacking or rig.jump_state != "GROUND":
-		return
-	var lunge_param := P.getf("attack.%s.lunge" % move_id)
-	# 左右横斩：单手持刀、刀身水平外伸，够得远
-	if move_id == "slash_left" or move_id == "slash_right":
-		var sgn := 1.0 if move_id == "slash_left" else -1.0
-		rig.timing_key = move_id
-		rig.force_swing(0.16 * sgn, 2.50 * sgn, {
-			"offhand": 1.0, "reach": 0.72, "height": 0.34, "lift": 0.05,
-			"torso": 0.62, "lean": 0.16, "lunge": lunge_param / 1.05,
-		})
-		last_attack = move_id
-		swing_serial += 1
-		return
-	# 正前斩：双手、刀身水平前伸，横扫正前方扇形（够远）
-	if move_id == "slash_fwd":
-		rig.timing_key = move_id
-		rig.force_swing(-1.05, 1.05, {
-			"offhand": 0.0, "reach": 0.88, "height": 0.46, "lift": 0.10,
-			"torso": 0.55, "lean": 0.10, "lunge": lunge_param / 1.05,
-		})
-		last_attack = move_id
-		swing_serial += 1
-		return
-	# 反手后刺：刀指正后方，沿刀轴捅出去
-	if move_id == "slash_back":
-		rig.timing_key = move_id
-		# 反手后刺：刀指正后方，沿刀轴捅出去
-		rig.force_swing(PI, PI, {
-			"offhand": 0.75, "reach": 0.35, "height": 0.16, "lift": -0.05,
-			"torso": 0.28, "lean": 0.04, "thrust": 1.85, "lunge": 0.0,
-		})
-		last_attack = move_id
-		swing_serial += 1
-		return
-	var clip := "light"
-	if move_id == "heavy":
-		clip = "heavy"
-	elif move_id == "spin":
-		clip = "spin"
-	var lunge_scale := lunge_param / maxf(LUNGE_MAX.get(clip, 1.05), 0.01)
-	rig.timing_key = move_id
-	rig.force_attack(clip, yaw_off, lunge_scale)
-	rig.attack_yaw = yaw_off
+	rig.play_action(move_id, P.getf("attack.%s.lunge" % move_id))
 	last_attack = move_id
 	swing_serial += 1
 
@@ -412,7 +359,7 @@ func parry_progress() -> float:
 
 
 func capsule() -> Dictionary:
-	return Hit.rig_capsule(rig, 1.1, 3.4)
+	return rig.combat_capsule()
 
 
 func hurt(_amount: float, _from_dir := Vector3.FORWARD, cause := "") -> void:

@@ -105,6 +105,7 @@ var combo_step := 0
 var is_attacking := false
 var attack_time := 0.0
 var dash_time := 0.0
+var ground_height := 0.0
 var jump_state := "GROUND"
 var jump_t := 0.0
 var vertical_velocity := 0.0
@@ -327,8 +328,8 @@ func _advance_jump(dt: float) -> void:
 			air_time += dt
 			vertical_velocity -= grav * dt
 			position.y += vertical_velocity * dt
-			if position.y <= 0.0 and vertical_velocity < 0.0:
-				position.y = 0.0
+			if position.y <= ground_height and vertical_velocity < 0.0:
+				position.y = ground_height
 				jump_state = "LANDING"
 				jump_t = 0.0
 				vertical_velocity = 0.0
@@ -417,20 +418,20 @@ func advance(dt: float) -> void:
 	rotation.y = heading
 	_yaw_rate = lerpf(_yaw_rate, angular_velocity, 1.0 - exp(-6.0 * dt))
 
-	var forward := -global_transform.basis.z
+	var forward := -global_basis.z.normalized()
 	var vel := forward * speed
 	# Movement follows the input vector, never the facing alone: S must
 	# backpedal and A/D must strafe even while the body is locked forward.
 	if move_command.length() > 0.05:
 		vel = move_command.normalized() * speed
 	if speed > 0.08 and move_command.length() > 0.05:
-		var local_move := global_transform.basis.inverse() * move_command
+		var local_move := global_basis.orthonormalized().inverse() * move_command
 		strafe = clampf(local_move.x / maxf(speed, 0.1), -1.0, 1.0)
 		gait_sign = signf(-local_move.z)
 		if absf(gait_sign) < 0.05:
 			gait_sign = 1.0
 	if is_attacking and _attack.has("lunge"):
-		var lunge := _eval_curve(_attack["lunge"], attack_time)
+		var lunge := _lunge_at(attack_time)
 		var d := lunge - _lunge_prev
 		_lunge_prev = lunge
 		position += forward * d
@@ -442,29 +443,27 @@ func advance(dt: float) -> void:
 			* (dash_distance / maxf(9.923 * dash_duration, 0.001))
 		# direction is fixed for the whole dash: forward and lateral dashes are
 		# distinct authored inputs, not a steering blend.
+		_steer_dash(forward, dt)
 		var dash_step := minf(dt, dash_time)
 		position += _dash_dir * dash_speed * dash_step
 		dash_time = maxf(0.0, dash_time - dash_step)
 	if not is_attacking:
 		position += vel * dt
 
-	var flat := Vector2(position.x, position.z)
-	if flat.length() > 15.0:
-		flat = flat.normalized() * 15.0
-		position.x = flat.x
-		position.z = flat.y
+	_constrain_horizontal()
 
 	# ---------------- gait clock
-	var run_amt := clampf((speed - WALK_SPEED) / (RUN_SPEED - WALK_SPEED), 0.0, 1.0)
-	var freq := lerpf(1.55, 2.75, clampf(speed / RUN_SPEED, 0.0, 1.0))
-	if speed > 0.08 and jump_state != "AIR" and jump_state != "LANDING":
+	var speed_mps := speed / scale.x
+	var run_amt := clampf((speed_mps - WALK_SPEED) / (RUN_SPEED - WALK_SPEED), 0.0, 1.0)
+	var freq := lerpf(1.55, 2.75, clampf(speed_mps / RUN_SPEED, 0.0, 1.0))
+	if speed_mps > 0.08 and jump_state != "AIR" and jump_state != "LANDING":
 		gait_phase = fmod(gait_phase + freq * dt, 1.0)
 	locomotion_state = "IDLE"
-	if speed > 0.4:
+	if speed_mps > 0.4:
 		locomotion_state = "WALK"
-	if speed > WALK_SPEED:
+	if speed_mps > WALK_SPEED:
 		locomotion_state = "RUN"
-	if speed > RUN_SPEED + 0.4:
+	if speed_mps > RUN_SPEED + 0.4:
 		locomotion_state = "SPRINT"
 	if is_attacking:
 		locomotion_state = "STRIKE"
@@ -477,29 +476,7 @@ func advance(dt: float) -> void:
 	elif jump_state == "LANDING":
 		locomotion_state = "LANDING"
 
-	# ---------------- attack timeline
-	if is_attacking:
-		attack_time += dt * ATTACK_RATE
-		if not _attack_queue.is_empty() and attack_time >= float(_attack["duration"]) * 0.70:
-			var nxt: int = _attack_queue.pop_front()
-			combo_step = nxt
-			var names := ["", "FRONT_R", "FRONT_L", "RISE_R", "RISE_L"]
-			_begin_attack(_clip(names[nxt]), false)
-		elif attack_time >= float(_attack["duration"]):
-			# A full spin ends facing the same direction.  Fold the extra 2π
-			# into a persistent offset so the recovery never unwinds backwards.
-			if attack_name == "SPIN":
-				_torso_turn_offset += TAU
-				if _smooth_pose.has("ty"):
-					_smooth_pose["ty"] = float(_smooth_pose["ty"]) - TAU
-			is_attacking = false
-			attack_name = ""
-			combo_step = 0
-			_attack_queue.clear()
-			_lunge_prev = 0.0
-			_attack_style = "twohand"
-			_onehand = 0.0
-			_left_raise = 0.0
+	_advance_attack(dt)
 
 	# Special IK poles fade in/out with the clip: switching them instantly at
 	# clip start/end snapped the elbow by up to 0.6 m in one frame.  The two
@@ -510,10 +487,10 @@ func advance(dt: float) -> void:
 	_special_w = lerpf(_special_w, sp_target, 1.0 - exp(-sp_rate * dt))
 
 	# ---------------- body mechanics
-	var lean_speed := clampf(speed / RUN_SPEED, 0.0, 1.2) * 0.17
-	var bob_amp := lerpf(0.006, 0.026, run_amt) * clampf(speed / 1.2, 0.0, 1.0)
+	var lean_speed := clampf(speed_mps / RUN_SPEED, 0.0, 1.2) * 0.17
+	var bob_amp := lerpf(0.006, 0.026, run_amt) * clampf(speed_mps / 1.2, 0.0, 1.0)
 	var bob := sin((gait_phase * 2.0 + 0.13) * TAU) * bob_amp
-	if speed < 0.4:
+	if speed_mps < 0.4:
 		bob = sin(time * 1.35) * 0.007
 	if jump_state == "AIR" or jump_state == "LANDING":
 		bob = 0.0
@@ -524,11 +501,11 @@ func advance(dt: float) -> void:
 	if jump_state != "AIR" and jump_state != "LANDING":
 		bob += (1.0 - clampf(stance_count / 4.0, 0.0, 1.0)) * lerpf(0.006, 0.020, run_amt)
 	var lat := clampf(strafe, -1.0, 1.0)
-	var bank := clampf(_yaw_rate * speed * 0.020, -0.24, 0.24) \
-		+ lat * 0.12 * clampf(speed / RUN_SPEED, 0.0, 1.0)
+	var bank := clampf(_yaw_rate * speed_mps * 0.020, -0.24, 0.24) \
+		+ lat * 0.12 * clampf(speed_mps / RUN_SPEED, 0.0, 1.0)
 	var sway := sin(gait_phase * TAU) * lerpf(0.004, 0.010, run_amt)
 
-	var carry_target := smoothstep(0.0, 1.0, clampf((speed - 0.5) / 2.0, 0.0, 1.0))
+	var carry_target := smoothstep(0.0, 1.0, clampf((speed_mps - 0.5) / 2.0, 0.0, 1.0))
 	_carry_w = lerpf(_carry_w, carry_target, 1.0 - exp(-3.2 * dt))
 	var pose := _current_pose(dt)
 	var body_y := HIP_Y * LOWER_SCALE - float(pose["crouch"]) * LOWER_SCALE + bob
@@ -542,8 +519,8 @@ func advance(dt: float) -> void:
 	_update_weapon(pose)
 	_update_arms(pose)
 	if contact_shadow != null:
-		contact_shadow.position.y = 0.012 - position.y
-		var hgt := maxf(position.y, 0.0)
+		var hgt := maxf((position.y - ground_height) / scale.y, 0.0)
+		contact_shadow.position.y = (ground_height - position.y) / scale.y + 0.012
 		var sh_scale := 1.0 + hgt * 0.14
 		contact_shadow.scale = Vector3(sh_scale, 1.0, sh_scale)
 		contact_shadow.transparency = clampf(hgt * 0.16, 0.0, 0.55)
@@ -555,7 +532,7 @@ func advance(dt: float) -> void:
 		head.rotation.x += sin(time * 0.9 + 1.0) * 0.010
 
 	if reactor_ring != null:
-		reactor_ring.rotation.y += dt * lerpf(0.25, 2.4, clampf(speed / RUN_SPEED, 0.0, 1.0))
+		reactor_ring.rotation.y += dt * lerpf(0.25, 2.4, clampf(speed_mps / RUN_SPEED, 0.0, 1.0))
 		reactor_ring.rotation.x = sin(time * 0.6) * 0.05
 
 	_update_legs(dt, run_amt)
@@ -581,6 +558,51 @@ func advance(dt: float) -> void:
 		lens_light.light_energy = 0.65 + 0.25 * sin(time * 2.3)
 	var moved := position.distance_to(start_pos)
 	display_speed = lerpf(display_speed, moved / maxf(dt, 0.0001), 0.55)
+
+
+func _constrain_horizontal() -> void:
+	var flat := Vector2(position.x, position.z)
+	if flat.length() > 15.0:
+		flat = flat.normalized() * 15.0
+		position.x = flat.x
+		position.z = flat.y
+
+
+func _steer_dash(_forward: Vector3, _dt: float) -> void:
+	pass
+
+
+func _lunge_at(t: float) -> float:
+	return _eval_curve(_attack.get("lunge", []), t)
+
+
+func _advance_attack(dt: float) -> void:
+	if is_attacking:
+		attack_time += dt * ATTACK_RATE
+		if not _attack_queue.is_empty() and attack_time >= float(_attack["duration"]) * 0.70:
+			var nxt: int = _attack_queue.pop_front()
+			combo_step = nxt
+			var names := ["", "FRONT_R", "FRONT_L", "RISE_R", "RISE_L"]
+			_begin_attack(_clip(names[nxt]), false)
+		elif attack_time >= float(_attack["duration"]):
+			_finish_attack()
+
+
+func _finish_attack() -> void:
+	# A full spin ends facing the same direction.  Fold the extra 2π
+	# into a persistent offset so the recovery never unwinds backwards.
+	if attack_name == "SPIN":
+		_torso_turn_offset += TAU
+		if _smooth_pose.has("ty"):
+			_smooth_pose["ty"] = float(_smooth_pose["ty"]) - TAU
+	is_attacking = false
+	attack_name = ""
+	combo_step = 0
+	_attack_queue.clear()
+	_lunge_prev = 0.0
+	_attack_style = "twohand"
+	_onehand = 0.0
+	_left_raise = 0.0
 
 
 func dash_direction_is_forward() -> bool:
@@ -965,14 +987,15 @@ func _leg_phase_offset(index: int, run_amt: float) -> float:
 
 
 func _update_legs(dt: float, run_amt: float) -> void:
+	var speed_mps := speed / scale.x
 	var duty := lerpf(0.68, 0.44, smoothstep(0.0, 1.0, run_amt))
-	var freq := lerpf(1.55, 2.75, clampf(speed / RUN_SPEED, 0.0, 1.0))
+	var freq := lerpf(1.55, 2.75, clampf(speed_mps / RUN_SPEED, 0.0, 1.0))
 	var stride := 0.0
-	if speed > 0.08:
-		stride = speed * duty / freq
+	if speed_mps > 0.08:
+		stride = speed_mps * duty / freq
 	stride = minf(stride, 0.55)
 	var lift_amt := lerpf(0.07, 0.22, smoothstep(0.0, 1.0, run_amt))
-	var gait_w := clampf(speed / 1.0, 0.0, 1.0)
+	var gait_w := clampf(speed_mps / 1.0, 0.0, 1.0)
 	var body_inv := body.transform.affine_inverse()
 	var lower: Node3D = get("lower_body") if has_method("get") else null
 	var lower_inv := lower.transform.affine_inverse() if lower != null else Transform3D.IDENTITY
@@ -997,7 +1020,7 @@ func _update_legs(dt: float, run_amt: float) -> void:
 		var down := true
 		var lift := 0.0
 		var radial := 0.0
-		if speed > 0.08:
+		if speed_mps > 0.08:
 			# Blend the analytic stride between forward (-Z) and lateral (X)
 			# so A/D is a real side-step, not a body turn with sliding feet.
 			var lat_w := clampf(strafe, -1.0, 1.0)
@@ -1034,11 +1057,11 @@ func _update_legs(dt: float, run_amt: float) -> void:
 		var radial_dir := Vector3(cos(leg["az"]), 0, sin(leg["az"]))
 		foot += radial_dir * radial
 		foot.y = ANKLE_H + lift
-		if down and not bool(leg["down"]) and speed > 0.4:
+		if down and not bool(leg["down"]) and speed_mps > 0.4:
 			var wp := global_transform * Vector3(foot.x * LOWER_SCALE, 0.02, foot.z * LOWER_SCALE)
-			footstep.emit(wp, clampf(speed / RUN_SPEED, 0.2, 1.0))
+			footstep.emit(wp, clampf(speed_mps / RUN_SPEED, 0.2, 1.0))
 			if i >= 2 and vfx_enabled:
-				_fx.footstep(wp, clampf(speed / RUN_SPEED, 0.2, 1.0) * 0.7)
+				_fx.footstep(wp, clampf(speed_mps / RUN_SPEED, 0.2, 1.0) * 0.7)
 		leg["down"] = down
 		leg["phase"] = q
 		# foot is authored in LowerBody-local metres; convert to world for
@@ -1197,7 +1220,7 @@ func _update_fx(dt: float) -> void:
 			var kind: String = String(_attack.get("hit_kind", "air"))
 			var tip := blade_tip.global_position
 			if kind == "ground":
-				tip.y = 0.04
+				tip.y = ground_height + 0.04
 			var blade_dir := weapon_root.global_transform.basis.y.normalized()
 			impact.emit(tip, 1.0)
 			_fx.blade_hit(tip, blade_dir, kind, 1.0)
@@ -1267,7 +1290,7 @@ func reset_demo(pos: Vector3, new_heading: float) -> void:
 	_torso_turn_offset = 0.0
 	time = 0.0
 	gait_phase = 0.0
-	position.y = 0.0
+	position.y = ground_height
 	body.position = Vector3(0, HIP_Y * LOWER_SCALE, 0)
 	body.rotation = Vector3.ZERO
 	torso.rotation = Vector3.ZERO

@@ -4,7 +4,6 @@ extends Node3D
 ## 手感参数全部来自 P（~ 面板实时改）；按键全部来自 B（Esc 面板重绑）。
 
 const GameHudScene = preload("res://src/game/hud.gd")
-const FpViewmodelScene = preload("res://src/game/fp_viewmodel.gd")
 const FpMaskScene = preload("res://src/game/fp_mask.gd")
 const ReplayScene = preload("res://src/game/replay.gd")
 const Tuning = preload("res://src/ui/tuning.gd")
@@ -19,7 +18,6 @@ var tuning
 var binds
 
 var hitstop := 0.0
-var fp_vm
 var fp_mask
 var _fp_mask_on := false
 var replay
@@ -77,12 +75,6 @@ func _ready() -> void:
 		hud.show_banner("第 %d 关" % (i + 1), name_cn, P.getf("rules.banner_time"))
 		hud.clear_death()
 	hud.set_hint("左键攻击 · 配合 A/D/S 出方向斩 · 右键弹反 · V 视角 · Tab 第一人称视野 · ~ 参数 · Esc 暂停")
-
-	fp_vm = FpViewmodelScene.new()
-	fp_vm.name = "FpViewmodel"
-	cam.camera.add_child(fp_vm)
-	fp_vm.setup(player.PALETTE)
-	fp_vm.visible = false
 
 	# 第三人称「第一人称视野黑幕」（Tab）：挂在相机下，和第一人称手持模型同一位置
 	fp_mask = FpMaskScene.new()
@@ -219,7 +211,6 @@ func _process(delta: float) -> void:
 	if replay.active:
 		replay.step(dt)
 		cam.step(dt, level.arena)
-		fp_vm.visible = false
 		_update_fp_mask()
 		var evs := ""
 		for ev in replay.cur_events:
@@ -265,9 +256,6 @@ func _process(delta: float) -> void:
 
 	# ---------------- 相机 / HUD
 	cam.step(dt, level.arena)
-	fp_vm.visible = cam.first_person
-	if cam.first_person:
-		fp_vm.update(dt, player)
 	_update_fp_mask()
 	hud.set_enemy_count(level.alive_count(), level.total_enemies)
 	hud.set_first_person(cam.first_person)

@@ -3,10 +3,10 @@ const HALF_WIDTH := 36.0
 const HALF_DEPTH := 32.0
 const CEILING := 25.0
 
-static func build() -> Dictionary:
-	return new().build_scene()
+static func build(height_test := false) -> Dictionary:
+	return new().build_scene(height_test)
 
-func build_scene() -> Dictionary:
+func build_scene(height_test: bool) -> Dictionary:
 	root.name = "GalleriaAtrium"
 	block("floor",Vector3(74,0.6,66),Vector3(0,-0.3,0))
 	block("dark",Vector3(74,0.7,66),Vector3(0,25.35,0))
@@ -112,9 +112,22 @@ func build_scene() -> Dictionary:
 			tube("cyan",Vector3(x,0.055,z-4),Vector3(x,0.055,z+4),0.03)
 	interior_detail()
 	environment()
-	var result := finish("GALLERIA · 坠击中庭", "高台跃下 → 空中左键坠击 / 4 近战 + 2 远程 / 右侧阶梯可返回",Vector2(36,32),Vector3(0,8,25),[
+	var title := "GALLERIA · 坠击中庭"
+	var hint := "高台跃下 → 空中左键坠击 / 4 近战 + 2 远程 / 右侧阶梯可返回"
+	var encounters := [
 		{"kind":"mob","pos":Vector3(0,0,10)}, {"kind":"mob","pos":Vector3(-6,0,5)},
 		{"kind":"mob","pos":Vector3(7,0,2)}, {"kind":"mob","pos":Vector3(0,0,-12)},
-		{"kind":"archer","pos":Vector3(-16,0,-20)}, {"kind":"archer","pos":Vector3(16,0,-20)}])
+		{"kind":"archer","pos":Vector3(-16,0,-20)}, {"kind":"archer","pos":Vector3(16,0,-20)},
+	]
+	if height_test:
+		title = "坠击中庭 · 高低差"
+		hint = "上下层各 1 近战、1 远程 · 右侧阶梯可往返 · R 重开"
+		encounters = [
+			{"kind": "mob", "pos": Vector3(-7, 8, 23)},
+			{"kind": "archer", "pos": Vector3(6, 8, 19)},
+			{"kind": "mob", "pos": Vector3(4, 0, 9)},
+			{"kind": "archer", "pos": Vector3(-5, 0, 5)},
+		]
+	var result := finish(title, hint, Vector2(HALF_WIDTH, HALF_DEPTH), Vector3(0, 8, 25), encounters)
 	result["vertical"] = true
 	return result

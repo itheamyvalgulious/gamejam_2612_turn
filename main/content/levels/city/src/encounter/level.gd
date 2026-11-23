@@ -265,8 +265,7 @@ func prepare_player() -> void:
 func arm_plunge() -> void:
 	plunge_armed = true
 	player.rig.vertical_velocity = minf(player.rig.vertical_velocity,-18.0)
-	player.rig.timing_key = "heavy"
-	player.rig.force_swing(-0.8,0.9,{"height":0.9,"lift":-0.4,"lean":0.35,"lunge":0.0})
+	player.rig.play_action("plunge", 0.0)
 	player.last_attack = "heavy"
 	player.swing_serial += 1
 	Fx.beam(player.rig.global_position+Vector3(0,4,0),player.rig.global_position,0.15,Color("79dbe7"))

@@ -3,7 +3,7 @@ extends Node3D
 ##
 ## 契约：
 ##   * 每面墙一块透明剪影 quad，法线相反的墙共用一张遮罩（4 墙 → 2 个 SubViewport）
-##   * 剪影来自**真实网格**（把每台 rig 的 MeshInstance3D 按骨骼节点合并），不是盒子代理
+##   * 剪影来自**真实网格**（把投影对象的 MeshInstance3D 按父节点合并），不是盒子代理
 ##   * 场上每个角色（玩家 + 敌人）在**每一面墙**上都有剪影：角落、贴墙、多个角色同时
 ##   * 正交投影 1:1：世界 x（或 z）与墙面横向位置一致，脚在墙底
 ##   * enabled / intensity / softness / caster_scale / remove_caster 都生效
@@ -12,8 +12,6 @@ extends Node3D
 
 const WallShadow := preload("res://src/fx/wall_shadow.gd")
 const ArenaKit := preload("res://src/arena/arena.gd")
-const MK := preload("res://src/vesper/mesh_kit.gd")
-const MAT := preload("res://src/vesper/materials.gd")
 
 var _fails: Array = []
 var _checks := 0
@@ -222,22 +220,30 @@ func _phase_robust() -> void:
 
 # ------------------------------------------------------------------ helpers
 func _make_rig(tag: String, pos: Vector3) -> Node3D:
-	var rig = load("res://src/vesper/mech_rig.gd").new()
-	rig.auto_step = false
-	rig.set_process(false)
-	rig.palette = {"tag": tag, "accent": Color(1.0, 0.4, 0.2), "tint": Color(0.9, 0.9, 1.0),
-		"metal_mix": 0.2}
+	# Fixed geometry fixture keeps the projection assertions independent of the hero asset.
+	var rig := Node3D.new()
+	rig.name = tag
+	rig.position = pos
 	add_child(rig)
-	rig.advance(0.0)
-	rig.global_position = pos
+	var profile := SphereMesh.new()
+	profile.radius = 1.2
+	profile.height = 4.0
+	profile.radial_segments = 24
+	profile.rings = 12
+	for index in 24:
+		var joint := Node3D.new()
+		rig.add_child(joint)
+		var part := MeshInstance3D.new()
+		part.mesh = profile
+		var angle := TAU * float(index) / 24.0
+		part.position = Vector3(cos(angle) * 1.35, 2.0 + 2.4 * float(index % 3) / 2.0, sin(angle) * 1.35)
+		joint.add_child(part)
 	return rig
 
 
 func _place(rig: Node3D, pos: Vector3) -> void:
 	rig.global_position = pos
-	rig.heading = 0.0
-	rig.rotation.y = 0.0
-	_ws.refresh()          # 游戏里由 level.step 每帧调用
+	_ws.refresh()
 
 
 func _count_meshes(n: Node) -> int:

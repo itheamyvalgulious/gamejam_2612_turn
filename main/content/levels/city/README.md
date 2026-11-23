@@ -55,7 +55,7 @@ Linux / macOS：`GODOT_BIN=/path/to/godot bash run.sh`。
 | `src/encounter/art.gd` | 实体构件、材质、灯管和照明 |
 | `src/encounter/level.gd` | 战斗流程、寻路、扫掠碰撞、相机与视线 |
 | `src/encounter/*enemy.gd` | 基础、远程、位移怪行为 |
-| `src/game/`、`src/vesper/` | 沿用 demo 的玩家、武器、机甲和战斗系统 |
+| `src/game/` | 关卡输入、相机和战斗系统，角色模型与动作共用 VESPER v2 源文件 |
 | `gfx/encounter/` | 环境材质着色器 |
 
 场景生成尺寸同时用于碰撞体，禁止单独移动视觉资产而遗漏对应碰撞。修改后运行 `run.cmd -ImportOnly`，再实际启动检查。提交源码、`.uid` 和字体导入配置；不提交 `.godot/`、截图、日志或临时测试脚本。
