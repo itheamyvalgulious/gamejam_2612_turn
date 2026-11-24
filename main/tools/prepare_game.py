@@ -16,6 +16,7 @@ MODULES = {
     "act": ("main/content/levels/actdemo", "Act"),
     "cargo": ("main/content/levels/cargo_hold2", "Cargo"),
     "city": ("main/content/levels/city", "City"),
+    "street": ("main/content/levels/street", "Street"),
     "galleria": ("main/content/levels/galleria", "Galleria"),
     "shadow_chamber": ("main/content/levels/shadow_chamber", "Fold"),
     "room_shared": ("main/content/levels/shared", "Room"),
@@ -113,9 +114,12 @@ def content_path(episode, relative):
 def relocate_resources(text, episode, relative, destinations):
     def relocate(match):
         original = match[1]
-        if original.startswith(("core/", "ui/", "assets/")):
+        if original.startswith(("core/", "ui/")):
             # Project-level files live outside runtime/ and already resolve.
             return "res://" + original
+        # Level-local assets (fonts) must point at their runtime copy; the old
+        # "assets/" pass-through left ui_font.tres pointing at a directory that
+        # only exists inside each standalone level project.
         if original == "src/game/hud.gd" and relative.as_posix() == "src/main.gd":
             return "res://ui/hud/combat_hud.gd"
         if original.startswith("team/vesper/"):
