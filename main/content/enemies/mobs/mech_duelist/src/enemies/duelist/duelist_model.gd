@@ -782,6 +782,29 @@ func set_knockdown_power(power: float) -> void:
 	_blade_inlay.set_shader_parameter("baseline", 3.2 * power)
 
 
+## 关卡重生的灯效还原：set_knockdown_power 是乘性写入，撤销要按 _ready
+## 里的基线重新赋值，而不是再乘回去。
+func restore_power() -> void:
+	armor_breached = false
+	set_effects(0.0, 0.0)
+	set_charge_state(-1.0)
+	_emissive(_optic, OPTIC_TINT, 3.8)
+	_emissive(_temple, OPTIC_TINT, 2.0)
+	_emissive(_status, STATUS_TINT, 2.15)
+	_emissive(_core, CORE_TINT, 3.75)
+	_emissive(_arm_power, ARM_TINT, 2.3)
+	_emissive(_shoulder_power, SHOULDER_TINT, 2.15)
+	_emissive(_exhaust_glow, EXHAUST_TINT, 2.9)
+	if _core_spill != null:
+		_core_spill.light_energy = 0.65
+	if _visor_spill != null:
+		_visor_spill.light_energy = 0.22
+	if _blade_spill != null:
+		_blade_spill.light_energy = 1.30
+		_blade_spill.light_color = Color("67ffd4")
+	_blade_inlay.set_shader_parameter("baseline", 3.2)
+
+
 func _tint_lamp(material: StandardMaterial3D, idle: Color, red: float) -> void:
 	var color := idle.lerp(SIGNAL_TINT, red)
 	material.albedo_color = color

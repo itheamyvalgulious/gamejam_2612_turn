@@ -150,7 +150,8 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 		rig.request_jump()
 		jump_buffer_dt = 0.0
 	if B.just("dash"):
-		rig.request_dash()
+		# Shift = 沿当前移动输入方向冲刺（含前/后/左/右）；无输入默认朝前
+		rig.request_dash(rig.global_transform.basis.inverse() * dir)
 	if B.just("parry"):
 		_begin_parry()
 	if B.just("attack_light"):

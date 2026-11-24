@@ -29,6 +29,9 @@ var _blade_part := ""
 var _blade_side := 0.0
 var _pending_armor_break := false
 var _break_point := Vector3.ZERO
+var _pace_center := PACE_CENTER
+var _cover: Array = []
+var _bounds := AABB()
 
 
 func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn := Vector3.INF, health := 3.0) -> void:
@@ -51,16 +54,31 @@ func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn :
 	var pace_center := PACE_CENTER
 	if spawn.is_finite():
 		pace_center = spawn - Vector3(sin(Pace.START_ANGLE), 0, cos(Pace.START_ANGLE)) * Pace.RADIUS
+	_pace_center = pace_center
+	_cover = cover
+	_bounds = bounds
 	sequence.setup(rig, pace_center, cover, bounds, Snd, func() -> float: return P.getf("audio.master"))
 	sequence.advance_pacing(0.0, _focus(), false)
 
 
+## 死亡演出是物理性的：碎甲剥成独立刚体、佩剑脱手、灯效被压低。
+## 重建 rig 要 ~370ms（_ready 全量生成网格），所以重生做物理还原：
+## 碎板挂回原父节点、碎片刚体销毁、灯效按基线重赋，关节姿态交给
+## seek(0)+advance_pacing 逐帧重写（finish_pose 每帧把剑写回腕部）。
 func _on_respawn() -> void:
 	phase = Phase.PACING
 	_normal_strike = 0
 	_blade_impulse = Vector3.ZERO
-	_knockdown = null
-	# seek(0, focus) 是现成的全量复位：清编排推进态并重新施加起始姿态。
+	_blade_part = ""
+	_blade_side = 0.0
+	_pending_armor_break = false
+	if _knockdown != null:
+		_knockdown.restore()
+		_knockdown = null
+	if _wreckage != null:
+		_wreckage.restore(rig)
+		_wreckage = null
+	rig.restore_power()
 	sequence.seek(0.0, _focus())
 	sequence.advance_pacing(0.0, _focus(), false)
 	sequence.show()

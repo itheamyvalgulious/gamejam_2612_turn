@@ -99,17 +99,23 @@ func setup(actor: Node3D, pace_center: Vector3, cover: Array = [], bounds := AAB
 	center = pace_center
 	_cover = cover
 	_bounds = bounds
-	add_child(_trail)
-	_trail.lifetime = 0.105
-	_trail.edge_width = 0.24
-	var trail_material := _trail.material_override.duplicate() as ShaderMaterial
-	trail_material.set_shader_parameter("silver_refraction", true)
-	trail_material.set_shader_parameter("energy", 4.15)
-	_trail.material_override = trail_material
-	add_child(_effects)
-	add_child(_afterimages)
-	_afterimages.setup(model)
-	_audio = AudioStreamPlayer3D.new()
+	# 残影装甲网格按 rig 拓扑构建一次即可：重生重 setup 时（rig 换新、结构不变）
+	# 复用同一批 ghost 网格，不重复构建，也不向 sequence 重挂已挂载的子节点。
+	if _trail.get_parent() == null:
+		add_child(_trail)
+		_trail.lifetime = 0.105
+		_trail.edge_width = 0.24
+		var trail_material := _trail.material_override.duplicate() as ShaderMaterial
+		trail_material.set_shader_parameter("silver_refraction", true)
+		trail_material.set_shader_parameter("energy", 4.15)
+		_trail.material_override = trail_material
+	if _effects.get_parent() == null:
+		add_child(_effects)
+	if _afterimages.get_parent() == null:
+		add_child(_afterimages)
+		_afterimages.setup(model)
+	if _audio == null:
+		_audio = AudioStreamPlayer3D.new()
 	if _charge_sound == null:
 		_charge_sound = Charge.make_sound()
 	_audio.stream = _charge_sound
@@ -117,7 +123,10 @@ func setup(actor: Node3D, pace_center: Vector3, cover: Array = [], bounds := AAB
 	_audio.max_distance = 26.0
 	_audio.panning_strength = 0.82
 	_audio.position = Vector3(0, 0.73, -0.32)
-	model.torso.add_child(_audio)
+	if _audio.get_parent() != model.torso:
+		if _audio.get_parent() != null:
+			_audio.get_parent().remove_child(_audio)
+		model.torso.add_child(_audio)
 
 
 func seek(next_time: float, focus: Vector3) -> void:

@@ -9,6 +9,7 @@ const DefeatBody = preload("res://src/enemies/duelist/duelist_defeat_body.gd")
 var breach: Node3D
 var age := 0.0
 var _plates: Array[DefeatBody] = []
+var _restores: Array[Dictionary] = []
 
 
 func begin(model, contact: Vector3, impulse: Vector3, part: String, side: float, rate: float) -> bool:
@@ -127,8 +128,33 @@ func _detach(model: Node3D, plate: Node3D, velocity: Vector3, spin: Vector3, rat
 	fragment.name = String(plate.name) + "Fragment"
 	model.add_child(fragment)
 	fragment.launch(pose, hull, velocity, spin, rate)
+	# 记录原父节点与原局部姿态：关卡重生时把碎甲按原样装回去，
+	# 而不是重建整个 rig（_ready 全量生成网格要 ~370ms）。
+	_restores.append({"plate": plate, "parent": plate.get_parent(), "xf": plate.transform})
 	plate.reparent(fragment, true)
 	_plates.append(fragment)
+
+
+## 关卡重生的物理还原：碎板归位、缺口盖片与碎片刚体销毁、灯效材质复原。
+## 关节位姿不在这里管——随后 seek/advance_pacing 会按出生动画重写所有关节。
+func restore(model: Node3D) -> void:
+	for entry in _restores:
+		var plate: Node3D = entry["plate"]
+		var parent: Node3D = entry["parent"]
+		if is_instance_valid(plate) and is_instance_valid(parent):
+			plate.reparent(parent, false)
+			plate.transform = entry["xf"]
+	_restores.clear()
+	for fragment in _plates:
+		if is_instance_valid(fragment):
+			fragment.queue_free()
+	_plates.clear()
+	if breach != null and is_instance_valid(breach):
+		breach.queue_free()
+		breach = null
+	model.armor_breached = false
+	model.set_charge_state(-1.0)
+	model.set_effects(0.0, 0.0)
 
 
 func step(delta: float, rate: float) -> void:

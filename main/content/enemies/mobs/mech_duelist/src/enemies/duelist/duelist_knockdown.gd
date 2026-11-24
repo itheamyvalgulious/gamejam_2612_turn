@@ -249,6 +249,16 @@ func _release_sword(model, rate: float) -> void:
 	_sword_body.launch(pose, shape, travel + Vector3.DOWN * 1.2, basis.x * 3.4 + basis.y * 0.9, rate)
 
 
+## 关卡重生的物理还原：掉落的佩剑刚体销毁；weapon_root 的归位交给
+## seek/advance_pacing 重新施加出生姿态（finish_pose 每帧都把剑写回腕部）。
+func restore() -> void:
+	if _sword_body != null and is_instance_valid(_sword_body):
+		_sword_body.queue_free()
+	_sword_body = null
+	_sword_impact = false
+	_sword_contact_seen = false
+
+
 func _sword_hit_world(_surface: Node) -> void:
 	if not _sword_contact_seen:
 		_sword_contact_seen = true

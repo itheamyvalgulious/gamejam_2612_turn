@@ -53,6 +53,13 @@ var _advance_frame := -1
 
 var _barriers: Array[Dictionary] = []
 
+# Uniform scale carried by the skeleton node.  The hair cards are authored in
+# real metres (torso_scale * upper_scale already folded in via HEAD_TO_METRE),
+# so the torso's authored scale must be stripped — but an EXTERNAL scale set on
+# the rig (e.g. the campaign's Units.to_units(1.0) world-unit conversion) has
+# to be preserved or the hair renders at a fraction of the body's size.
+var _skel_scale := 1.0
+
 const HR_NY := 48
 const HR_NPHI := 64
 var _hr_table := PackedFloat32Array()
@@ -587,7 +594,10 @@ func _align_skeleton() -> void:
 		return
 	var xf := _head.global_transform
 	var b := xf.basis.orthonormalized()
-	_skeleton.global_transform = Transform3D(b, xf.origin)
+	# head_world_scale = authored torso scale (HEAD_TO_METRE) * external rig
+	# scale; divide the authored part back out and keep the external one.
+	_skel_scale = maxf(xf.basis.get_scale().x / HEAD_TO_METRE, 1e-4)
+	_skeleton.global_transform = Transform3D(b.scaled(Vector3.ONE * _skel_scale), xf.origin)
 
 
 func update(dt: float, rig: Node3D) -> void:
@@ -603,14 +613,17 @@ func update(dt: float, rig: Node3D) -> void:
 	if rig != null and is_instance_valid(rig):
 		var rp := rig.global_position
 		if _has_prev_rig:
-			var v := (rp - _prev_rig_pos) / dt
+			# world units -> hair metres, so the slip force keeps its authored strength
+			var v := (rp - _prev_rig_pos) / (dt * _skel_scale)
 			if v.length() > 24.0:
 				v = v.limit_length(24.0)
 			_rig_vel = _rig_vel.lerp(v, 1.0 - exp(-12.0 * dt))
 		_prev_rig_pos = rp
 		_has_prev_rig = true
 
-	var skel_basis := _skeleton.global_transform.basis
+	# Direction vectors must be unit: the skeleton transform now carries the
+	# external rig scale, and every force below is authored in metres.
+	var skel_basis := _skeleton.global_transform.basis.orthonormalized()
 	var head_fwd := -skel_basis.z
 	var head_back := skel_basis.z
 

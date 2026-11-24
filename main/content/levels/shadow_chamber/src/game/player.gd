@@ -155,7 +155,7 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 		rig.request_jump()
 		jump_buffer_dt = 0.0
 	if B.just("dash") and _impact_elapsed >= IMPACT_BRACE_TIME:
-		rig.request_dash()
+		rig.request_dash(rig.global_transform.basis.inverse() * dir)
 	if B.just("parry"):
 		_begin_parry()
 	if B.just("attack_light"):
