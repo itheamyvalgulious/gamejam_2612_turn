@@ -44,7 +44,7 @@ const UPPER := 0.452
 const FORE := 0.422
 const GRIP := 0.16
 const BLADE_Y0 := 0.28
-const BLADE_LEN := 1.28
+const BLADE_LEN := 1.60
 
 const WALK_SPEED := 2.2
 const RUN_SPEED := 5.6
