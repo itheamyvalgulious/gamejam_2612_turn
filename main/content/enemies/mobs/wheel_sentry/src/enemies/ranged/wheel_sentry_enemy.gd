@@ -48,13 +48,40 @@ var _locked_wheel_yaw := 0.0
 
 func setup_sentry(yaw: float, first_shot_delay := 0.95) -> void:
 	kind = "archer"
+	_spawn_yaw = yaw
+	_spawn_delay = first_shot_delay
 	_fire_cd = first_shot_delay
 	max_hp = P.getf("archer.hp")
 	hp = max_hp
-	rig = Model.instantiate()
-	add_child(rig)
+	if rig == null:
+		rig = Model.instantiate()
+		add_child(rig)
 	rig.turret.rotation.y = yaw
 	rig.wheel_frame.rotation.y = yaw
+
+
+var _spawn_yaw := 0.0
+var _spawn_delay := 0.95
+
+
+func _on_respawn() -> void:
+	_enter(Phase.PATROL)
+	_fire_cd = _spawn_delay
+	_strafe = 1.0
+	_orbit_gear = 1.0
+	_retreating = false
+	_wheel_speed = 0.0
+	_brace_amount = 0.0
+	_beam_hit = false
+	_locked_turret = Transform3D.IDENTITY
+	_locked_position = Vector3.ZERO
+	_locked_wheel_yaw = 0.0
+	_clear_beam()
+	stop_charge_sound()
+	if rig != null:
+		rig.set_attack_charge(0.0, false)
+		rig.turret.rotation.y = _spawn_yaw
+		rig.wheel_frame.rotation.y = _spawn_yaw
 
 
 func center() -> Vector3:

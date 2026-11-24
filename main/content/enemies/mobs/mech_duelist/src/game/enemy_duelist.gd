@@ -38,19 +38,32 @@ func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn :
 	hp = max_hp
 	damage = 35.0
 	scale_factor = MODEL_SCALE
-	rig = CombatRig.new()
-	rig.name = "Duelist"
-	rig.scale = Vector3.ONE * MODEL_SCALE
-	if level != null:
-		rig.kerb = level.arena.get("kerb", Vector2(INF, 0.0))
-	add_child(rig)
-	add_child(sequence)
+	if rig == null:
+		rig = CombatRig.new()
+		rig.name = "Duelist"
+		rig.scale = Vector3.ONE * MODEL_SCALE
+		if level != null:
+			rig.kerb = level.arena.get("kerb", Vector2(INF, 0.0))
+		add_child(rig)
+	if sequence.get_parent() == null:
+		add_child(sequence)
 	sequence.normal_attack_rate = NORMAL_ATTACK_RATE
 	var pace_center := PACE_CENTER
 	if spawn.is_finite():
 		pace_center = spawn - Vector3(sin(Pace.START_ANGLE), 0, cos(Pace.START_ANGLE)) * Pace.RADIUS
 	sequence.setup(rig, pace_center, cover, bounds, Snd, func() -> float: return P.getf("audio.master"))
 	sequence.advance_pacing(0.0, _focus(), false)
+
+
+func _on_respawn() -> void:
+	phase = Phase.PACING
+	_normal_strike = 0
+	_blade_impulse = Vector3.ZERO
+	_knockdown = null
+	# seek(0, focus) 是现成的全量复位：清编排推进态并重新施加起始姿态。
+	sequence.seek(0.0, _focus())
+	sequence.advance_pacing(0.0, _focus(), false)
+	sequence.show()
 
 
 func ground_position() -> Vector3:

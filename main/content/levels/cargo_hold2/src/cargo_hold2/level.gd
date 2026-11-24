@@ -7,12 +7,19 @@ var rng := RandomNumberGenerator.new()
 var player_previous := Vector3.ZERO
 
 func start_level(_idx: int) -> void:
-	_clear_enemies()
-	_clear_arena()
 	index = 0
-	arena = CargoArena.build()
-	arena_node = arena["node"]
-	add_child(arena_node)
+	if arena_node == null:
+		arena = CargoArena.build()
+		arena_node = arena["node"]
+		add_child(arena_node)
+		_spawn_encounters()
+	else:
+		# 场景与敌人阵容固定：重生只复位，不重建（原实现敌人重 build 要几秒）
+		for e in enemies:
+			if is_instance_valid(e):
+				e.respawn()
+	if projectiles != null:
+		projectiles.clear_all()
 	player.reset(arena["player_spawn"])
 	player.rig.arena_bounds = Vector2.ZERO
 	player_previous = player.rig.global_position
@@ -20,24 +27,33 @@ func start_level(_idx: int) -> void:
 	cam.pitch = -0.12
 	cam.snap(arena)
 	rng.randomize()
+	total_enemies = enemies.size()
+	state = "fight"
+	state_t = 0
+	Snd.set_arena(arena)
+	if on_level_changed.is_valid():
+		on_level_changed.call(0, arena["name_cn"], arena["hint"])
+
+
+func _spawn_encounters() -> void:
 	for pad in [0, 4, 2]:
 		var enemy := Phase.new()
 		enemy.anchor_index = pad
 		add_child(enemy)
 		enemy.level = self
 		enemy.global_position = arena["anchors"][pad]
+		enemy.spawn_xf = enemy.global_transform
+		if enemy.rig != null:
+			enemy.spawn_rig_xf = enemy.rig.transform
 		enemies.append(enemy)
 	var basic = Sentinel.new()
 	add_child(basic)
 	basic.level = self
 	basic.global_position = CargoArena.BASIC_SPAWN
+	basic.spawn_xf = basic.global_transform
+	if basic.rig != null:
+		basic.spawn_rig_xf = basic.rig.transform
 	enemies.append(basic)
-	total_enemies = 4
-	state = "fight"
-	state_t = 0
-	Snd.set_arena(arena)
-	if on_level_changed.is_valid():
-		on_level_changed.call(0, arena["name_cn"], arena["hint"])
 
 func step(dt: float, ctx: Dictionary) -> void:
 	state_t += dt

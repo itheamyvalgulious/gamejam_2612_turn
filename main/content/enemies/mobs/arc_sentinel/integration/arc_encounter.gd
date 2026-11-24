@@ -13,6 +13,17 @@ var _blade_prev: Transform3D
 var _blade_now: Transform3D
 var _consumed := true
 
+
+func _on_respawn() -> void:
+	_cooldown = 0.0
+	_attack = 0
+	_consumed = true
+	if rig != null:
+		rig.play_anim("idle")
+		rig.rotation = Vector3(0.0, rig.rotation.y, 0.0)
+		_blade_now = _blade()
+		_blade_prev = _blade_now
+
 # Intercept and damage checks share the blade profile in world units.
 var blade_discs: Array = []
 var weapon_scale := 1.0

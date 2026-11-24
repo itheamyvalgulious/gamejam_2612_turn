@@ -68,6 +68,35 @@ func configure(model: Node3D) -> void:
 	_cue_tones["cannon_charge"] = _tone(94.0, 670.0, Motion.CANNON_FIRE - Motion.CANNON_CHARGE - 0.04)
 	_cue_tones["cannon_fire"] = _tone(390.0, 83.0, Motion.CANNON_RELEASE - Motion.CANNON_FIRE)
 	_cue_tones["tail_sweep"] = _tone(135.0, 420.0, 0.37)
+	# 折相外壳 shader 的渲染管线变体在第一次 material_overlay 时才编译，
+	# 实测会在首次折相当帧卡 ~150ms。趁加载期把 overlay 挂到第一块拼件上
+	# 渲几帧，让引擎提前编好变体。
+	_warm_overlay.call_deferred()
+
+
+var _warm_left := 0
+
+
+func _warm_overlay() -> void:
+	if _pieces.is_empty() or _phase_mat == null or _applied_shell == _phase_mat:
+		return
+	_pieces[0].material_overlay = _phase_mat
+	_pieces[0].cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_warm_left = 3
+	set_process(true)
+
+
+func _process(_dt: float) -> void:
+	# 只用于预热：预热帧耗尽后摘回 overlay，之后不再占用 process。
+	if _warm_left <= 0:
+		set_process(false)
+		return
+	_warm_left -= 1
+	if _warm_left <= 0 and not _pieces.is_empty():
+		if _applied_shell != _phase_mat:
+			_pieces[0].material_overlay = _applied_shell
+			_pieces[0].cast_shadow = _piece_shadows[0]
+		set_process(false)
 
 
 func show_pose(pose: RefCounted, enabled: bool, time: float, playing: bool,

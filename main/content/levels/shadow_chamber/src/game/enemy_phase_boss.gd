@@ -42,6 +42,19 @@ func spawn_fold(spawn: Transform3D, arena: Dictionary) -> void:
 	controller.reset_at(spawn.origin, spawn.basis.get_euler().y)
 
 
+## 重生复用：controller.reset_at 已做全量复位（hp/相位/姿态），
+## 这里只需补外壳层的存活标记与出场 intro。
+var spawn_xf := Transform3D.IDENTITY
+
+
+func respawn() -> void:
+	alive = true
+	_death_time = 0.0
+	visible = true
+	_pending.clear()
+	controller.reset_at(spawn_xf.origin, spawn_xf.basis.get_euler().y)
+
+
 func step(dt: float, ctx: Dictionary) -> void:
 	_pending.clear()
 	if not alive:

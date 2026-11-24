@@ -641,6 +641,40 @@ func is_assembled() -> bool:
 	return field != null and field.is_assembled()
 
 
+## 关卡重生的原地复位：不管当前散在什么状态，直接回到「已组装 + idle」。
+## 模块网格保留在 field.mods 里（不同状态只是换摆放），不用重建。
+func reset_encounter() -> void:
+	current_anim = "idle"
+	_loop = true
+	_t = 0.0
+	_playing = true
+	_pending_anim = ""
+	_resume_anim = "idle"
+	_resume_t = 0.0
+	_auto_reform_at = -1.0
+	_auto_resume = false
+	_resume_countdown = -1.0
+	_frozen_pose = {}
+	_swarm_retract = 0.0
+	_home_xz = Vector2.ZERO
+	_shot_age = -1.0
+	_muzzle_ok = false
+	_charge = 0.0
+	_orb_scale = 0.0
+	_shot_flash = 0.0
+	_fast_swarm = false
+	if field != null:
+		field.state = FieldScript.State.ASSEMBLED
+		field.update_assembled(P["module_breath"], 0.0, 6.0)
+	if rig != null:
+		rig.position = Vector3(0.0, _rig_base_y(), 0.0)
+		rig.rotation = Vector3.ZERO
+		rig.apply_pose(_base_pose())
+		rig.set_frame_visibility(P["frame_visibility"])
+	_apply_anim_pose(0.0)
+	_hide_shurikens()
+
+
 func blink() -> void:
 	if not _can_swarm():
 		return

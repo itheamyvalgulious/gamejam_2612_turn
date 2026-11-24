@@ -63,6 +63,31 @@ func die() -> void:
 		level.on_enemy_died(self)
 
 
+## 关卡重生时的「原地复活」：敌人节点池化复用，不 queue_free 重建。
+## 基类只复位公共字段；AI/rig 内部状态由各 encounter 覆写 _on_respawn 复位。
+## spawn_xf 由 level 在出生点定好后赋值，respawn 直接摆回去。
+var spawn_xf := Transform3D.IDENTITY
+var spawn_rig_xf := Transform3D.IDENTITY
+
+
+func respawn() -> void:
+	alive = true
+	hp = max_hp
+	_dead_t = 0.0
+	visible = true
+	last_hit_serial = -1
+	swung_serial = 0
+	if spawn_xf != Transform3D.IDENTITY:
+		global_transform = spawn_xf
+	if rig != null and spawn_rig_xf != Transform3D.IDENTITY:
+		rig.transform = spawn_rig_xf
+	_on_respawn()
+
+
+func _on_respawn() -> void:
+	pass
+
+
 func finish_death(dt: float) -> void:
 	_dead_t = maxf(0.0, _dead_t - dt)
 	visible = _dead_t > 0.0

@@ -123,7 +123,14 @@ func _counts() -> Dictionary:
 			meshes += 1
 		elif n is GPUParticles3D or n is CPUParticles3D:
 			parts += 1
+	var alive_n := 0
+	var lvl = _level()
+	if lvl != null and lvl.get("enemies") != null:
+		for e in lvl.get("enemies"):
+			if is_instance_valid(e) and e.get("alive"):
+				alive_n += 1
 	return {
+		"enemies_alive": alive_n,
 		"nodes": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
 		"objects": int(Performance.get_monitor(Performance.OBJECT_COUNT)),
 		"resources": int(Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)),

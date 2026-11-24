@@ -14,24 +14,41 @@ var finishing_enemy: Node3D
 
 func start_level(_idx: int) -> void:
 	finishing_enemy = null
-	_clear_enemies()
 	index = 0
 	if arena_node == null:
 		arena = SceneArena.build("--galleria-height-test" in OS.get_cmdline_user_args())
 		arena_node = arena["node"]
 		add_child(arena_node)
 		preload("res://src/encounter/neon_gi.gd").install(arena_node,not arena["vertical"])
+		_spawn_encounters()
+	else:
+		# 场景与敌人阵容固定：重生只复位，不重建（原实现敌人重 build 要几秒）
+		for e in enemies:
+			if is_instance_valid(e):
+				e.respawn()
+	if projectiles != null:
+		projectiles.clear_all()
 	player.rig.ground_height = arena["player_spawn"].origin.y
 	player.reset(arena["player_spawn"])
 	plunge_armed = false
 	drop_start_height = player.rig.global_position.y
-	build_navigation()
+	if nav == null:
+		build_navigation()
 	player.rig.arena_bounds = Vector2.ZERO
 	player_previous = player.rig.global_position
 	cam.yaw = 0
 	cam.pitch = -0.12
 	cam.snap(arena)
 	rng.randomize()
+	total_enemies = enemies.size()
+	state = "fight"
+	state_t = 0
+	Snd.set_arena(arena)
+	if on_level_changed.is_valid():
+		on_level_changed.call(0, arena["name_cn"], arena["hint"])
+
+
+func _spawn_encounters() -> void:
 	for entry in arena["encounters"]:
 		var enemy
 		match entry["kind"]:
@@ -52,13 +69,10 @@ func start_level(_idx: int) -> void:
 				archers.append(enemy)
 			_:
 				enemy.global_position = arena["anchors"][entry["pad"]] if entry["kind"] == "phase" else entry["pos"]
+		enemy.spawn_xf = enemy.global_transform
+		if enemy.rig != null:
+			enemy.spawn_rig_xf = enemy.rig.transform
 		enemies.append(enemy)
-	total_enemies = enemies.size()
-	state = "fight"
-	state_t = 0
-	Snd.set_arena(arena)
-	if on_level_changed.is_valid():
-		on_level_changed.call(0, arena["name_cn"], arena["hint"])
 
 func step(dt: float, ctx: Dictionary) -> void:
 	state_t += dt

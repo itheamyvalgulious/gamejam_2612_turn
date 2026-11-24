@@ -42,6 +42,9 @@ func setup(p_player: PlayerUnit, p_proj: Projectiles, p_cam: GameCam) -> void:
 
 func start_level(idx: int) -> void:
 	index = clampi(idx, 0, LEVELS.size() - 1)
+	if _can_reuse():
+		_restart_in_place()
+		return
 	_clear_arena()
 	_clear_enemies()
 	arena = ArenaKit.build(String(LEVELS[index]["kind"]), Vector3.ZERO)
@@ -61,6 +64,41 @@ func start_level(idx: int) -> void:
 	state = "intro"
 	state_t = 0.0
 	Snd.set_arena(arena)
+	if on_level_changed.is_valid():
+		on_level_changed.call(index, String(arena.get("name_cn", "")), String(arena.get("hint", "")))
+
+
+## 关卡内的场景和敌人列表都是固定的：重生时竞技场/敌人生成可整段跳过，
+## 敌人原地复活即可，不再重建任何网格（原先重生要 2–4s）。
+func _can_reuse() -> bool:
+	if arena_node == null or not is_instance_valid(arena_node):
+		return false
+	if String(arena.get("kind", "")) != String(LEVELS[index]["kind"]):
+		return false
+	var list: Array = LEVELS[index]["enemies"]
+	if enemies.size() != list.size():
+		return false
+	for i in enemies.size():
+		if not is_instance_valid(enemies[i]):
+			return false
+		var want := "archer" if String(list[i]) == "archer" else "mob"
+		if enemies[i].kind != want:
+			return false
+	return true
+
+
+func _restart_in_place() -> void:
+	player.reset(arena["player_spawn"])
+	player.rig.arena_bounds = Vector2.ZERO
+	if cam != null:
+		cam.snap(arena)
+	for e in enemies:
+		e.respawn()
+	if projectiles != null:
+		projectiles.clear_all()
+	total_enemies = enemies.size()
+	state = "intro"
+	state_t = 0.0
 	if on_level_changed.is_valid():
 		on_level_changed.call(index, String(arena.get("name_cn", "")), String(arena.get("hint", "")))
 
@@ -117,6 +155,9 @@ func _spawn_enemies() -> void:
 			enemy.rig.rotation.y = t.basis.get_euler().y
 		enemy.level = self
 		enemy.global_position = t.origin
+		enemy.spawn_xf = enemy.global_transform
+		if enemy.rig != null:
+			enemy.spawn_rig_xf = enemy.rig.transform
 		enemies.append(enemy)
 
 

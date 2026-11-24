@@ -34,12 +34,19 @@ func setup(p_player: PlayerUnit, p_proj: Projectiles, p_cam: GameCam, arena_buil
 
 
 func start_level() -> void:
-	_clear_arena()
-	_clear_enemies()
-	arena = _arena_builder.build(Vector3.ZERO)
-	arena_node = arena["node"]
-	add_child(arena_node)
-	StaticBatch.apply(arena_node)
+	if arena_node != null and is_instance_valid(arena_node):
+		# 房间场景全程不变：重生只复位，不重建（原实现重生要重建整个竞技场）
+		for e in enemies:
+			if is_instance_valid(e):
+				e.respawn()
+	else:
+		_clear_arena()
+		_clear_enemies()
+		arena = _arena_builder.build(Vector3.ZERO)
+		arena_node = arena["node"]
+		add_child(arena_node)
+		StaticBatch.apply(arena_node)
+		_spawn_enemies()
 	if shadow != null and is_instance_valid(shadow):
 		shadow.queue_free()
 	shadow = null
@@ -48,7 +55,6 @@ func start_level() -> void:
 	# 相机立刻对位：切关的第一帧敌人就开始思考，相机不能还停在上一关
 	if cam != null:
 		cam.snap(arena)
-	_spawn_enemies()
 	total_enemies = enemies.size()
 	state = "intro"
 	state_t = 0.0

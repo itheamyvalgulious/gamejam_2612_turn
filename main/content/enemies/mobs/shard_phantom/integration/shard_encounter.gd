@@ -12,6 +12,17 @@ var _shot_pending := false
 var _rebase_pending := false
 
 
+func _on_respawn() -> void:
+	_destination = -1
+	_phase_t = 0.0
+	_phase_cd = 0.65
+	_attack_cd = 1.1
+	_shot_pending = false
+	_rebase_pending = false
+	if rig != null and rig.has_method("reset_encounter"):
+		rig.reset_encounter()
+
+
 func _ready() -> void:
 	enemy_id = "shard_phantom"
 	kind = "phase"

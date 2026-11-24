@@ -46,29 +46,37 @@ func setup(p_player: PlayerUnit, p_proj: Projectiles, p_cam: GameCam) -> void:
 
 func start_level(idx: int) -> void:
 	index = clampi(idx, 0, LEVELS.size() - 1)
-	_clear_arena()
-	_clear_enemies()
-	arena = ArenaKit.build(String(LEVELS[index]["kind"]), Vector3.ZERO)
-	arena_node = arena["node"]
-	add_child(arena_node)
-	StaticBatch.apply(arena_node)
-	if shadow != null and is_instance_valid(shadow):
-		shadow.queue_free()
-	shadow = null
-	if phase_demo:
-		arena["hint"] = "注视会让折相充能 · 在它实体化时进攻"
-		var spawn: Transform3D = arena["player_spawn"]
-		var boss_spawn: Transform3D = arena["spawns"][0]
-		var target := boss_spawn.origin
-		target.y = spawn.origin.y
-		arena["player_spawn"] = spawn.looking_at(target)
+	var reuse := _can_reuse()
+	if not reuse:
+		_clear_arena()
+		_clear_enemies()
+		arena = ArenaKit.build(String(LEVELS[index]["kind"]), Vector3.ZERO)
+		arena_node = arena["node"]
+		add_child(arena_node)
+		StaticBatch.apply(arena_node)
+		if shadow != null and is_instance_valid(shadow):
+			shadow.queue_free()
+		shadow = null
+		if phase_demo:
+			arena["hint"] = "注视会让折相充能 · 在它实体化时进攻"
+			var spawn: Transform3D = arena["player_spawn"]
+			var boss_spawn: Transform3D = arena["spawns"][0]
+			var target := boss_spawn.origin
+			target.y = spawn.origin.y
+			arena["player_spawn"] = spawn.looking_at(target)
 	player.reset(arena["player_spawn"])
 	player.rig.arena_bounds = Vector2.ZERO
 	# 相机立刻对位：切关的第一帧敌人就开始思考，相机不能还停在上一关
 	if cam != null:
 		cam.first_height_offset = FOLD_EYE_RISE if phase_demo else 0.0
 		cam.snap(arena)
-	_spawn_enemies()
+	if reuse:
+		for e in enemies:
+			e.respawn()
+		if projectiles != null:
+			projectiles.clear_all()
+	else:
+		_spawn_enemies()
 	total_enemies = enemies.size()
 	state = "intro"
 	state_t = 0.0
@@ -77,6 +85,18 @@ func start_level(idx: int) -> void:
 	Snd.set_arena(arena)
 	if on_level_changed.is_valid():
 		on_level_changed.call(index, String(arena.get("name_cn", "")), String(arena.get("hint", "")))
+
+
+## 竞技场与 boss 阵容固定：重生时原地复活 boss（controller.reset_at 全量
+## 复位），竞技场/影墙/网格一概不重建（原实现重生要几秒）。
+func _can_reuse() -> bool:
+	if arena_node == null or not is_instance_valid(arena_node):
+		return false
+	if String(arena.get("kind", "")) != String(LEVELS[index]["kind"]):
+		return false
+	if enemies.size() != 1 or not is_instance_valid(enemies[0]):
+		return false
+	return true
 
 
 func _clear_arena() -> void:
@@ -101,6 +121,7 @@ func _spawn_enemies() -> void:
 	add_child(enemy)
 	enemy.level = self
 	enemy.spawn_fold(arena["spawns"][0], arena)
+	enemy.spawn_xf = arena["spawns"][0]
 	enemies.append(enemy)
 	_setup_shadows()
 
