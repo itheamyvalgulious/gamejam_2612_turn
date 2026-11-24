@@ -16,6 +16,9 @@ const MODEL_SCALE := 1.36
 const PACE_CENTER := Vector3(0.0, 0.0, 5.60)
 const WAKE_RANGE := 20.0 / Units.M_PER_UNIT
 const NORMAL_ATTACK_RATE := 2.0
+const ROUTED_STRIKE_REACH := 5.05
+const STAIR_STRIKE_CLEARANCE := 2.85
+const STAIR_MELEE_CLEARANCE := 3.05
 
 enum Phase { PACING, SETTLING, OPENING, MELEE }
 
@@ -32,6 +35,9 @@ var _break_point := Vector3.ZERO
 var _pace_center := PACE_CENTER
 var _cover: Array = []
 var _bounds := AABB()
+var _opening_pursuit := false
+var _used_ground_motion := false
+var _player_floor := Vector3.ZERO
 
 
 func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn := Vector3.INF, health := 3.0) -> void:
@@ -58,6 +64,16 @@ func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn :
 	_cover = cover
 	_bounds = bounds
 	sequence.setup(rig, pace_center, cover, bounds, Snd, func() -> float: return P.getf("audio.master"))
+	if level != null and level.has_method("duelist_ground_move"):
+		rig.ground_sampler = level.duelist_floor
+		rig.attack_ground_move = level.duelist_ground_move
+		rig.stair_lane = level.duelist_stair_lane
+		rig.attack_blade_clear = level.duelist_blade_clear
+		sequence.can_strike_from = func(at: Vector3) -> bool: return level.duelist_can_strike(at, _player_floor)
+		sequence.patrol.route_point = level.duelist_route_point
+		sequence.patrol.ground_move = level.duelist_ground_move
+		sequence.patrol.on_stairs = level.duelist_on_stairs
+	_player_floor = player.rig.global_position
 	sequence.advance_pacing(0.0, _focus(), false)
 
 
@@ -67,6 +83,10 @@ func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn :
 ## seek(0)+advance_pacing 逐帧重写（finish_pose 每帧把剑写回腕部）。
 func _on_respawn() -> void:
 	phase = Phase.PACING
+	_opening_pursuit = false
+	_used_ground_motion = false
+	_player_floor = player.rig.global_position
+	rig.cancel_strike()
 	_normal_strike = 0
 	_blade_impulse = Vector3.ZERO
 	_blade_part = ""
@@ -86,6 +106,10 @@ func _on_respawn() -> void:
 
 func ground_position() -> Vector3:
 	return rig.global_position
+
+
+func uses_ground_motion() -> bool:
+	return _used_ground_motion
 
 
 func hit_parts() -> Array:
@@ -129,6 +153,7 @@ func on_attack_parried(normal: Vector3) -> void:
 
 
 func step(dt: float, ctx: Dictionary) -> void:
+	_used_ground_motion = false
 	if not alive:
 		_step_knockdown(dt, Fx.time_scale)
 		return
@@ -136,6 +161,8 @@ func step(dt: float, ctx: Dictionary) -> void:
 	if not player.alive:
 		sequence.sync_audio(true)
 		return
+	if player.rig.jump_state != "AIR":
+		_player_floor = player.rig.global_position
 	sequence.show()
 	match phase:
 		Phase.PACING, Phase.SETTLING:
@@ -145,15 +172,63 @@ func step(dt: float, ctx: Dictionary) -> void:
 			if sequence.advance_pacing(dt, _focus(), phase == Phase.SETTLING):
 				phase = Phase.OPENING
 		Phase.OPENING:
-			_step_opening(dt)
+			if not _step_opening_route(dt):
+				_step_opening(dt)
 			if sequence.finished:
 				phase = Phase.MELEE
 		Phase.MELEE:
+			_set_melee_route()
 			_step_normal(dt)
+			_used_ground_motion = rig.has_attack_lane(rig.global_position) or (sequence.patrol.ground_move.is_valid() \
+				and sequence.normal_pose.is_empty() and not sequence.sprint_flashing \
+				and sequence.sprint_windup < 0.0 and sequence.rebound_pose.is_empty())
 	sequence.advance_guard(dt, _focus())
 
 
+func _step_opening_route(dt: float) -> bool:
+	if not sequence.patrol.route_point.is_valid():
+		return false
+	if not _opening_pursuit:
+		var charging := Sequence.ATTACK_AT - sequence.time
+		if charging <= 0.0 or charging > dt or not sequence.dash.is_empty() \
+			or not level.duelist_needs_route(rig.global_position, _player_floor):
+			return false
+		sequence.advance(charging, _focus())
+		sequence.begin_routed_opening()
+		sequence.sync_audio(true)
+		_opening_pursuit = true
+		dt -= charging
+	_used_ground_motion = true
+	var can_approach: bool = level.duelist_can_strike(rig.global_position, _player_floor)
+	var gap: float = (rig.global_position - _player_floor).slide(Vector3.UP).length()
+	var clearance := Lunge.TARGET_CLEARANCE if can_approach and gap < 12.0 else 0.0
+	if gap < 12.0 and rig.has_attack_lane(rig.global_position) and rig.has_attack_lane(_player_floor):
+		clearance = STAIR_STRIKE_CLEARANCE
+	sequence.advance_routed_opening(dt, _focus(), _player_floor, clearance)
+	if sequence.patrol.landed and player.rig.jump_state != "AIR" \
+		and (rig.global_position - _player_floor).slide(Vector3.UP).length() <= ROUTED_STRIKE_REACH \
+		and level.duelist_can_strike(rig.global_position, _player_floor):
+		sequence.begin_routed_strike(_focus())
+		_opening_pursuit = false
+	return true
+
+
+func _set_melee_route() -> void:
+	if not sequence.patrol.route_point.is_valid():
+		return
+	var at: Vector3 = rig.global_position
+	sequence.climbing = rig.has_attack_lane(at)
+	sequence.seeking_level = not level.duelist_can_strike(at, _player_floor)
+	var gap := (at - _player_floor).slide(Vector3.UP).length()
+	sequence.stair_rush_ready = sequence.climbing and gap > Sequence.STAIR_SPRINT_MIN \
+		and gap <= Sequence.STAIR_SPRINT_MAX and player.rig.jump_state != "AIR" \
+		and level.duelist_can_rush(at, _player_floor, Sequence.STAIR_FLASH_CLEARANCE)
+	sequence.patrol.route_goal = _player_floor if sequence.seeking_level or sequence.climbing else Vector3.INF
+	sequence.patrol.route_clearance = STAIR_MELEE_CLEARANCE if sequence.climbing and not sequence.seeking_level else 0.0
+
+
 func _step_opening(dt: float) -> void:
+	var blade_before: Transform3D = rig.weapon_spin.global_transform
 	var before := sequence.time - Sequence.ATTACK_AT
 	var previous_end: Vector3 = sequence.dash.get("end", Vector3.INF)
 	var previous_aim: float = sequence.dash.get("aim", INF)
@@ -161,20 +236,23 @@ func _step_opening(dt: float) -> void:
 	var after := sequence.time - Sequence.ATTACK_AT
 	if before < 0.0 and after >= 0.0:
 		swung_serial += 1
+		if not sequence.dash.is_empty():
+			rig.start_strike(sequence.dash, after)
 	# A long frame can cross the first cut and the handoff. Resolve the first sweep before switching.
 	if swung_serial == 1 and before >= Lunge.CUT_END and not sequence.return_pose.is_empty():
 		swung_serial += 1
 		rig.start_return(sequence.return_pose, after)
-	elif after < Lunge.DURATION and not sequence.dash.is_empty():
+	elif before >= 0.0 and after < Lunge.DURATION and not sequence.dash.is_empty():
 		var new_end: Vector3 = sequence.dash["end"]
 		var new_aim: float = sequence.dash["aim"]
 		if not previous_end.is_equal_approx(new_end) or not is_equal_approx(previous_aim, new_aim):
 			rig.start_strike(sequence.dash, after)
-	rig.update_strike(before, after, dt)
+	rig.update_strike(before, after, dt, blade_before)
 	sequence.sync_audio(sequence.finished)
 
 
 func _step_normal(dt: float) -> void:
+	var blade_before: Transform3D = rig.weapon_spin.global_transform
 	var serial := sequence.normal_serial
 	var before := sequence.normal_time
 	sequence.advance(dt, _focus())
@@ -194,7 +272,7 @@ func _step_normal(dt: float) -> void:
 			before = minf(before, strikes[next].z)
 			rig.start_normal(sequence.normal_move, sequence.normal_pose, sequence.normal_time,
 				sequence.normal_attack_rate, next, sequence.normal_windup_extension)
-		rig.update_strike(before, sequence.normal_time, dt)
+		rig.update_strike(before, sequence.normal_time, dt, blade_before)
 	else:
 		var end := Lunge.DURATION + ReturnCut.DURATION
 		rig.update_strike(end, end, dt)

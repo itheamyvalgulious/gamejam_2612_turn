@@ -4,6 +4,16 @@ const Sentinel = preload("res://src/game/arc_encounter.gd")
 const Sentry = preload("res://src/game/wheel_encounter.gd")
 const Duelist = preload("res://src/game/duelist_encounter.gd")
 const ACTOR_RADIUS := 1.75
+const DUELIST_STEP_HEIGHT := 0.44
+const SENTRY_STEP_HEIGHT := 0.37
+const SENTINEL_STEP_HEIGHT := 0.38
+const SENTINEL_TRACK_RADIUS := 1.20
+const SENTRY_ROLL_RADIUS := 1.58
+const DUELIST_STRIKE_HEIGHT := 0.87
+const STAIR_BLADE_MARGIN := 0.22
+const STAIR_ENTRY := Vector3(SceneArena.STAIR_X, 0.0, SceneArena.STAIR_BOTTOM - 1.6)
+const STAIR_EXIT := Vector3(SceneArena.STAIR_X, SceneArena.DECK_HEIGHT, SceneArena.STAIR_TOP + 3.2)
+const STAIR_ASCENT := Vector3(SceneArena.STAIR_X, 1.5, SceneArena.STAIR_BOTTOM + 5.2)
 var nav: AStarGrid2D
 var plunge_armed := false
 var drop_start_height := 0.0
@@ -15,17 +25,12 @@ var finishing_enemy: Node3D
 func start_level(_idx: int) -> void:
 	finishing_enemy = null
 	index = 0
-	if arena_node == null:
+	var first_start := arena_node == null
+	if first_start:
 		arena = SceneArena.build("--galleria-height-test" in OS.get_cmdline_user_args())
 		arena_node = arena["node"]
 		add_child(arena_node)
 		preload("res://src/encounter/neon_gi.gd").install(arena_node,not arena["vertical"])
-		_spawn_encounters()
-	else:
-		# 场景与敌人阵容固定：重生只复位，不重建（原实现敌人重 build 要几秒）
-		for e in enemies:
-			if is_instance_valid(e):
-				e.respawn()
 	if projectiles != null:
 		projectiles.clear_all()
 	player.rig.ground_height = arena["player_spawn"].origin.y
@@ -40,6 +45,13 @@ func start_level(_idx: int) -> void:
 	cam.pitch = -0.12
 	cam.snap(arena)
 	rng.randomize()
+	if first_start:
+		_spawn_encounters()
+	else:
+		# Put the player at the spawn before enemies reacquire a target.
+		for e in enemies:
+			if is_instance_valid(e):
+				e.respawn()
 	total_enemies = enemies.size()
 	state = "fight"
 	state_t = 0
@@ -69,6 +81,7 @@ func _spawn_encounters() -> void:
 				archers.append(enemy)
 			_:
 				enemy.global_position = arena["anchors"][entry["pad"]] if entry["kind"] == "phase" else entry["pos"]
+				enemy.use_ground_routes(sentinel_ground_move, sentinel_support_floor, sentinel_waypoint)
 		enemy.spawn_xf = enemy.global_transform
 		if enemy.rig != null:
 			enemy.spawn_rig_xf = enemy.rig.transform
@@ -80,7 +93,7 @@ func step(dt: float, ctx: Dictionary) -> void:
 		for enemy in enemies:
 			var old: Vector3 = enemy.rig.global_position
 			enemy.step(dt, ctx)
-			if (enemy.kind == "mob" or enemy.kind == "duelist") and enemy.alive:
+			if enemy.kind == "duelist" and enemy.alive and not enemy.uses_ground_motion():
 				enemy.rig.global_position = resolve_motion(old, enemy.rig.global_position, false)
 	elif state == "clear":
 		# Finish this independent room; never load the demo's next arena.
@@ -102,7 +115,7 @@ func on_enemy_died(enemy) -> void:
 func _duelist_cover() -> Array:
 	var cover: Array = []
 	for box: AABB in arena["solids"]:
-		if absf(box.position.y) > 0.05 or box.size.x >= 35.0 or box.size.z >= 35.0:
+		if arena["walkables"].has(box) or absf(box.position.y) > 0.05 or box.size.x >= 35.0 or box.size.z >= 35.0:
 			continue
 		var radius := Vector2(box.size.x, box.size.z).length() * 0.5
 		var at := box.get_center()
@@ -283,6 +296,177 @@ func navigation_direction(position_at: Vector3, goal: Vector3, heading: Vector3)
 		if direction.length() > 0.9:
 			return direction.normalized()
 	return heading
+
+
+func duelist_on_stairs(at: Vector3) -> bool:
+	return absf(at.x - SceneArena.STAIR_X) < SceneArena.STAIR_WIDTH * 0.5 \
+		and at.z >= SceneArena.STAIR_BOTTOM and at.z < SceneArena.STAIR_TOP
+
+
+func duelist_stair_lane(at: Vector3) -> Vector2:
+	# Include the approach and the upper landing where a cut can still reach the rails.
+	var half_width := SceneArena.STAIR_WIDTH * 0.5
+	if absf(at.x - SceneArena.STAIR_X) > half_width + 0.4 \
+			or at.z < SceneArena.STAIR_BOTTOM - 1.4 or at.z > STAIR_EXIT.z + 1.7:
+		return Vector2.INF
+	# The left side opens into the platform at the top of the rail.
+	var left_edge := SceneArena.STAIR_X - half_width + STAIR_BLADE_MARGIN
+	left_edge -= 5.0 * smoothstep(SceneArena.STAIR_TOP, STAIR_EXIT.z, at.z)
+	return Vector2(left_edge, SceneArena.STAIR_X + half_width - STAIR_BLADE_MARGIN)
+
+
+func duelist_blade_clear(heel: Vector3, tip: Vector3) -> bool:
+	var span := AABB(heel, Vector3.ZERO).expand(tip).grow(0.14)
+	for box: AABB in arena["solids"]:
+		if box.intersects(span) and box.grow(0.14).intersects_segment(heel, tip) != null:
+			return false
+	return true
+
+
+func duelist_floor(at: Vector3, ceiling: float) -> float:
+	var height := 0.0
+	for box: AABB in arena["walkables"]:
+		if box.end.y <= ceiling and Rect2(box.position.x, box.position.z, box.size.x, box.size.z).has_point(Vector2(at.x, at.z)):
+			height = maxf(height, box.end.y)
+	return height
+
+
+func sentinel_ground_move(from: Vector3, goal: Vector3) -> Vector3:
+	return _supported_motion(from, goal, SENTINEL_TRACK_RADIUS, SENTINEL_STEP_HEIGHT, 0.06)
+
+
+func sentinel_support_floor(at: Vector3) -> float:
+	return floor_at(at, at.y + 0.04)
+
+
+func sentinel_waypoint(from: Vector3, goal: Vector3) -> Vector3:
+	var from_stairs := duelist_on_stairs(from)
+	var goal_stairs := duelist_on_stairs(goal)
+	var from_upper := from.y >= SceneArena.DECK_HEIGHT - SENTINEL_STEP_HEIGHT
+	var goal_upper := goal.y >= SceneArena.DECK_HEIGHT - SENTINEL_STEP_HEIGHT
+	if not from_stairs and not from_upper and (goal_stairs or goal_upper):
+		var at_entry := absf(from.x - STAIR_ENTRY.x) < 1.0 and from.z < SceneArena.STAIR_BOTTOM \
+			and from.z >= STAIR_ENTRY.z - 1.0
+		if not at_entry:
+			return _sentinel_ground_waypoint(from, STAIR_ENTRY)
+	if from_stairs or goal_stairs or from_upper or goal_upper:
+		return duelist_route_point(from, goal, true)
+	return _sentinel_ground_waypoint(from, goal)
+
+
+func _sentinel_ground_waypoint(from: Vector3, goal: Vector3) -> Vector3:
+	var offset := (goal - from).slide(Vector3.UP)
+	var probe := from + offset.limit_length(4.0)
+	if melee_clear(from + Vector3.UP, goal + Vector3.UP) \
+			and sentinel_ground_move(from, probe).distance_to(probe) < 0.06:
+		return goal
+	var path := nav.get_point_path(nearest_cell(from), nearest_cell(goal))
+	# Prefer a clear point farther along the path so grid rounding cannot pull the
+	# tracks back to the start cell at a corner.
+	for i in range(mini(path.size() - 1, 4), -1, -1):
+		var point := Vector3(path[i].x, from.y, path[i].y)
+		if point.distance_squared_to(from) < 0.12:
+			continue
+		if sentinel_ground_move(from, point).distance_to(point) < 0.06:
+			return point
+	return from
+
+
+func sentry_ground_move(from: Vector3, goal: Vector3) -> Vector3:
+	return _supported_motion(from, goal, SENTRY_ROLL_RADIUS, SENTRY_STEP_HEIGHT)
+
+
+func duelist_ground_move(from: Vector3, goal: Vector3) -> Vector3:
+	return _supported_motion(from, goal, ACTOR_RADIUS, DUELIST_STEP_HEIGHT)
+
+
+func _supported_motion(from: Vector3, goal: Vector3, radius: float, step_height: float, sample_distance := 0.24) -> Vector3:
+	# Sample the treads in order so a path cannot skip over a gap.
+	var offset := (goal - from).slide(Vector3.UP)
+	var count := maxi(1, ceili(offset.length() / sample_distance))
+	var position := from
+	for i in range(1, count + 1):
+		var next := from + offset * (float(i) / count)
+		next.y = duelist_floor(next, position.y + step_height)
+		if position.y - next.y > step_height or not position_clear(next, radius, true):
+			break
+		position = next
+	return position
+
+
+func duelist_can_strike(from: Vector3, goal: Vector3) -> bool:
+	if absf(from.y - goal.y) > DUELIST_STRIKE_HEIGHT:
+		return false
+	return melee_clear(from + Vector3.UP * 2.3, goal + Vector3.UP * 2.3)
+
+
+func duelist_can_rush(from: Vector3, goal: Vector3, clearance: float) -> bool:
+	if not duelist_stair_lane(goal).is_finite():
+		return false
+	var heading := (goal - from).slide(Vector3.UP).normalized()
+	var landing := goal - heading * clearance
+	var ground := duelist_ground_move(from, landing)
+	return ground.slide(Vector3.UP).distance_to(landing.slide(Vector3.UP)) < 0.35 and duelist_can_strike(ground, goal)
+
+
+func duelist_needs_route(from: Vector3, goal: Vector3) -> bool:
+	return duelist_stair_lane(from).is_finite() or duelist_stair_lane(goal).is_finite() or not duelist_can_strike(from, goal)
+
+
+func duelist_route_point(from: Vector3, goal: Vector3, flowing := false) -> Vector3:
+	var from_stairs := duelist_on_stairs(from)
+	var goal_stairs := duelist_on_stairs(goal)
+	var from_upper := from.y >= SceneArena.DECK_HEIGHT - DUELIST_STEP_HEIGHT and not from_stairs
+	var goal_upper := goal.y >= SceneArena.DECK_HEIGHT - DUELIST_STEP_HEIGHT and not goal_stairs
+	if flowing and goal_upper and from.z > SceneArena.STAIR_TOP - 1.0 and from.z < STAIR_EXIT.z - 0.3 \
+		and from.y >= SceneArena.DECK_HEIGHT - DUELIST_STEP_HEIGHT and absf(from.x - SceneArena.STAIR_X) < SceneArena.STAIR_WIDTH * 0.5:
+		# Start cutting across the deck as soon as the whole diagonal clears the last guard.
+		var merge := Vector3(lerpf(SceneArena.STAIR_X, goal.x, 0.14), SceneArena.DECK_HEIGHT, STAIR_EXIT.z + 1.2)
+		if duelist_ground_move(from, merge).distance_to(merge) < 0.12:
+			return merge
+	if from_stairs:
+		if goal_stairs:
+			return Vector3(SceneArena.STAIR_X, goal.y, goal.z)
+		return STAIR_EXIT if goal_upper else STAIR_ENTRY
+	if from_upper:
+		if goal_upper:
+			# Finish clearing the padded stair guards before cutting across the deck.
+			if from.z < STAIR_EXIT.z - 0.3 and absf(from.x - SceneArena.STAIR_X) < SceneArena.STAIR_WIDTH * 0.5:
+				return STAIR_EXIT
+			return goal
+		if absf(from.x - SceneArena.STAIR_X) > 1.0 or from.z > STAIR_EXIT.z + 1.0:
+			return STAIR_EXIT
+		return Vector3(SceneArena.STAIR_X, 6.4, SceneArena.STAIR_TOP - 4.8)
+	if goal_stairs or goal_upper:
+		if flowing and from.z < SceneArena.STAIR_BOTTOM and from.z > STAIR_ENTRY.z - 4.0 \
+			and absf(from.x - SceneArena.STAIR_X) < 5.0:
+			# Skip the corner point when a continuous diagonal can feed into the stair lane.
+			var merge := Vector3(SceneArena.STAIR_X, 0.57, SceneArena.STAIR_BOTTOM + 1.5)
+			if duelist_ground_move(from, merge).distance_to(merge) < 0.16:
+				return merge
+		if absf(from.x - SceneArena.STAIR_X) < 1.0 and from.z < SceneArena.STAIR_BOTTOM and from.z >= STAIR_ENTRY.z - 1.0:
+			return STAIR_ASCENT
+		return _duelist_lower_waypoint(from, STAIR_ENTRY)
+	return _duelist_lower_waypoint(from, goal)
+
+
+func _duelist_lower_waypoint(from: Vector3, goal: Vector3) -> Vector3:
+	var toward := (goal - from).slide(Vector3.UP)
+	if toward.length_squared() < 0.001:
+		return goal
+	var near := from + toward.limit_length(4.5)
+	if duelist_ground_move(from, near).distance_to(near) < 0.12 and melee_clear(from + Vector3.UP, goal + Vector3.UP):
+		return goal
+	var cells := nav.get_point_path(nearest_cell(from), nearest_cell(goal))
+	var waypoint := from
+	for i in range(mini(cells.size(), 6)):
+		var point := Vector3(cells[i].x, from.y, cells[i].y)
+		if point.distance_to(from) < 0.65:
+			continue
+		if duelist_ground_move(from, point).distance_to(point) > 0.18:
+			break
+		waypoint = point
+	return waypoint
 
 
 func floor_at(pos: Vector3, max_height: float) -> float:

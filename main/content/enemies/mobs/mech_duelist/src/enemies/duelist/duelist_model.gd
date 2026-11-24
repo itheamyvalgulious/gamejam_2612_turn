@@ -19,7 +19,8 @@ const Pace = preload("res://src/enemies/duelist/duelist_pace.gd")
 const BLADE_START := 0.22
 const BLADE_LENGTH := 2.42
 const SWEEP_EXTENSION := 0.85
-const SWEEP_END := BLADE_START + BLADE_LENGTH + SWEEP_EXTENSION
+const BLADE_END := BLADE_START + BLADE_LENGTH
+const SWEEP_END := BLADE_END + SWEEP_EXTENSION
 const BLADE_WIDTH := 0.210
 const HIP_HEIGHT := 2.51
 const THIGH := 1.19
@@ -42,6 +43,10 @@ var weapon_spin: Node3D
 var sword_grip_cant := 0.0
 var armor_breached := false
 var kerb := Vector2(INF, 0.0)
+var ground_sampler: Callable
+var attack_ground_move: Callable
+var stair_lane: Callable
+var attack_blade_clear: Callable
 var legs: Array[Dictionary] = []
 var arms: Array[Dictionary] = []
 var blade_discs: Array = []
@@ -659,7 +664,10 @@ func _position_sword_arm(arm: Dictionary, upper: Vector3, lower: Vector3) -> voi
 	DisplayPose.solve_chain(arm["shoulder"], arm["elbow"], wrist, shoulder, shoulder + reach, upper, UPPER_ARM, FOREARM)
 
 
-func floor_height(point: Vector3) -> float:
+func floor_height(point: Vector3, height_limit := INF) -> float:
+	if ground_sampler.is_valid():
+		var ceiling := height_limit if is_finite(height_limit) else global_position.y + 0.74
+		return ground_sampler.call(point, ceiling)
 	return kerb.y if absf(point.x) >= kerb.x else 0.0
 
 
@@ -668,6 +676,80 @@ func keep_sole_above_floor(foot: Transform3D) -> Transform3D:
 	var toe := foot * Pace.TOE
 	foot.origin.y += maxf(0.0, maxf(floor_height(heel) - heel.y, floor_height(toe) - toe.y))
 	return foot
+
+
+func has_attack_lane(point: Vector3) -> bool:
+	return stair_lane.is_valid() and (stair_lane.call(point) as Vector2).is_finite()
+
+
+func attack_step(from: Vector3, to: Vector3) -> Vector3:
+	if not attack_ground_move.is_valid() or not (has_attack_lane(from) or has_attack_lane(to)):
+		return to
+	return attack_ground_move.call(from, to)
+
+
+func finish_attack_pose(hand_open := 0.24, toes := Vector2.ZERO, support_roll := 0.0,
+		armor_clearance := 0.0, grip_cant := 0.0, reach := BLADE_END) -> void:
+	if stair_lane.is_valid():
+		var lane: Vector2 = stair_lane.call(global_position)
+		if lane.is_finite():
+			_fit_stair_sword(lane, reach, grip_cant)
+	finish_pose(hand_open, 1.0, toes, support_roll, armor_clearance, grip_cant)
+
+
+func _fit_stair_sword(lane: Vector2, reach: float, grip_cant: float) -> void:
+	var arm := arms[1]
+	var shoulder := arm["shoulder"] as Node3D
+	var wrist := arm["wrist"] as Node3D
+	var socket := Hand.sword_socket(grip_cant)
+	var sword := wrist.transform * socket
+	var to_local_axes := global_basis.orthonormalized().inverse()
+	var up := to_local_axes * Vector3.UP
+	var across := to_local_axes * Vector3.RIGHT
+	var model_scale := global_basis.get_scale().x
+	var deviation := sword_wrist_deviation()
+	var flexion := sword_wrist_flexion()
+	var flex_roll := sword_arm_angles(deviation, flexion)
+
+	# Rotate the shoulder-to-tip arc into the lane, keeping the elbow bend
+	# and the grip relative to the forearm as authored.
+	for _attempt in 3:
+		var tip := sword * Vector3(0.0, reach, 0.0)
+		var world_tip := to_global(tip)
+		var room := clampf(world_tip.x, lane.x, lane.y)
+		if is_equal_approx(room, world_tip.x):
+			break
+		var arm_to_tip := tip - shoulder.position
+		var planar := arm_to_tip.slide(across)
+		if planar.length_squared() < 0.0001:
+			planar = up * 0.01
+		var length := arm_to_tip.length()
+		var sideways := clampf((room - shoulder.global_position.x) / model_scale, -length, length)
+		var in_lane := planar.normalized() * sqrt(maxf(0.0, length * length - sideways * sideways))
+		var rotation := Basis(Quaternion(arm_to_tip.normalized(), (in_lane + across * sideways).normalized()))
+		pose_sword_arm(rotation * sword.basis, flex_roll.x, flex_roll.y, deviation, flexion, grip_cant)
+		sword = wrist.transform * socket
+
+	if not attack_blade_clear.is_valid() or _stair_sword_clear(sword, reach):
+		return
+	# A deck edge or the next tread can also block the blade vertically.
+	# Choose the smallest joint rotation that gives the whole blade room.
+	var aim := sword.basis
+	var pitch_axis := aim.y.cross(up).normalized()
+	if pitch_axis.is_zero_approx():
+		pitch_axis = across
+	for angle in [6.0, 12.0, 20.0, 32.0, 48.0, 70.0, 95.0]:
+		for axis: Vector3 in [pitch_axis, -pitch_axis, up, -up]:
+			var candidate := Basis(axis, deg_to_rad(angle)) * aim
+			pose_sword_arm(candidate, flex_roll.x, flex_roll.y, deviation, flexion, grip_cant)
+			if _stair_sword_clear(wrist.transform * socket, reach):
+				return
+	pose_sword_arm(aim, flex_roll.x, flex_roll.y, deviation, flexion, grip_cant)
+
+
+func _stair_sword_clear(sword: Transform3D, reach: float) -> bool:
+	return attack_blade_clear.call(to_global(sword * Vector3(0.0, BLADE_START, 0.0)),
+		to_global(sword * Vector3(0.0, reach, 0.0)))
 
 
 func finish_pose(hand_open := 0.24, blade_grip := 1.0, toe_angles := Vector2.ZERO,

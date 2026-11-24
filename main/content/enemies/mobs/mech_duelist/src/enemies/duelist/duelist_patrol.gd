@@ -11,6 +11,9 @@ const MIN_REACH_MARGIN := 0.035
 const RUN_RANGE := 10.0 / Units.M_PER_UNIT
 const RUN_ENTRY_RANGE := 10.45 / Units.M_PER_UNIT
 const SUPPORT_REACH := 1.45
+const BURST_PACE := 58.0
+const STAIR_BURST_PACE := 27.0
+const ROUTED_BURST_SPEED_MULTIPLIER := 2.0
 
 enum Step { ORBIT, PURSUE, CLOSE, RETREAT, TURN, BRAKE, PRESS }
 
@@ -27,6 +30,12 @@ var moving := false
 var landed := false
 var press_range := 0.0
 var press_haste := 0.0
+var route_goal := Vector3.INF
+var route_clearance := 0.0
+var route_burst := false
+var route_point: Callable
+var ground_move: Callable
+var on_stairs: Callable
 var next_foot: int:
 	get:
 		return _swing
@@ -73,6 +82,9 @@ func reset() -> void:
 	motion = Step.ORBIT
 	press_range = 0.0
 	press_haste = 0.0
+	route_goal = Vector3.INF
+	route_clearance = 0.0
+	route_burst = false
 	_running = false
 	_entry_speed = 0.0
 	_exit_velocity = Vector3.ZERO
@@ -173,19 +185,33 @@ func advance(model, dt: float, focus: Vector3, cover: Array, bounds: AABB, stop_
 func _start_step(model, focus: Vector3, cover: Array, bounds: AABB) -> void:
 	var scale: float = model.global_basis.get_scale().x
 	_root_from = model.global_position
-	var sight := (focus - _root_from).slide(Vector3.UP)
+	var following_route := route_goal.is_finite() and route_point.is_valid()
+	var bursting := following_route and route_burst
+	var stairs: bool = on_stairs.is_valid() and on_stairs.call(_root_from)
+	var destination: Vector3 = focus
+	if following_route:
+		destination = route_goal if route_clearance > 0.0 else route_point.call(_root_from, route_goal, bursting)
+	var sight := (destination - _root_from).slide(Vector3.UP)
 	var distance := sight.length()
 	_yaw_from = model.global_rotation.y
 	var wanted := atan2(-sight.x, -sight.z) if distance > 0.10 else _yaw_from
 	var turn := angle_difference(_yaw_from, wanted)
 	var previous := motion
 	motion = _choose_step(distance, turn)
-	if _is_forward_step(previous) and not _is_forward_step(motion):
+	if following_route:
+		motion = Step.TURN if not bursting and absf(turn) > deg_to_rad(52.0) else Step.PURSUE
+		if distance - route_clearance < 0.12 and motion != Step.TURN:
+			motion = Step.BRAKE
+	if not bursting and _is_forward_step(previous) and not _is_forward_step(motion):
 		motion = Step.BRAKE
 	# Open the foot on the side of the turn, then collect the other foot on the next step.
 	if motion == Step.TURN and previous != Step.TURN:
 		_swing = 0 if turn > 0.0 else 1
 	var angle_limit := 42.0 if motion == Step.TURN else 25.0
+	if following_route and motion == Step.TURN:
+		angle_limit = 72.0
+	if bursting and motion == Step.PURSUE:
+		angle_limit = 105.0
 	if motion == Step.BRAKE:
 		angle_limit = 8.0
 	angle_limit = deg_to_rad(angle_limit)
@@ -199,18 +225,43 @@ func _start_step(model, focus: Vector3, cover: Array, bounds: AABB) -> void:
 		stride = Vector2.ZERO
 	var move := forward * stride.x + across * (_orbit * stride.y)
 	var radius := 1.1 * scale
-	_root_to = _clear_travel(_root_from + move * scale, cover, bounds, radius)
-	if motion != Step.TURN and motion != Step.BRAKE and _root_to.distance_squared_to(_root_from) < 0.045:
+	if following_route:
+		# The waypoint owns travel, while the turn is still driven by the planted feet.
+		var reach := maxf(0.0, distance - route_clearance)
+		var stride_limit := 1.65 if stairs else 3.35
+		if stairs and distance < 6.2:
+			stride_limit = 0.80
+		var length := minf(reach, stride_limit)
+		if bursting:
+			length = minf(reach, 2.65 if stairs else 5.1)
+		if motion == Step.TURN:
+			length = 0.0
+		elif motion == Step.BRAKE:
+			length = minf(length, 0.35)
+		move = sight.normalized() * (length / scale)
+	_root_to = ground_move.call(_root_from, _root_from + move * scale) if ground_move.is_valid() \
+		else _clear_travel(_root_from + move * scale, cover, bounds, radius)
+	if not following_route and motion != Step.TURN and motion != Step.BRAKE and _root_to.distance_squared_to(_root_from) < 0.045:
 		_orbit *= -1.0
 		move = forward * stride.x + across * _orbit * maxf(stride.y, 0.39)
-		_root_to = _clear_travel(_root_from + move * scale, cover, bounds, radius)
+		_root_to = ground_move.call(_root_from, _root_from + move * scale) if ground_move.is_valid() \
+			else _clear_travel(_root_from + move * scale, cover, bounds, radius)
 
 	_step_duration = float(STEP_DURATIONS[motion])
 	if motion == Step.PRESS:
 		_step_duration = lerpf(_step_duration, 0.195, press_haste)
+	if following_route:
+		_step_duration = 0.16 if motion == Step.TURN or stairs else 0.19
 	var travel := _root_to - _root_from
+	if bursting:
+		var pace := STAIR_BURST_PACE if stairs else BURST_PACE
+		# Lean into a new heading in stride. Keep a positive speed through the bend.
+		pace *= lerpf(1.0, 0.66, smoothstep(0.40, 2.45, absf(turn)))
+		_step_duration = clampf(travel.slide(Vector3.UP).length() / pace, 0.042, 0.146) / ROUTED_BURST_SPEED_MULTIPLIER
 	var carries_momentum := motion != Step.BRAKE and motion != Step.TURN
 	_entry_speed = maxf(0.0, _exit_velocity.dot(travel.normalized()))
+	if bursting and carries_momentum:
+		_entry_speed = maxf(_entry_speed, _exit_velocity.length() * 0.64)
 	_exit_velocity = travel / _step_duration if carries_momentum else Vector3.ZERO
 	_entry_yaw_speed = _exit_yaw_speed
 	_exit_yaw_speed = (_yaw_to - _yaw_from) / _step_duration if carries_momentum else 0.0
@@ -219,15 +270,19 @@ func _start_step(model, focus: Vector3, cover: Array, bounds: AABB) -> void:
 	_exit_run = 1.0 if motion == Step.PURSUE else 0.0
 	var forward_step := _is_forward_step(motion)
 	_exit_lean = float(FORWARD_LEANS[motion]) if forward_step else 0.0
+	if bursting and forward_step:
+		_exit_lean = 0.32
 
 	var side := -1.0 if _swing == 0 else 1.0
 	var lead := 0.29 if motion == Step.BRAKE else 0.16
 	var stance := 0.47 if motion == Step.PURSUE else 0.60
-	var center := _root_to + (across * side * stance + forward * lead + move * 0.22) * scale
+	var center := _root_to + (across * side * stance + forward * lead + move * (0.08 if bursting else 0.22)) * scale
 	var spread := side * (center - _feet[1 - _swing].origin).dot(across)
 	center += across * side * clampf((stance + 0.24) * scale - spread, 0.0, 0.46 * scale)
-	center = _clear_position(center, cover, bounds, 0.23 * scale)
-	center.y = model.global_position.y + Pace.SOLE_HEIGHT * scale
+	if not ground_move.is_valid():
+		center = _clear_position(center, cover, bounds, 0.23 * scale)
+	center.y = model.floor_height(center, _root_to.y + 0.74) + Pace.SOLE_HEIGHT * scale if ground_move.is_valid() \
+		else model.global_position.y + Pace.SOLE_HEIGHT * scale
 	var yaw := _yaw_to - side * deg_to_rad(9.0)
 	_foot_to = model.keep_sole_above_floor(Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * scale), center))
 
@@ -241,7 +296,13 @@ func _is_forward_step(step: int) -> bool:
 func left_can_support(model) -> bool:
 	var foot := _feet[0]
 	var toe := foot * Pace.TOE
-	return toe.y <= model.floor_height(toe) + 0.09 and model.to_local(foot.origin).z <= SUPPORT_REACH
+	var contact: bool = toe.y <= model.floor_height(toe) + 0.09
+	if not contact and ground_move.is_valid():
+		# Downhill the heel can carry weight on the upper tread while the toe
+		# overhangs the next step.
+		var heel := foot * Pace.HEEL
+		contact = heel.y <= model.floor_height(heel) + 0.09
+	return contact and model.to_local(foot.origin).z <= SUPPORT_REACH
 
 
 func _choose_step(distance: float, turn: float) -> int:
@@ -320,7 +381,7 @@ func _support_foot(stride: float) -> Transform3D:
 		var forward := travel.normalized()
 		var scale := foot.basis.get_scale().y
 		var overreach := maxf(0.0, (_root_to - foot.origin).dot(forward) - SUPPORT_REACH * scale)
-		var release := smoothstep(0.62, 1.0, stride)
+		var release := smoothstep(0.35 if route_burst else 0.62, 1.0, stride)
 		foot.origin += (forward + Vector3.UP * 0.24) * (overreach * release)
 	return foot
 
@@ -353,7 +414,7 @@ func _pose(model, focus: Vector3) -> void:
 	feet[_swing] = foot
 	toes[_swing] *= 1.0 - travel
 
-	var blend := smoothstep(0.0, RECOVERY, recovery_age)
+	var blend := smoothstep(0.0, 0.165 / ROUTED_BURST_SPEED_MULTIPLIER if route_burst else RECOVERY, recovery_age)
 	var support := -1.0 if _swing == 1 else 1.0
 	var body := model.body as Node3D
 	var chest := model.torso as Node3D

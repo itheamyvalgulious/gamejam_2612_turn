@@ -256,7 +256,7 @@ static func sweep_blade_parts(prev_xf: Transform3D, cur_xf: Transform3D, discs: 
 			if n.length_squared() < EPS:
 				n = Vector3.UP
 			best = {"hit": true, "depth": depth, "point": res["c1"],
-				"blade_point": res["c0"], "normal": n.normalized(),
+				"blade_point": res["c0"], "normal": n.normalized(), "travel": s["b"] - s["a"],
 				"t": float(res["s"]), "disc_r": rr, "part": String(p.get("label", ""))}
 	return best
 

@@ -2,6 +2,11 @@ extends "res://src/encounter/art.gd"
 const HALF_WIDTH := 36.0
 const HALF_DEPTH := 32.0
 const CEILING := 25.0
+const STAIR_X := 29.0
+const STAIR_WIDTH := 6.0
+const STAIR_BOTTOM := -10.0
+const STAIR_TOP := 18.0
+const DECK_HEIGHT := 8.0
 
 static func build(height_test := false) -> Dictionary:
 	return new().build_scene(height_test)
@@ -50,10 +55,10 @@ func build_scene(height_test: bool) -> Dictionary:
 			neon_path("cyan",[Vector3(x-0.5,8.04,z+0.4),Vector3(x,8.04,z),Vector3(x+0.5,8.04,z+0.4)],0.025)
 	# 28 shallow solid treads form the return route; same boxes drive support and collision.
 	for i in 28:
-		var h := (i+1)*8.0/28.0
-		var z := -9.5+i
-		block("frame",Vector3(6,h,1),Vector3(29,h*0.5,z),true,true,0.02)
-		block("metal",Vector3(5.8,0.025,0.09),Vector3(29,h+0.014,z-0.43),false,false,0.005)
+		var h := (i+1)*DECK_HEIGHT/28.0
+		var z := STAIR_BOTTOM+0.5+i
+		block("frame",Vector3(STAIR_WIDTH,h,1),Vector3(STAIR_X,h*0.5,z),true,true,0.02)
+		block("metal",Vector3(5.8,0.025,0.09),Vector3(STAIR_X,h+0.014,z-0.43),false,false,0.005)
 		if i%4 == 0:
 			for x in [26.35,31.65]:
 				block("cyan",Vector3(0.15,0.03,0.65),Vector3(x,h+0.018,z),false,false,0.008)
@@ -121,8 +126,11 @@ func build_scene(height_test: bool) -> Dictionary:
 	]
 	if height_test:
 		title = "坠击中庭 · 高低差"
-		hint = "下层中央 · 1 生命刀客 · 侧斩终结触发慢放"
-		encounters = [{"kind": "duelist", "pos": Vector3(2, 0, -1), "health": 1.0}]
+		hint = "下层 · 人形刀客与单轮巡射机甲"
+		encounters = [
+			{"kind": "duelist", "pos": Vector3(2, 0, -1), "health": 1.0},
+			{"kind": "archer", "pos": Vector3(17, 0, 7)},
+		]
 	var result := finish(title, hint, Vector2(HALF_WIDTH, HALF_DEPTH), Vector3(0, 8, 25), encounters)
 	result["vertical"] = true
 	result["height_test"] = height_test

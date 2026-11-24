@@ -12,7 +12,11 @@ ROOTS = {
         "src/enemies/duelist/duelist_wreckage.gd",
     ]),
     "shard": ("mobs/shard_phantom", ["scripts/character.gd", "scripts/phantom/energy_shuriken.gd"]),
-    "wheel": ("mobs/wheel_sentry", ["scenes/ranged/wheel_sentry_model.tscn", "src/enemies/ranged/wheel_sentry_beam.gd"]),
+    "wheel": ("mobs/wheel_sentry", [
+        "scenes/ranged/wheel_sentry_model.tscn",
+        "src/enemies/ranged/wheel_sentry_beam.gd",
+        "src/enemies/ranged/wheel_sentry_knockdown.gd",
+    ]),
 }
 PATHS = re.compile(r'''(?<=["'])res://([^"'\s]+)(?=["'])''')
 
@@ -77,7 +81,7 @@ def adapters(episode, enemies):
 
 def adapt_wheel(text):
     text = text.replace("extends EnemyUnit", 'extends "res://src/game/encounter_unit.gd"')
-    for path in ("scenes/ranged/wheel_sentry_model.tscn", "src/enemies/ranged/wheel_sentry_beam.gd"):
+    for path in ROOTS["wheel"][1]:
         text = text.replace("res://" + path, "res://team/wheel/" + path)
     text = text.replace('kind = "archer"', 'kind = "archer"\n\tenemy_id = "wheel_sentry"')
     return text
@@ -129,6 +133,9 @@ func spawn_shard(pos: Vector3, direction: Vector3, speed: float, damage: float) 
         begin = source.index('\t\t"sentry_charge":')
         end = source.index('\t\t"laser":', begin)
         text = text.replace('\t\t"laser":', source[begin:end] + '\t\t"laser":', 1)
+    if relative == "src/audio/audio.gd":
+        text = text.replace('"qi_loop", "sentry_charge",', '"qi_loop", "sentry_charge", "sentry_break",', 1)
+        text = text.replace('"swing_light", "hit", "clang"', '"swing_light", "hit", "clang", "sentry_break"', 1)
     if relative == "src/core/params.gd":
         source = (wheel / relative).read_text(encoding="utf-8-sig")
         specs = [line for line in source.splitlines() if re.match(r'\s*_f\("sentry\.', line)]

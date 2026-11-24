@@ -6,15 +6,21 @@ const EDGE_RADIUS := 0.24
 const HIT_FROM := 0.30
 const HIT_TO := 0.87
 const ATTACK_CLIPS := ["attack1", "attack2"]
+const STRIKE_HEIGHT := 0.87
 
 var _cooldown := 0.0
 var _attack := 0
 var _blade_prev: Transform3D
 var _blade_now: Transform3D
 var _consumed := true
+var _ground_move: Callable
+var _support_floor: Callable
+var _waypoint: Callable
+var _fall_speed := 0.0
 
 
 func _on_respawn() -> void:
+	_fall_speed = 0.0
 	_cooldown = 0.0
 	_attack = 0
 	_consumed = true
@@ -30,7 +36,7 @@ var weapon_scale := 1.0
 var last_dt := 0.0
 var is_attacking: bool:
 	get:
-		return not _consumed and rig.current_anim in ATTACK_CLIPS
+		return _fall_speed <= 0.0 and not _consumed and rig.current_anim in ATTACK_CLIPS
 var attack_elapsed: float:
 	get:
 		return rig.anim_time()
@@ -57,6 +63,23 @@ func _ready() -> void:
 	_blade_length = rig.rig.marker_tip.global_position.distance_to(_blade_now.origin)
 	for i in 7:
 		blade_discs.append({"y": _blade_length * float(i) / 6.0, "r": EDGE_RADIUS})
+
+
+func use_ground_routes(move: Callable, support: Callable, waypoint: Callable) -> void:
+	_ground_move = move
+	_support_floor = support
+	_waypoint = waypoint
+
+
+func hurt(amount: float, normal := Vector3.UP, knock := 0.0) -> void:
+	if _ground_move.is_valid() and alive and amount > 0.0 and knock > 0.0:
+		var from: Vector3 = rig.global_position
+		var push := normal.slide(Vector3.UP).normalized() * knock
+		rig.global_position = _ground_move.call(from, from + push)
+		_blade_now = _blade()
+		_blade_prev = _blade_now
+		knock = 0.0
+	super.hurt(amount, normal, knock)
 
 
 func blocks_when_seen() -> bool:
@@ -88,14 +111,22 @@ func step(dt: float, ctx: Dictionary) -> void:
 		return
 	_cooldown = maxf(0.0, _cooldown - dt)
 	var pace := 0.0
+	var grounded := _settle_on_ground(dt)
 	var clip: String = rig.current_anim
-	if player != null and player.alive and level.state == "fight" and clip in ["idle", "run"]:
+	if grounded and player != null and player.alive and level.state == "fight" and clip in ["idle", "run"]:
 		var center_at: Vector3 = rig.global_position
-		var to: Vector3 = (player.rig.global_position - center_at).slide(Vector3.UP)
-		var distance := to.length()
-		var desired: float = atan2(to.x, to.z) if distance > 0.01 else rig.rotation.y
+		var target: Vector3 = player.rig.global_position
+		var offset := (target - center_at).slide(Vector3.UP)
+		var distance := offset.length()
+		var same_level := not _ground_move.is_valid() or absf(target.y - center_at.y) <= STRIKE_HEIGHT
+		var clear: bool = same_level and (not level.has_method("melee_clear") \
+			or level.melee_clear(center(), target + Vector3.UP * 1.4))
+		var chase := target
+		if _waypoint.is_valid() and (not clear or distance > 3.25):
+			chase = _waypoint.call(center_at, target)
+		var heading := (chase - center_at).slide(Vector3.UP)
+		var desired: float = atan2(heading.x, heading.z) if heading.length_squared() > 0.0001 else rig.rotation.y
 		rig.rotation.y = rotate_toward(rig.rotation.y, desired, dt * 6.0)
-		var clear: bool = not level.has_method("melee_clear") or level.melee_clear(center(), player.rig.global_position + Vector3.UP * 1.4)
 		if distance <= 3.25 and clear and _cooldown <= 0.0:
 			_attack += 1
 			swung_serial += 1
@@ -103,20 +134,53 @@ func step(dt: float, ctx: Dictionary) -> void:
 			_cooldown = rig.anim_duration() + 0.43
 			_consumed = false
 			Snd.play_at("swing_light", center(), {"gain": 0.44})
-		elif distance > 2.65:
-			var direction: Vector3 = rig.global_basis.z.normalized()
-			if level.has_method("navigation_direction"):
-				direction = level.navigation_direction(center_at, player.rig.global_position, direction)
-			pace = minf(P.getf("mob.speed"), 8.0)
-			rig.global_position += direction * pace * dt
-			if clip != "run":
-				rig.play_anim("run")
+		elif (distance > 2.65 or not same_level) and dt > 0.0:
+			pace = _move_toward(center_at, target, heading, dt)
+			var movement_clip := "run" if pace > 0.04 else "idle"
+			if clip != movement_clip:
+				rig.play_anim(movement_clip)
 		elif clip != "idle":
 			rig.play_anim("idle")
 	rig.set_track_speed(pace / SCALE, pace / SCALE)
 	_blade_prev = _blade_now
 	rig._process(dt)
 	_blade_now = _blade()
+
+
+func _settle_on_ground(dt: float) -> bool:
+	if not _support_floor.is_valid():
+		return true
+	var at: Vector3 = rig.global_position
+	var floor_y: float = _support_floor.call(at)
+	if at.y <= floor_y + 0.04:
+		_fall_speed = 0.0
+		return true
+	# A displaced unit must land before it can chase or swing.
+	_fall_speed += P.getf("jump.gravity") * dt
+	at.y = maxf(floor_y, at.y - _fall_speed * dt)
+	rig.global_position = at
+	if at.y > floor_y:
+		_consumed = true
+		if rig.current_anim != "idle":
+			rig.play_anim("idle")
+		return false
+	_fall_speed = 0.0
+	return true
+
+
+func _move_toward(from: Vector3, target: Vector3, heading: Vector3, dt: float) -> float:
+	var pace := minf(P.getf("mob.speed"), 8.0)
+	var forward: Vector3 = rig.global_basis.z.normalized()
+	if _ground_move.is_valid():
+		if heading.normalized().dot(forward) < 0.55:
+			return 0.0
+		var at: Vector3 = _ground_move.call(from, from + heading.limit_length(pace * dt))
+		rig.global_position = at
+		return (at - from).slide(Vector3.UP).length() / dt
+	if level.has_method("navigation_direction"):
+		forward = level.navigation_direction(from, target, forward)
+	rig.global_position += forward * pace * dt
+	return pace
 
 
 func predict_weapon_xf(time: float) -> Transform3D:

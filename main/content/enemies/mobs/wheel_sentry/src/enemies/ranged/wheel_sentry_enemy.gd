@@ -3,6 +3,7 @@ extends EnemyUnit
 
 const Model = preload("res://scenes/ranged/wheel_sentry_model.tscn")
 const Beam = preload("res://src/enemies/ranged/wheel_sentry_beam.gd")
+const Knockdown = preload("res://src/enemies/ranged/wheel_sentry_knockdown.gd")
 const Units = preload("res://src/core/units.gd")
 
 enum Phase { PATROL, BRAKE, LIGHT, CHARGE, FIRING, RECOVERY }
@@ -27,6 +28,8 @@ const MIN_FIRE_DISTANCE := 3.8 / Units.M_PER_UNIT
 const PRESSURED_BEAM_DISTANCE := 5.6 / Units.M_PER_UNIT
 const ORBIT_STEER := deg_to_rad(34.0)
 const BRACE_DURATION := 0.18
+const MAX_GUN_PITCH := deg_to_rad(36.0)
+const RETREAT_REPLAN := 0.12
 
 var phase := Phase.PATROL
 var phase_age := 0.0
@@ -37,6 +40,9 @@ var _light_duration := 0.55
 var _strafe := 1.0
 var _orbit_gear := 1.0
 var _retreating := false
+var _steer_delay := 0.0
+var _escape_yaw := 0.0
+var _ground_roll: Callable
 var _wheel_speed := 0.0
 var _brace_amount := 0.0
 var _beam_hit := false
@@ -44,6 +50,11 @@ var _charge_sound := 0
 var _locked_turret := Transform3D.IDENTITY
 var _locked_position := Vector3.ZERO
 var _locked_wheel_yaw := 0.0
+var _knockdown: Knockdown
+var _fatal_contact: Dictionary = {}
+var _spawn_yaw := 0.0
+var _spawn_delay := 0.95
+var _spawn_model_pose := Transform3D.IDENTITY
 
 
 func setup_sentry(yaw: float, first_shot_delay := 0.95) -> void:
@@ -56,17 +67,21 @@ func setup_sentry(yaw: float, first_shot_delay := 0.95) -> void:
 	if rig == null:
 		rig = Model.instantiate()
 		add_child(rig)
+		_spawn_model_pose = rig.transform
 	rig.turret.rotation.y = yaw
 	rig.wheel_frame.rotation.y = yaw
-
-
-var _spawn_yaw := 0.0
-var _spawn_delay := 0.95
+	if level != null and level.has_method("sentry_ground_move"):
+		_ground_roll = level.sentry_ground_move
+		rig.support_ground = level.duelist_floor
 
 
 func _on_respawn() -> void:
 	_enter(Phase.PATROL)
 	_fire_cd = _spawn_delay
+	_light_count = 0
+	_steer_delay = 0.0
+	_escape_yaw = _spawn_yaw
+	_fatal_contact.clear()
 	_strafe = 1.0
 	_orbit_gear = 1.0
 	_retreating = false
@@ -78,10 +93,17 @@ func _on_respawn() -> void:
 	_locked_wheel_yaw = 0.0
 	_clear_beam()
 	stop_charge_sound()
+	if _knockdown != null:
+		_knockdown.restore(rig, self)
+		_knockdown = null
 	if rig != null:
-		rig.set_attack_charge(0.0, false)
-		rig.turret.rotation.y = _spawn_yaw
+		rig.transform = _spawn_model_pose
 		rig.wheel_frame.rotation.y = _spawn_yaw
+		rig.wheel.rotation = Vector3.ZERO
+		rig.set_deployment(0.0)
+		rig.set_aim(_spawn_yaw, 0.0)
+		rig.set_attack_charge(0.0, false)
+		rig.set_defeat_power(0.0)
 
 
 func center() -> Vector3:
@@ -115,12 +137,21 @@ func counter_in_view(observer: Camera3D) -> bool:
 func hit_parts() -> Array:
 	var axle: Vector3 = rig.wheel.global_position
 	var wheel_axis: Vector3 = rig.wheel_frame.global_basis.z
-	return [
+	var parts: Array = [
 		{"a": rig.turret.to_global(Vector3(0, 0.24, -0.83)),
-			"b": rig.turret.to_global(Vector3(0, 0.25, 0.75)), "r": 0.61},
-		{"a": axle - Vector3.UP * 0.67, "b": axle + Vector3.UP * 0.65, "r": 0.62},
-		{"a": axle - wheel_axis * 0.70, "b": axle + wheel_axis * 0.70, "r": 0.61},
+			"b": rig.turret.to_global(Vector3(0, 0.25, 0.75)), "r": 0.61, "label": "turret"},
+		{"a": axle - Vector3.UP * 0.67, "b": axle + Vector3.UP * 0.65, "r": 0.62, "label": "wheel"},
+		{"a": axle - wheel_axis * 0.70, "b": axle + wheel_axis * 0.70, "r": 0.61, "label": "wheel"},
+		{"a": rig.turret.to_global(Vector3(0, -0.07, -1.31)),
+			"b": rig.turret.to_global(Vector3(0, 0.40, -1.30)), "r": 0.29, "label": "optic"},
 	]
+	for support: Dictionary in rig._supports:
+		var shoe: Node3D = support["shoe"]
+		if shoe.position.y < -1.1:
+			parts.append({"a": shoe.to_global(Vector3(0, -0.09, -0.22)),
+				"b": shoe.to_global(Vector3(0, -0.09, 0.13)), "r": 0.21,
+				"label": "shoe_left" if support["side"] < 0.0 else "shoe_right"})
+	return parts
 
 
 func status_text() -> String:
@@ -136,13 +167,12 @@ func step(dt: float, ctx: Dictionary) -> void:
 	projectiles = ctx.get("projectiles")
 	arena = ctx.get("arena", {})
 	if not alive:
-		_dead_t = maxf(0.0, _dead_t - dt)
-		rig.rotation.z = lerpf(rig.rotation.z, 1.12, 1.0 - exp(-8.0 * dt))
-		visible = _dead_t > 0.0
+		_advance_defeat(dt)
 		return
 	if player == null or dt <= 0.0:
 		return
 	_fire_cd = maxf(0.0, _fire_cd - dt)
+	_steer_delay = maxf(0.0, _steer_delay - dt)
 	phase_age += dt
 	match phase:
 		Phase.PATROL:
@@ -185,9 +215,13 @@ func _patrol(dt: float) -> void:
 	# A pursuer cutting off a retreat can prompt the long beam after the first light shot.
 	var beam_due := _light_count >= LIGHTS_PER_BEAM and _fire_cd <= 0.0
 	var pressured := _retreating and _light_count > 0 and distance <= PRESSURED_BEAM_DISTANCE
-	if distance >= MIN_FIRE_DISTANCE and (beam_due or pressured):
+	var wants_beam := distance >= MIN_FIRE_DISTANCE and (beam_due or pressured)
+	var wants_light := _light_count < LIGHTS_PER_BEAM and _fire_cd <= 0.0
+	if not (wants_beam or wants_light) or not _has_shot(_target_point()):
+		return
+	if wants_beam:
 		_enter(Phase.BRAKE)
-	elif _light_count < LIGHTS_PER_BEAM and _fire_cd <= 0.0:
+	else:
 		_light_duration = maxf(0.05, P.getf("archer.telegraph"))
 		_enter(Phase.LIGHT)
 
@@ -230,25 +264,29 @@ func _wants_retreat(flat: Vector3) -> bool:
 
 func _back_away(facing: float, dt: float) -> void:
 	_orbit_gear = -1.0
-	var steer := 0.0
 	var yaw: float = rig.wheel_frame.rotation.y
 	var gap: Vector3 = (player.rig.global_position - rig.global_position).slide(Vector3.UP)
 	# Retain the wheel's heading when player overlap makes the bearing unstable.
 	if gap.length_squared() < OVERLAP_DISTANCE * OVERLAP_DISTANCE:
 		facing = yaw
-	var straight := Vector3(sin(facing), 0.0, cos(facing)) * RETREAT_LOOKAHEAD
-	if _clear_roll(straight) < 0.98 or absf(angle_difference(yaw, facing)) > deg_to_rad(50.0):
-		var best := -INF
-		for angle: float in EVASION_ANGLES:
-			var turn := deg_to_rad(angle * _strafe)
-			var heading := facing + turn
-			var rear := Vector3(sin(heading), 0.0, cos(heading)) * RETREAT_LOOKAHEAD
-			var clearance := minf(_clear_roll(rear), _clear_roll(rear * 0.5))
-			var score := clearance * 2.1 + cos(angle_difference(yaw, heading)) * 0.60 + cos(turn) * 0.32
-			if score > best:
-				best = score
-				steer = turn
-	_drive(facing, steer, -P.getf("sentry.retreat_speed"), dt, true)
+	if _steer_delay <= 0.0:
+		_steer_delay = RETREAT_REPLAN
+		_escape_yaw = facing
+		var straight := Vector3(sin(facing), 0.0, cos(facing)) * RETREAT_LOOKAHEAD
+		if _clear_roll(straight) < 0.98 or absf(angle_difference(yaw, facing)) > deg_to_rad(50.0):
+			var best := -INF
+			for angle: float in EVASION_ANGLES:
+				var turn := deg_to_rad(angle * _strafe)
+				var heading := facing + turn
+				var rear := Vector3(sin(heading), 0.0, cos(heading)) * RETREAT_LOOKAHEAD
+				var clearance := _clear_roll(rear)
+				if not _ground_roll.is_valid():
+					clearance = minf(clearance, _clear_roll(rear * 0.5))
+				var score := clearance * 2.1 + cos(angle_difference(yaw, heading)) * 0.60 + cos(turn) * 0.32
+				if score > best:
+					best = score
+					_escape_yaw = heading
+	_drive(facing, angle_difference(facing, _escape_yaw), -P.getf("sentry.retreat_speed"), dt, true)
 
 
 func _brake(dt: float) -> void:
@@ -264,8 +302,8 @@ func _brake(dt: float) -> void:
 	rig.set_attack_charge(0.0, true)
 	if phase_age < BRAKE_DURATION or _brace_amount < 1.0:
 		return
-	if not player.alive:
-		_recover(0.55)
+	if not player.alive or not _has_shot(target):
+		_recover(0.30)
 	else:
 		_begin_beam()
 
@@ -293,8 +331,12 @@ func _drive(facing: float, steer: float, desired_speed: float, dt: float, evadin
 	if is_zero_approx(_wheel_speed):
 		return
 	var forward := -Vector3(sin(yaw), 0.0, cos(yaw))
-	var distance := _clear_roll(forward * _wheel_speed * dt) * _wheel_speed * dt
-	rig.global_position += forward * distance
+	var travel := forward * _wheel_speed * dt
+	var from: Vector3 = rig.global_position
+	var goal: Vector3 = _ground_roll.call(from, from + travel) if _ground_roll.is_valid() \
+		else from + travel * _clear_roll(travel)
+	rig.global_position = goal
+	var distance := from.distance_to(goal) * signf(_wheel_speed)
 	rig.wheel.rotation.x = wrapf(rig.wheel.rotation.x - distance / rig.WHEEL_RADIUS, -PI, PI)
 
 
@@ -303,6 +345,11 @@ func _clear_roll(travel: Vector3) -> float:
 		return 1.0
 	var from: Vector3 = rig.global_position
 	var goal := from + travel
+	if _ground_roll.is_valid():
+		if travel.is_zero_approx():
+			return 1.0
+		var reachable: Vector3 = _ground_roll.call(from, goal)
+		return clampf((reachable - from).dot(travel) / travel.length_squared(), 0.0, 1.0)
 	if level.clamp_enemy_position(goal, scale_factor).is_equal_approx(goal):
 		return 1.0
 	# Stop along the wheel's forward axis at a wall instead of sliding along it.
@@ -323,14 +370,32 @@ func _target_point() -> Vector3:
 
 
 func _aim_at(point: Vector3, weight: float) -> void:
-	var offset: Vector3 = point - rig.turret.global_position
-	var horizontal := Vector2(offset.x, offset.z).length()
-	if horizontal < 0.001:
-		return
-	var yaw := atan2(-offset.x, -offset.z)
-	var pitch := atan2(offset.y - float(rig.shot_origin.position.y), horizontal)
-	rig.turret.rotation.y = lerp_angle(rig.turret.rotation.y, yaw, weight)
-	rig.turret.rotation.x = lerpf(rig.turret.rotation.x, clampf(pitch, -0.27, 0.27), weight)
+	var aim := _gun_angles(point)
+	rig.set_aim(lerp_angle(rig.turret.rotation.y, aim.y, weight),
+		lerpf(rig.turret.rotation.x, clampf(aim.x, -MAX_GUN_PITCH, MAX_GUN_PITCH), weight))
+
+
+func _gun_angles(point: Vector3) -> Vector2:
+	var offset: Vector3 = point - rig.global_position
+	var yaw := _target_yaw(offset)
+	var horizontal := offset.slide(Vector3.UP).length()
+	var muzzle_y: float = rig.shot_origin.position.y
+	var pitch := 0.0
+	# Account for the muzzle below the pivot and the lift of the aiming ring.
+	for _sample in 3:
+		offset.y = point.y - rig.global_position.y - rig.gun_height(pitch)
+		pitch = atan2(offset.y, horizontal) - asin(clampf(muzzle_y / maxf(0.08, offset.length()), -1.0, 1.0))
+	return Vector2(pitch, yaw)
+
+
+func _has_shot(point: Vector3) -> bool:
+	var aim := _gun_angles(point)
+	if absf(aim.x) > MAX_GUN_PITCH:
+		return false
+	var axes := Basis.from_euler(Vector3(aim.x, aim.y, 0.0))
+	var muzzle: Vector3 = rig.global_position + Vector3.UP * rig.gun_height(aim.x) + axes * rig.shot_origin.position
+	var offset := point - muzzle
+	return offset.dot(-axes.z) > 0.10 and Beam.trace_obstruction(muzzle, -axes.z, arena) >= offset.length()
 
 
 func _charge_light(dt: float) -> void:
@@ -350,7 +415,9 @@ func _charge_light(dt: float) -> void:
 		_update_charge_sound(progress, false)
 		return
 	stop_charge_sound()
-	if projectiles != null:
+	if projectiles != null and not _has_shot(target):
+		target = _target_point()
+	if projectiles != null and _has_shot(target):
 		_aim_at(target, 1.0)
 		origin = fire_origin()
 		var direction: Vector3 = -rig.turret.global_basis.z.normalized()
@@ -486,20 +553,69 @@ func _clear_beam() -> void:
 
 func hurt(amount: float, normal := Vector3.UP, knock := 0.0) -> void:
 	var planted := phase == Phase.CHARGE or phase == Phase.FIRING
+	if alive and amount >= hp:
+		if _fatal_contact.is_empty():
+			_fatal_contact = {"point": center(), "force": -normal, "part": ""}
+		knock = 0.0
 	super.hurt(amount, normal, 0.0 if planted else knock)
+
+
+func hurt_by_blade(amount: float, normal: Vector3, knock: float, travel: Vector3, contact: Dictionary) -> void:
+	if not alive or amount <= 0.0:
+		return
+	if amount >= hp:
+		var cut := travel.normalized()
+		var inward := -normal.normalized()
+		if cut.is_zero_approx():
+			cut = inward
+		elif cut.dot(inward) > 0.0:
+			cut = cut.lerp(inward, 0.40).normalized()
+		var force: Vector3 = contact.get("force", cut)
+		var point: Vector3 = contact.get("contact", contact.get("blade_point", center()))
+		var part: String = contact.get("part", "")
+		var on_turret: Vector3 = rig.turret.to_local(point)
+		if part == "turret" and on_turret.z < -1.10 and absf(on_turret.x) < 0.40:
+			part = "optic"
+		_fatal_contact = {"point": point, "force": force, "part": part}
+	hurt(amount, normal, knock)
 
 
 func die() -> void:
 	if not alive:
 		return
 	alive = false
-	_dead_t = 1.2
 	_clear_beam()
 	rig.set_attack_charge(0.0, false)
-	Fx.death_burst(center())
-	Snd.play_at("death", center(), {"gain": 0.8})
+	var point: Vector3 = _fatal_contact.get("point", center())
+	var force: Vector3 = _fatal_contact.get("force", Vector3.ZERO)
+	_knockdown = Knockdown.new()
+	var supports := smoothstep(0.0, 0.78, float(rig.deployment))
+	_knockdown.begin(rig, arena, point, force, _fatal_contact.get("part", ""), _wheel_speed, supports)
+	Fx.spark(point, _knockdown.force, 1.65)
 	if level != null:
 		level.on_enemy_died(self)
+
+
+func _advance_defeat(dt: float) -> void:
+	if _knockdown == null:
+		return
+	_knockdown.advance(rig, self, dt)
+	for event in _knockdown.take_contacts():
+		var point: Vector3 = event["point"]
+		match event["kind"]:
+			"break":
+				Snd.play_at("sentry_break", point, {"pos": point, "gain": 1.32, "prio": 4})
+				Fx.spark(point, _knockdown.force, 1.18)
+				var arc := point + Vector3.UP * 0.16 + _knockdown.force * 0.12
+				Fx.beam(point, arc, 0.043, Color("c5aaff"), 0.075)
+				Fx.beam(arc, arc + rig.global_basis.x.normalized() * 0.17, 0.029, Color("cae6ff"), 0.065)
+			"rim":
+				Snd.play_at("clang", point, {"pos": point, "gain": 0.6, "rate": 0.81})
+				Fx.spark(point, _knockdown.force, 0.65)
+			"shell":
+				Snd.play_at("hit", point, {"pos": point, "gain": 1.5, "rate": 0.72, "prio": 4})
+				Fx.spark(point, Vector3.UP, 1.1)
+				Fx.shake(0.36)
 
 
 func _exit_tree() -> void:

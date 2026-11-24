@@ -78,7 +78,11 @@ func body_in_view(camera: Camera3D) -> bool:
 	return false
 
 
+var _routed_opening := false
+
+
 func start_strike(dash: Dictionary, time: float) -> void:
+	_routed_opening = dash.get("route_cut", false)
 	var live_position := position
 	_prepare_strike(0.0, HIT_START, HIT_END,
 		func(sample: float) -> void: Lunge.apply(self, dash, sample))
@@ -125,11 +129,11 @@ func _prepare_strike(start: float, from: float, to: float, sample_pose: Callable
 
 func _strike_seconds(time: float) -> float:
 	if _opening_clock:
-		return Sequence.attack_seconds(time)
+		return Sequence.attack_seconds(time, _routed_opening)
 	return Sequence.normal_seconds(time, _normal_windup_end, _normal_rate, _normal_windup_extension)
 
 
-func update_strike(t0: float, t1: float, dt: float) -> void:
+func update_strike(t0: float, t1: float, dt: float, live_previous := Transform3D.IDENTITY) -> void:
 	last_dt = dt
 	attack_elapsed = _strike_seconds(t1)
 	is_attacking = t1 >= _strike_start and t0 < _hit_end and not _prediction.is_empty()
@@ -137,6 +141,13 @@ func update_strike(t0: float, t1: float, dt: float) -> void:
 	if _hit_window:
 		weapon_prev_xf = predict_weapon_xf(_strike_seconds(t0))
 		weapon_xf = predict_weapon_xf(attack_elapsed)
+		if has_attack_lane(global_position):
+			# The predicted sweep guides a parry, while damage follows the actual
+			# stair-adjusted blade between the first and last active frames.
+			if t0 >= _hit_start:
+				weapon_prev_xf = live_previous
+			if t1 <= _hit_end:
+				weapon_xf = weapon_spin.global_transform
 
 
 func in_hit_window() -> bool:

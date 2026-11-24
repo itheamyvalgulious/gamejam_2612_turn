@@ -129,6 +129,8 @@ func _ready() -> void:
 	process_priority = 127
 	for k in ["step", "swing_light", "arrow_whistle", "clang", "arrow_hit", "hit"]:
 		_wave(k, 0)
+	for variant in VARIANTS:
+		_wave("sentry_break", variant)
 
 
 func set_arena(arena: Dictionary) -> void:

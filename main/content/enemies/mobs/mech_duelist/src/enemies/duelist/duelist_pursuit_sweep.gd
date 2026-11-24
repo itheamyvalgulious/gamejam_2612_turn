@@ -12,6 +12,7 @@ const Units = preload("res://src/core/units.gd")
 const DISPLAY_NAME := "横扫挥斩"
 const MIN_RANGE := 2.7 / Units.M_PER_UNIT
 const RANGE := 7.40
+const STAIR_MIN_RANGE := 3.45
 const PREP_RANGE := 4.5 / Units.M_PER_UNIT
 const WINDUP_END := 0.39
 const LEAD_STEP_START := 0.24
@@ -71,10 +72,11 @@ const SUPPORT_KEYS := [
 ]
 
 
-static func can_start(model: Node3D, focus: Vector3, reach := RANGE) -> bool:
-	var offset := (focus - model.global_position).slide(Vector3.UP)
+static func can_start(model, focus: Vector3, reach := RANGE) -> bool:
+	var offset: Vector3 = (focus - model.global_position).slide(Vector3.UP)
 	var distance := offset.length()
-	return distance >= MIN_RANGE and distance <= reach \
+	var minimum := STAIR_MIN_RANGE if model.has_attack_lane(model.global_position) else MIN_RANGE
+	return distance >= minimum and distance <= reach \
 		and -model.global_basis.z.normalized().dot(offset.normalized()) >= 0.88
 
 
@@ -89,8 +91,8 @@ static func begin(model, focus: Vector3, cover: Array, bounds: AABB) -> Dictiona
 	for obstacle: Dictionary in cover:
 		var radius := maxf(0.35, float(obstacle["r"]) - 1.2) + 1.1 * size
 		goal = HitMath.slide_around_body(origin.origin, goal, obstacle["c"], radius)
-	goal = _keep_inside(goal, bounds)
-	var shift := origin.affine_inverse() * goal
+	goal = model.attack_step(origin.origin, _keep_inside(goal, bounds))
+	var shift := origin.basis.inverse() * (goal - origin.origin).slide(Vector3.UP)
 
 	state["root"] = origin
 	state["root_shift"] = shift
@@ -116,7 +118,9 @@ static func apply(model, state: Dictionary, time: float) -> void:
 	var drift := shift * travel
 	var root_turn := Basis(Vector3.UP, deg_to_rad(-42.0) * pelvis_open * follow)
 	var unturn := root_turn.inverse()
-	model.global_transform = Transform3D(origin.basis * root_turn, origin * drift)
+	var at: Vector3 = model.attack_step(origin.origin, origin * drift)
+	model.global_transform = Transform3D(origin.basis * root_turn, at)
+	drift = origin.affine_inverse() * at
 
 	var hip: Transform3D = state["hip"]
 	var body := model.body as Node3D
@@ -143,7 +147,7 @@ static func apply(model, state: Dictionary, time: float) -> void:
 	_pose_support(model, state, time)
 	var thrust_grip := smoothstep(0.29, LEAD_LAND, time) * (1.0 - smoothstep(0.66, 0.88, time))
 	_pose_sword(model, state, time, unturn, thrust_grip)
-	model.finish_pose(lerpf(0.30, 0.15, chest_open * follow), 1.0, Vector2.ZERO, 0.0, 0.07,
+	model.finish_attack_pose(lerpf(0.30, 0.15, chest_open * follow), Vector2.ZERO, 0.0, 0.07,
 		THRUST_GRIP_CANT * thrust_grip)
 
 
@@ -190,6 +194,13 @@ static func _pose_support(model, state: Dictionary, time: float) -> void:
 
 static func _pose_sword(model, state: Dictionary, time: float, unturn: Basis, thrust_grip: float) -> void:
 	var blade := _sample(BLADE_KEYS, time, 1, true)
+	if model.has_attack_lane(model.global_position):
+		# Tilt the return cut with the treads. The straight thrust keeps its own aim.
+		var target: Vector3 = state["focus"]
+		var gap: float = (target - model.global_position).slide(Vector3.UP).length()
+		var rise: float = model.floor_height(target, target.y) - model.global_position.y
+		var sweep := smoothstep(1.26, SECOND_HIT_START, time) * (1.0 - smoothstep(SECOND_HIT_END, 2.11, time))
+		blade.y += clampf(rad_to_deg(atan2(rise, maxf(gap, 2.6))), -18.0, 14.0) * sweep
 	var angles := _sample(BLADE_KEYS, time, 2) * (PI / 180.0)
 	var ready := smoothstep(0.0, 0.25, time)
 	var previous: Basis = state["blade"]

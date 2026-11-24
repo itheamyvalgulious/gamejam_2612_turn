@@ -255,6 +255,8 @@ func clamp_enemy_position(point: Vector3, scale_factor: float = 1.0) -> Vector3:
 
 
 func _clamp_enemy(enemy) -> void:
+	if enemy.rig.get_parent() is RigidBody3D:
+		return
 	var old: Vector3 = enemy.rig.global_position
 	enemy.rig.global_position = clamp_enemy_position(old, enemy.scale_factor)
 

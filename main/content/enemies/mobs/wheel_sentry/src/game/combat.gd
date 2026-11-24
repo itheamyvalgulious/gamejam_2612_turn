@@ -36,7 +36,10 @@ static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_
 		var dmg: float = P.getf("attack.%s.damage" % player.last_attack)
 		var knock: float = P.getf("attack.%s.knockback" % player.last_attack)
 		var previous_hp: float = e.hp
-		e.hurt(dmg, normal, knock)
+		if e.has_method("hurt_by_blade"):
+			e.hurt_by_blade(dmg, normal, knock, res.get("travel", Vector3.ZERO), res)
+		else:
+			e.hurt(dmg, normal, knock)
 		var dealt: float = previous_hp - e.hp
 		if dmg > 0.0 and dealt <= 0.0:
 			events.append({"kind": "block", "pos": point, "normal": normal, "enemy": e,
