@@ -278,6 +278,14 @@ static func samples(kind: String, variant: int) -> PackedFloat32Array:
 				{"osc": "noise", "f0": 1400.0, "q": 1.0, "filt": "bp",
 					"env": [[0.0, 1.0], [0.02, 0.35], [0.12, 0.0]], "gain": 0.8},
 			] + _metal_modes(760.0, 0.30, 0.24) as Array, seed_i)
+		"armor_snap":
+			# A dry fracture followed by the small pieces rattling apart.
+			buf = render_layers(0.22, [
+				{"osc": "noise", "f0": 2600.0, "f1": 4800.0, "q": 0.84, "filt": "bp", "gain": 1.35,
+					"env": [[0.0, 0.0], [0.001, 1.0], [0.010, 0.26], [0.023, 0.08], [0.026, 0.62], [0.043, 0.0]]},
+				{"osc": "noise", "f0": 1440.0, "f1": 620.0, "q": 1.2, "filt": "bp", "gain": 0.62,
+					"env": [[0.0, 0.0], [0.003, 0.9], [0.019, 0.44], [0.037, 0.23], [0.081, 0.0]]},
+			] + _metal_modes(1190.0 + rng.randf_range(-70.0, 70.0), 0.33, 0.18) as Array, seed_i)
 		# ---------------- 刀气：中频呼啸 + 泛音
 		"qi":
 			buf = render_layers(0.6, [

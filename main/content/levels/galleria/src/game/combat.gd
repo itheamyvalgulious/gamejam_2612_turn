@@ -11,7 +11,8 @@ class_name Combat
 
 
 ## 玩家一次挥砍的结算。每次攻击对同一敌人只生效一次（用 swing_serial 去重）。
-static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_segs: Array = []) -> Array:
+static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_segs: Array,
+		replay, dt: float) -> Array:
 	var events: Array = []
 	var rig = player.rig
 	if rig == null or not rig.in_hit_window():
@@ -47,13 +48,23 @@ static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_
 		var dmg: float = P.getf("attack.%s.damage" % player.last_attack)
 		var knock: float = P.getf("attack.%s.knockback" % player.last_attack)
 		var travel: Vector3 = res.get("travel", Vector3.ZERO)
+		var entry := {}
 		if e.has_method("hurt_by_blade"):
-			e.hurt_by_blade(dmg, normal, knock, travel)
+			if dmg >= e.hp:
+				entry = Hit.blade_entry(replay.blade_samples(rig, dt), res)
+				if entry.is_empty():
+					var cut := travel.normalized()
+					var inward := -normal
+					entry["force"] = inward if cut.dot(normal) >= 0.0 else cut.lerp(inward, 0.58).normalized()
+				res.merge(entry, true)
+			e.hurt_by_blade(dmg, normal, knock, travel, res)
 		else:
 			e.hurt(dmg, normal, knock)
-		events.append({"kind": "kill" if not e.alive else "hit", "pos": point, "normal": normal,
+		var event := {"kind": "kill" if not e.alive else "hit", "pos": point, "normal": normal,
 			"enemy": e, "damage": dmg, "contact": res.get("blade_point", point),
-			"contact_fraction": res.get("t", 1.0), "travel": travel})
+			"contact_fraction": res.get("t", 1.0), "travel": travel}
+		event.merge(entry, true)
+		events.append(event)
 	return events
 
 

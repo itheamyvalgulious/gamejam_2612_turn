@@ -328,3 +328,82 @@ func separate_enemies() -> void:
 
 func clamp_enemy_position(point: Vector3, _scale_factor: float = 1.0) -> Vector3:
 	return resolve_motion(point, point, false) if position_clear(point, 1.8, false) else Vector3.INF
+
+
+func duelist_defeat_path(start: Vector3, direction: Vector3) -> Dictionary:
+	var samples: Array[Vector3] = [start]
+	var best := _defeat_rest(start, direction)
+	var best_count := 1
+	for step in range(1, 21):
+		var candidate := start + direction * (float(step) * 0.24)
+		var previous := samples[-1]
+		candidate.y = _defeat_support(candidate, minf(start.y + 1.10, previous.y + 0.44))
+		if candidate.y < previous.y - 0.55 or not _defeat_clear(candidate, 1.26, 3.8):
+			break
+		samples.append(candidate)
+		var rest := _defeat_rest(candidate, direction)
+		if not rest.is_empty():
+			best = rest
+			best_count = samples.size()
+	if best.is_empty():
+		var inward := Vector3(-start.x, 0.0, -start.z).normalized()
+		best = {"facing": inward if not inward.is_zero_approx() else direction,
+			"normal": Vector3.UP, "compact": true, "support_lift": 0.0}
+	best["samples"] = samples.slice(0, best_count)
+	return best
+
+
+func _defeat_rest(center: Vector3, forward: Vector3) -> Dictionary:
+	for degrees: float in [0.0, 45.0, -45.0, 90.0, -90.0, 135.0, -135.0, 180.0]:
+		var facing := forward.rotated(Vector3.UP, deg_to_rad(degrees))
+		var across := facing.cross(Vector3.UP)
+		var head := center + facing * 2.77
+		var feet := center - facing * 2.00
+		head.y = _defeat_support(head, center.y + 1.02)
+		feet.y = _defeat_support(feet, center.y + 1.02)
+		if absf(head.y - center.y) > 0.96 or absf(feet.y - center.y) > 0.96:
+			continue
+		if not _defeat_clear(head, 0.82, 0.98) or not _defeat_clear(feet, 0.82, 0.78):
+			continue
+		var legs_clear := true
+		for side: float in [-1.0, 1.0]:
+			var foot := feet + across * 0.96 * side
+			foot.y = _defeat_support(foot, center.y + 1.02)
+			legs_clear = legs_clear and absf(foot.y - feet.y) <= 0.50 and _defeat_clear(foot, 0.66, 0.80)
+		if not legs_clear:
+			continue
+		if not _defeat_clear(center, 1.02, 1.2):
+			continue
+		var rise := (head.y - feet.y) / 4.77
+		var up := (Vector3.UP - facing * rise).normalized()
+		# Fit the support plane above the discrete stair noses as well as the endpoints.
+		var lift := 0.0
+		for offset: float in [-1.65, -0.8, 0.55, 1.15, 1.80, 2.45]:
+			var along := center + facing * offset
+			var height := _defeat_support(along, center.y + 1.02)
+			lift = maxf(lift, height - center.y - rise * offset)
+		return {"facing": facing, "normal": up, "compact": false, "support_lift": minf(lift, 0.31)}
+	return {}
+
+
+func _defeat_support(at: Vector3, ceiling: float) -> float:
+	var top := Vector3(at.x, ceiling + 0.01, at.z)
+	var ray := PhysicsRayQueryParameters3D.create(top, Vector3(at.x, -0.42, at.z), 1)
+	var hit := get_world_3d().direct_space_state.intersect_ray(ray)
+	if not hit.is_empty() and (hit["normal"] as Vector3).y > 0.54:
+		return (hit["position"] as Vector3).y
+	return floor_at(at, ceiling)
+
+
+func _defeat_clear(at: Vector3, radius: float, height: float) -> bool:
+	if absf(at.x) > SceneArena.HALF_WIDTH - radius or absf(at.z) > SceneArena.HALF_DEPTH - radius:
+		return false
+	for box: AABB in arena["solids"]:
+		if box.end.y <= at.y + 0.045 or box.position.y >= at.y + height:
+			continue
+		if arena["walkables"].has(box) and box.end.y <= at.y + 0.18 + radius * 0.37:
+			continue
+		var footprint := Rect2(box.position.x, box.position.z, box.size.x, box.size.z).grow(radius)
+		if footprint.has_point(Vector2(at.x, at.z)):
+			return false
+	return true

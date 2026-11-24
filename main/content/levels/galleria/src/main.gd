@@ -228,7 +228,7 @@ func _process(delta: float) -> void:
 		player.step(dt, level.arena, level.enemies)
 		level.constrain_player()
 	level.step(dt, ctx)
-	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []))
+	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []), replay, dt)
 	var final_hit := {}
 	for ev in p_events:
 		if ev["kind"] == "kill" and ev["enemy"] == level.finishing_enemy:
@@ -308,10 +308,14 @@ func _advance_finishing_shot(delta: float) -> float:
 	if _finish.windup_now:
 		Snd.play_at("swing_heavy", _finish.point, {"gain": 1.05, "rate": 0.78})
 	if _finish.impact_now:
+		if _finish.target.has_method("show_fatal_damage"):
+			_finish.target.show_fatal_damage(_finish.point)
 		Snd.play_at("clang", _finish.point, {"gain": 1.05, "rate": 0.84, "prio": 4})
 		Snd.play_at("hit", _finish.point, {"gain": 1.78, "rate": 0.76, "prio": 4})
-		Fx.spark(_finish.point, _finish.normal, 2.12)
+		Fx.critical_strike(_finish.point, _finish.impact_force)
 		Fx.screen_flash(0.085, Color(0.66, 0.88, 1.0))
+	if _finish.early_reaction_dt > 0.0:
+		_finish.target.advance_fatal_reaction(_finish.early_reaction_dt, rate)
 	if _finish.complete():
 		_end_finishing_shot()
 	elif is_zero_approx(simulation_dt):
@@ -368,7 +372,14 @@ func _on_combat_event(ev: Dictionary, record_event := true) -> void:
 				hud.show_banner("被格挡", "它在你画面里 —— 朝边缘箭头的方向转身，再用%s斩（%s键）" % [side, "D" if side == "右" else "A"], 1.0)
 		"hit", "kill":
 			Snd.play_at("hit", pos, {"gain": 0.9})
-			if Fx != null:
+			var enemy = ev.get("enemy")
+			if ev["kind"] == "kill" and enemy != null and enemy.has_method("show_fatal_damage"):
+				var contact: Vector3 = ev.get("contact", pos)
+				var travel: Vector3 = ev.get("travel", Vector3.UP)
+				var force: Vector3 = ev.get("force", travel)
+				enemy.show_fatal_damage(contact)
+				Fx.critical_strike(contact, force)
+			elif Fx != null:
 				Fx.spark(pos, ev.get("normal", Vector3.UP), 1.2)
 			hitstop = maxf(hitstop, P.getf("attack.%s.hitstop" % player.last_attack))
 			if String(ev["kind"]) == "kill":

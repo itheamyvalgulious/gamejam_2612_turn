@@ -223,7 +223,7 @@ static func sweep_blade_parts(prev_xf: Transform3D, cur_xf: Transform3D, discs: 
 		var r: float = float(d["r"]) * disc_scale
 		var a := prev_xf * Vector3(0.0, y, 0.0)
 		var b := cur_xf * Vector3(0.0, y, 0.0)
-		segs.append({"a": a, "b": b, "r": r})
+		segs.append({"a": a, "b": b, "r": r, "y": y})
 		lo = lo.min(a).min(b)
 		hi = hi.max(a).max(b)
 		max_r = maxf(max_r, r)
@@ -257,8 +257,45 @@ static func sweep_blade_parts(prev_xf: Transform3D, cur_xf: Transform3D, discs: 
 				n = Vector3.UP
 			best = {"hit": true, "depth": depth, "point": res["c1"], "travel": s["b"] - s["a"],
 				"blade_point": res["c0"], "normal": n.normalized(),
-				"t": float(res["s"]), "disc_r": rr, "part": String(p.get("label", ""))}
+				"t": float(res["s"]), "disc_r": rr, "disc_y": s["y"],
+				"capsule_a": pa, "capsule_b": pb, "capsule_r": pr,
+				"part": String(p.get("label", "")), "side": p.get("side", 0.0)}
 	return best
+
+
+## Rewind the confirmed blade disc to its most recent outside-to-inside crossing.
+## The combat sweep still decides damage. This selects the reaction and shot timing.
+static func blade_entry(samples: Array, hit: Dictionary) -> Dictionary:
+	var a: Vector3 = hit["capsule_a"]
+	var b: Vector3 = hit["capsule_b"]
+	var disk := Vector3.UP * float(hit["disc_y"])
+	var radius: float = hit["disc_r"]
+	for frame in range(samples.size() - 2, -1, -1):
+		var from: Vector3 = samples[frame]["pose"] * disk
+		var to: Vector3 = samples[frame + 1]["pose"] * disk
+		if dist_point_segment(from, a, b) <= radius or from.distance_squared_to(to) < EPS:
+			continue
+		var closest := seg_seg(from, to, a, b)
+		if float(closest["d"]) > radius:
+			continue
+		var outside := 0.0
+		var inside: float = closest["s"]
+		for refinement in 10:
+			var middle := (outside + inside) * 0.5
+			if dist_point_segment(from.lerp(to, middle), a, b) > radius:
+				outside = middle
+			else:
+				inside = middle
+		var blade := from.lerp(to, inside)
+		var axis := Geometry3D.get_closest_point_to_segment(blade, a, b)
+		var outward := axis.direction_to(blade)
+		var cut := from.direction_to(to)
+		if cut.dot(outward) >= -0.02:
+			continue
+		return {"contact": axis + outward * float(hit["capsule_r"]), "normal": outward,
+			"force": cut.lerp(-outward, 0.58).normalized(), "travel": to - from,
+			"contact_time": lerpf(samples[frame]["time"], samples[frame + 1]["time"], inside)}
+	return {}
 
 
 ## 球体扫掠 vs 一组判定件（弹回的飞行物打怪）

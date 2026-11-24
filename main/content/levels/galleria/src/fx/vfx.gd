@@ -345,6 +345,38 @@ func spark(pos: Vector3, dir := Vector3.UP, power := 1.0) -> void:
 	_emit_light(pos + Vector3.UP * 0.4, 4.0 + 3.0 * p, 0.18)
 
 
+func critical_strike(pos: Vector3, dir: Vector3) -> void:
+	var cut := dir.normalized() if dir.length_squared() > 0.001 else Vector3.FORWARD
+	var fan := (cut + Vector3.UP * 0.24).normalized()
+	_emit_particle(pos, Vector3.ZERO, 0.078, 1.03, Color(1.0, 0.91, 0.74, 1.25),
+		{"grav": 0.0, "grow": 0.62, "fade": 3.1})
+	# The brightest streaks follow the entry; a broader spray breaks up around them.
+	for i in 26:
+		var out := _dir_spread(fan, 0.70)
+		var speed := _rng.randf_range(19.0, 31.0)
+		var tint := Color(1.0, _rng.randf_range(0.74, 0.94), _rng.randf_range(0.34, 0.66), 1.0)
+		_emit_particle(pos + out * 0.08, out * speed, _rng.randf_range(0.16, 0.31),
+			_rng.randf_range(0.15, 0.29), tint,
+			{"grav": 15.0, "drag": 3.0, "fade": 1.5, "stretch": 1.0, "grow": -0.62})
+	for i in 50:
+		var out := _dir_spread(fan, 0.46)
+		var speed := _rng.randf_range(8.0, 21.0)
+		var tint := Color(1.0, _rng.randf_range(0.39, 0.69), 0.14, 0.94)
+		_emit_particle(pos + out * 0.06, out * speed, _rng.randf_range(0.23, 0.43),
+			_rng.randf_range(0.11, 0.21), tint,
+			{"grav": 19.0, "drag": 3.1, "fade": 1.25, "stretch": 0.90, "grow": -0.55})
+	for i in 14:
+		var out := _hemi(Vector3.UP, 0.52)
+		var velocity := out * _rng.randf_range(2.5, 6.5) + cut * 2.7
+		_emit_particle(pos, velocity, _rng.randf_range(0.36, 0.58), _rng.randf_range(0.045, 0.095),
+			Color(1.0, 0.29, 0.08, 0.85), {"grav": 12.0, "drag": 1.8, "fade": 1.45, "stretch": 0.35})
+	for i in 7:
+		var drift := cut * _rng.randf_range(0.9, 1.7) + _hemi(Vector3.UP, 0.63)
+		_emit_particle(pos, drift, _rng.randf_range(0.49, 0.74), _rng.randf_range(0.45, 0.72),
+			Color(0.23, 0.24, 0.26, 0.38), {"smoke": true, "grav": -0.9, "drag": 1.6, "grow": 1.15})
+	_emit_light(pos + Vector3.UP * 0.15, 18.0, 0.15, Color("ffc08a"))
+
+
 func clang(pos: Vector3, dir := Vector3.UP) -> void:
 	# 打铁：白色高能火花 + 冲击环 + 强光
 	_emit_particle(pos, Vector3.ZERO, 0.09, 0.8,

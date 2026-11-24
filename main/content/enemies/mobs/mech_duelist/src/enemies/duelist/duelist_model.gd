@@ -40,6 +40,7 @@ var head: Node3D
 var weapon_root: Node3D
 var weapon_spin: Node3D
 var sword_grip_cant := 0.0
+var armor_breached := false
 var kerb := Vector2(INF, 0.0)
 var legs: Array[Dictionary] = []
 var arms: Array[Dictionary] = []
@@ -278,6 +279,12 @@ func _build_leg(side: float) -> void:
 	var hip := MeshKit.pivot(self, Vector3.ZERO, "Hip")
 	var knee := MeshKit.pivot(self, Vector3.ZERO, "Knee")
 	var ankle := MeshKit.pivot(self, Vector3.ZERO, "Foot")
+	var thigh_armor := MeshKit.pivot(hip, Vector3.ZERO, "ThighArmor")
+	var thigh_flank := MeshKit.pivot(hip, Vector3.ZERO, "ThighFlank")
+	var shin_armor := MeshKit.pivot(knee, Vector3.ZERO, "ShinArmor")
+	thigh_armor.set_meta(&"joint_detail", true)
+	thigh_flank.set_meta(&"joint_detail", true)
+	shin_armor.set_meta(&"joint_detail", true)
 	_joint(hip, 0.131, 0.254)
 	_shell(hip, [
 		[-1.156, 0.081, 0.088, 0, 0.0], [-1.020, 0.112, 0.121, 0, 0.015],
@@ -285,7 +292,7 @@ func _build_leg(side: float) -> void:
 		[-0.365, 0.187, 0.169, 0, 0.022], [-0.179, 0.151, 0.135, 0, 0.026],
 		[-0.081, 0.119, 0.115, 0, 0.0],
 	], Vector3.ZERO, _dark)
-	Armor.fit_split(hip, [
+	Armor.fit_split(thigh_armor, [
 		[-1.055, 0.124, 0.128, -0.014, -0.005, -39, 45, 0.061],
 		[-0.913, 0.164, 0.177, -0.009, -0.012, -44, 70, 0.082],
 		[-0.683, 0.206, 0.206, -0.003, -0.012, -49, 83, 0.109],
@@ -293,21 +300,21 @@ func _build_leg(side: float) -> void:
 		[-0.292, 0.214, 0.193, 0.009, -0.011, -29, 81, 0.166],
 		[-0.195, 0.146, 0.136, 0.014, -0.014, 3, 57, 0.114],
 	], _armor, _titanium, _titanium, _dark, 0.029, side)
-	Armor.fit(hip, [
+	Armor.fit(thigh_flank, [
 		[-1.008, 0.111, 0.128, -0.014, 0.004, -61, -46, -0.027],
 		[-0.855, 0.169, 0.178, -0.008, 0.002, -101, -51, -0.069],
 		[-0.642, 0.189, 0.197, -0.013, 0.001, -116, -54, -0.092],
 		[-0.416, 0.199, 0.192, -0.005, 0.008, -122, -52, -0.076],
 		[-0.248, 0.172, 0.157, -0.002, 0.008, -105, -60, -0.059],
 	], _armor, _titanium, _dark, 0.023, side)
-	Armor.fit(hip, [
+	Armor.fit(thigh_flank, [
 		[-0.544, 0.201, 0.180, 0.002, 0.006, 88, 119, 0.088],
 		[-0.434, 0.219, 0.193, 0.008, 0.013, 91, 147, 0.065],
 		[-0.319, 0.214, 0.190, 0.010, 0.015, 98, 165, 0.051],
 		[-0.198, 0.173, 0.146, 0.011, 0.013, 79, 154, 0.038],
 		[-0.130, 0.135, 0.130, 0.008, 0.015, 87, 117, 0.025],
 	], _titanium, _armor, _dark, 0.022, side)
-	Armor.fit(hip, [
+	Armor.fit(thigh_flank, [
 		[-0.889, 0.150, 0.151, 0, 0.017, 99, 132, 0.073],
 		[-0.721, 0.201, 0.181, 0.004, 0.020, 92, 151, 0.072],
 		[-0.465, 0.213, 0.192, 0.009, 0.022, 98, 166, 0.046],
@@ -323,7 +330,7 @@ func _build_leg(side: float) -> void:
 		[-0.406, 0.144, 0.141, 0, 0.076], [-0.211, 0.114, 0.110, 0, 0.032],
 		[-0.074, 0.094, 0.095, 0, 0.014],
 	], Vector3.ZERO, _dark)
-	Armor.fit_split(knee, [
+	Armor.fit_split(shin_armor, [
 		[-1.122, 0.080, 0.082, -0.008, -0.016, -29, 36, 0.030],
 		[-0.983, 0.098, 0.115, -0.006, -0.010, -42, 49, 0.062],
 		[-0.775, 0.116, 0.137, 0.002, -0.004, -48, 61, 0.086],
@@ -332,7 +339,9 @@ func _build_leg(side: float) -> void:
 		[-0.157, 0.121, 0.165, 0.001, -0.014, -44, 66, 0.025],
 	], _ceramic, _armor, _titanium, _dark, 0.026, side)
 	var patella := MeshKit.pivot(knee, Vector3.ZERO, "Patella")
-	Armor.fit(patella, [
+	var patella_armor := MeshKit.pivot(patella, Vector3.ZERO, "KneeCover")
+	patella_armor.set_meta(&"joint_detail", true)
+	Armor.fit(patella_armor, [
 		[-0.187, 0.103, 0.143, 0, -0.010, -39, 45, 0.029],
 		[-0.110, 0.123, 0.149, 0, -0.026, -57, 62, 0.055],
 		[-0.019, 0.136, 0.152, 0, -0.026, -62, 68, 0.041],
@@ -367,11 +376,13 @@ func _build_leg(side: float) -> void:
 		[-0.021, 0.080, 0.150, 0, -0.060], [0.034, 0.066, 0.096, 0, -0.012],
 	], Vector3.ZERO, _dark)
 	var toe := MeshKit.pivot(ankle, Rig.TOE_HINGE, "Forefoot")
+	var toe_cover := MeshKit.pivot(toe, Vector3.ZERO, "ToeCover")
+	toe_cover.set_meta(&"joint_detail", true)
 	_shell(toe, [
 		[-0.071, 0.088, 0.113, 0, -0.072], [-0.053, 0.098, 0.113, 0, -0.071],
 		[-0.023, 0.098, 0.104, 0, -0.069], [0.017, 0.084, 0.073, 0, -0.045],
 	], Vector3.ZERO, _dark)
-	Casing.panel(toe, PackedVector3Array([
+	Casing.panel(toe_cover, PackedVector3Array([
 		Vector3(-0.083, -0.014, -0.119), Vector3(-0.076, 0.019, -0.042),
 		Vector3(-0.036, 0.029, -0.008), Vector3(0.056, 0.027, -0.014),
 		Vector3(0.086, 0.001, -0.076), Vector3(0.079, -0.019, -0.120),
@@ -379,7 +390,9 @@ func _build_leg(side: float) -> void:
 	]), Vector3(0, 0.93, -0.37), 0.026, _armor, _titanium)
 	for z: float in [-0.101, 0.038, 0.097]:
 		_plate(ankle, Vector3(0.163, 0.019, 0.059), Vector3(0, -0.164, z), _dark)
-	legs.append({"hip": hip, "knee": knee, "ankle": ankle, "toe": toe, "patella": patella, "side": side})
+	legs.append({"hip": hip, "knee": knee, "ankle": ankle, "toe": toe, "patella": patella, "side": side,
+		"thigh_armor": thigh_armor, "thigh_flank": thigh_flank, "shin_armor": shin_armor,
+		"patella_armor": patella_armor, "toe_cover": toe_cover})
 
 
 func _build_arm(side: float) -> void:
@@ -389,6 +402,8 @@ func _build_arm(side: float) -> void:
 	var clavicle := MeshKit.pivot(torso, Vector3(side * 0.36, 0.86, 0.02), "Clavicle")
 	var scapula := MeshKit.pivot(torso, Vector3(side * 0.30, 0.74, 0.194), "Scapula")
 	var cap := MeshKit.pivot(shoulder, Vector3.ZERO, "ShoulderCap")
+	var cap_cover := MeshKit.pivot(cap, Vector3.ZERO, "PauldronCover")
+	cap_cover.set_meta(&"joint_detail", true)
 	var twist := MeshKit.pivot(elbow, Vector3.ZERO, "ForearmTwist")
 	Armor.fit(scapula, [
 		[-0.259, 0.058, 0.070, -0.148, 0.017, 135, 172, -0.055],
@@ -411,7 +426,7 @@ func _build_arm(side: float) -> void:
 		[-0.116, 0.106, 0.104, 0, 0.009], [0.062, 0.081, 0.081, 0, 0],
 	], Vector3.ZERO, _dark)
 	var cap_shift := 0.020 if side < 0.0 else 0.0
-	Armor.fit(cap, [
+	Armor.fit(cap_cover, [
 		[-0.505, 0.102, 0.102, cap_shift, -0.006, 26, 83, 0.101],
 		[-0.342, 0.148, 0.151, cap_shift, 0, -12, 121, 0.143],
 		[-0.206, 0.168, 0.174, cap_shift, 0.007, -24, 147, 0.111],
@@ -420,13 +435,13 @@ func _build_arm(side: float) -> void:
 		[0.084, 0.057, 0.064, cap_shift, 0.006, 32, 95, 0.023],
 	], _ceramic, _armor, _dark, 0.027, side)
 	if side < 0.0:
-		Armor.fit(cap, [
+		Armor.fit(cap_cover, [
 			[-0.380, 0.124, 0.140, 0.035, 0.004, 90, 129, 0.083],
 			[-0.262, 0.154, 0.161, 0.030, 0.009, 62, 142, 0.106],
 			[-0.154, 0.167, 0.170, 0.027, 0.012, 47, 130, 0.060],
 			[-0.092, 0.143, 0.154, 0.028, 0.008, 68, 119, 0.042],
 		], _alloy, _titanium, _dark, 0.021, side)
-		_fastener(cap, Vector3(-0.179, -0.194, 0.010), 0.018, Vector3.LEFT)
+		_fastener(cap_cover, Vector3(-0.179, -0.194, 0.010), 0.018, Vector3.LEFT)
 	Armor.fit(shoulder, [
 		[-0.738, 0.081, 0.070, 0, 0.004, 4, 42, 0.028],
 		[-0.598, 0.120, 0.111, 0.003, 0.003, -27, 68, 0.083],
@@ -473,7 +488,8 @@ func _build_arm(side: float) -> void:
 	_joint(wrist, 0.046, 0.071)
 	var fingers := Hand.build(wrist, side > 0.0, _casing_materials())
 	arms.append({"shoulder": shoulder, "elbow": elbow, "wrist": wrist, "side": side,
-		"clavicle": clavicle, "scapula": scapula, "cap": cap, "twist": twist, "fingers": fingers})
+		"clavicle": clavicle, "scapula": scapula, "cap": cap, "twist": twist, "fingers": fingers,
+		"breakaway_cap": cap_cover})
 
 
 func _build_sword() -> void:
@@ -758,6 +774,8 @@ func set_knockdown_power(power: float) -> void:
 	set_charge_state(-1.0)
 	for lamp in [_core, _optic, _temple, _status, _arm_power, _shoulder_power, _exhaust_glow]:
 		lamp.emission_energy_multiplier *= power
+		if armor_breached:
+			lamp.albedo_color = Color("242c31").lerp(lamp.albedo_color, power)
 	_core_spill.light_energy *= power
 	_visor_spill.light_energy *= power
 	_blade_spill.light_energy *= power

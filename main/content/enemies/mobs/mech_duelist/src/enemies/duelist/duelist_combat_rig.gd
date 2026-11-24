@@ -163,23 +163,25 @@ func hit_parts() -> Array:
 		_part(head.to_global(Vector3(0, 0.13, 0)), head.to_global(Vector3(0, 0.40, 0)), 0.235 * factor, "head"),
 	]
 	for leg in legs:
+		var side: float = leg["side"]
 		var hip: Vector3 = leg["hip"].global_position
 		var knee: Vector3 = leg["knee"].global_position
 		var ankle: Vector3 = leg["ankle"].global_position
-		parts.append(_part(hip, knee, 0.20 * factor, "thigh"))
-		parts.append(_part(knee, ankle, 0.18 * factor, "shin"))
-		parts.append(_part(ankle, leg["ankle"].to_global(Vector3(0, -0.08, -0.36)), 0.13 * factor, "foot"))
+		parts.append(_part(hip, knee, 0.20 * factor, "thigh", side))
+		parts.append(_part(knee, ankle, 0.18 * factor, "shin", side))
+		parts.append(_part(ankle, leg["ankle"].to_global(Vector3(0, -0.08, -0.36)), 0.13 * factor, "foot", side))
 	for arm in arms:
+		var side: float = arm["side"]
 		var shoulder: Vector3 = arm["shoulder"].global_position
 		var elbow: Vector3 = arm["elbow"].global_position
 		var hand: Vector3 = arm["wrist"].global_position
-		parts.append(_part(shoulder, elbow, 0.17 * factor, "upper_arm"))
-		parts.append(_part(elbow, hand, 0.13 * factor, "forearm"))
+		parts.append(_part(shoulder, elbow, 0.17 * factor, "upper_arm", side))
+		parts.append(_part(elbow, hand, 0.13 * factor, "forearm", side))
 	return parts
 
 
-func _part(from: Vector3, to: Vector3, radius: float, label: String) -> Dictionary:
-	return {"a": from, "b": to, "r": radius, "label": label}
+func _part(from: Vector3, to: Vector3, radius: float, label: String, side := 0.0) -> Dictionary:
+	return {"a": from, "b": to, "r": radius, "label": label, "side": side}
 
 
 func sync_replay_pose() -> void:

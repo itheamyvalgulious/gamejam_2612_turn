@@ -257,7 +257,10 @@ static func thorax(torso: Node3D, mat: Dictionary) -> void:
 
 static func pelvis(body: Node3D, mat: Dictionary) -> void:
 	for side: float in [-1.0, 1.0]:
-		Armor.fit(body, [
+		var cover := MeshKit.pivot(body, Vector3.ZERO, "PelvisCover")
+		cover.set_meta(&"joint_detail", true)
+		body.set_meta(&"right_cover" if side > 0.0 else &"left_cover", cover)
+		Armor.fit(cover, [
 			[-0.161, 0.214, 0.215, 0.022, -0.015, 19, 66, 0.066],
 			[-0.118, 0.336, 0.235, 0.017, -0.020, 12, 87, 0.108],
 			[-0.040, 0.386, 0.257, 0.017, -0.020, 9, 94, 0.136],

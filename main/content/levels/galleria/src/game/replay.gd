@@ -128,14 +128,37 @@ func record(dt := 1.0 / 60.0) -> void:
 	frame_times.append(frame_times[-1] + dt if not frame_times.is_empty() else 0.0)
 
 
-func apply_shot_pose(time: float) -> void:
+func apply_shot_pose(time: float, live_rig: Node3D = null) -> void:
 	var frame := head - 1
 	while frame > 0 and frame_times[frame] > time:
 		frame -= 1
 	var blend := 0.0
 	if frame + 1 < head:
 		blend = clampf(inverse_lerp(frame_times[frame], frame_times[frame + 1], time), 0.0, 1.0)
-	_apply(frame, blend)
+	_apply(frame, blend, live_rig)
+
+
+func blade_samples(rig, dt: float) -> Array:
+	if head == 0:
+		return []
+	var node_index := _nodes_for(rig).find(rig.weapon_spin)
+	if node_index < 0:
+		return []
+	var now := frame_times[-1] + dt
+	var start := now - minf(rig.attack_elapsed + 0.025, 0.30)
+	var first := head - 1
+	while first > 0 and frame_times[first] > start:
+		first -= 1
+	var samples: Array = []
+	var slot := 3 + node_index * NODE_FLOATS
+	for frame in range(first, head):
+		var p := frame * stride + slot
+		var origin := Vector3(buf[p], buf[p + 1], buf[p + 2])
+		var rotation := Quaternion(buf[p + 3], buf[p + 4], buf[p + 5], buf[p + 6]).normalized()
+		var scale := Vector3(buf[p + 7], buf[p + 8], buf[p + 9])
+		samples.append({"time": frame_times[frame], "pose": Transform3D(Basis(rotation).scaled_local(scale), origin)})
+	samples.append({"time": now, "pose": rig.weapon_xf})
+	return samples
 
 
 func _nodes_for(rig) -> Array:
@@ -331,14 +354,14 @@ func _line(st: SurfaceTool, a: Vector3, b: Vector3, c: Color) -> void:
 	st.add_vertex(b)
 
 
-func _apply(i: int, blend := 0.0) -> void:
+func _apply(i: int, blend := 0.0, live_rig: Node3D = null) -> void:
 	var o := i * stride
 	var p := o + 2
 	var rigs: Array = [_player.rig]
 	for e in _level.enemies:
 		rigs.append(e.rig)
 	for a in ACTORS:
-		if buf[p] > 0.5 and a < rigs.size():
+		if buf[p] > 0.5 and a < rigs.size() and rigs[a] != live_rig:
 			var list := _nodes_for(rigs[a])
 			var q := p + 1
 			for nd in list:

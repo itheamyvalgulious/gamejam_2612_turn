@@ -11,6 +11,7 @@ const Lunge = preload("res://src/enemies/duelist/duelist_lunge.gd")
 const ReturnCut = preload("res://src/enemies/duelist/duelist_return_cut.gd")
 const PursuitSweep = preload("res://src/enemies/duelist/duelist_pursuit_sweep.gd")
 const Knockdown = preload("res://src/enemies/duelist/duelist_knockdown.gd")
+const Wreckage = preload("res://src/enemies/duelist/duelist_wreckage.gd")
 const MODEL_SCALE := 1.36
 const PACE_CENTER := Vector3(0.0, 0.0, 5.60)
 const WAKE_RANGE := 20.0 / Units.M_PER_UNIT
@@ -22,7 +23,12 @@ var sequence := Sequence.new()
 var phase := Phase.PACING
 var _normal_strike := 0
 var _knockdown: Knockdown
+var _wreckage: Wreckage
 var _blade_impulse := Vector3.ZERO
+var _blade_part := ""
+var _blade_side := 0.0
+var _pending_armor_break := false
+var _break_point := Vector3.ZERO
 
 
 func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn := Vector3.INF, health := 3.0) -> void:
@@ -93,7 +99,7 @@ func on_attack_parried(normal: Vector3) -> void:
 
 func step(dt: float, ctx: Dictionary) -> void:
 	if not alive:
-		_step_knockdown(dt)
+		_step_knockdown(dt, Fx.time_scale)
 		return
 	player = ctx.get("player")
 	if not player.alive:
@@ -170,10 +176,15 @@ func hurt(amount: float, normal := Vector3.UP, _knock := 0.0) -> void:
 	super.hurt(amount, normal, 0.0)
 
 
-func hurt_by_blade(amount: float, normal: Vector3, knock: float, travel: Vector3) -> void:
-	_blade_impulse = travel if travel.slide(Vector3.UP).length_squared() > 0.001 else -normal
+func hurt_by_blade(amount: float, normal: Vector3, knock: float, travel: Vector3, contact: Dictionary) -> void:
+	_blade_impulse = contact.get("force", travel if travel.slide(Vector3.UP).length_squared() > 0.001 else -normal)
+	_blade_part = contact.get("part", "")
+	_blade_side = contact.get("side", 0.0)
 	hurt(amount, normal, knock)
-	_blade_impulse = Vector3.ZERO
+	if alive:
+		_blade_impulse = Vector3.ZERO
+		_blade_part = ""
+		_blade_side = 0.0
 
 
 func die() -> void:
@@ -184,31 +195,83 @@ func die() -> void:
 	sequence.sync_audio(true)
 	sequence.hide()
 	_knockdown = Knockdown.new()
-	_knockdown.begin(rig, _blade_impulse)
+	var path := {}
+	var launch_dir := _blade_impulse.slide(Vector3.UP).normalized()
+	if level != null and level.has_method("duelist_defeat_path") and not launch_dir.is_zero_approx():
+		path = level.duelist_defeat_path(rig.global_position, launch_dir)
+	_knockdown.begin(rig, _blade_impulse, path, _blade_part, _blade_side)
 	if level != null:
 		level.on_enemy_died(self)
 
 
-func _step_knockdown(dt: float) -> void:
+func knockdown_landing_position() -> Vector3:
+	return _knockdown.landing if _knockdown != null and _knockdown.launched else rig.global_position
+
+
+func show_fatal_damage(point: Vector3) -> void:
+	if alive or _pending_armor_break or _wreckage != null or _blade_part.is_empty():
+		return
+	_knockdown.capture_contact_pose(rig)
+	_break_point = rig.to_local(point)
+	_pending_armor_break = true
+
+
+func advance_fatal_reaction(dt: float, rate: float) -> void:
+	if not alive and _knockdown != null:
+		_step_knockdown(dt, rate)
+
+
+func _break_armor(rate: float) -> void:
+	_pending_armor_break = false
+	_wreckage = Wreckage.new()
+	var point: Vector3 = rig.to_global(_break_point)
+	if not _wreckage.begin(rig, point, _blade_impulse, _blade_part, _blade_side, rate):
+		_wreckage = null
+		return
+	var source := _wreckage.breach.global_position
+	Snd.play_at("armor_snap", source, {"pos": source, "gain": 1.48, "prio": 5})
+
+
+func _step_knockdown(dt: float, rate: float) -> void:
 	var before := _knockdown.age
-	if before == 0.0 and dt > 0.0:
+	_knockdown.advance(rig, dt, rate)
+	var sound_time := Knockdown.HIT_LIFT_OFF if not _blade_part.is_empty() else 0.0
+	if before <= sound_time and _knockdown.age > sound_time:
 		Snd.play_at("death", center(), {"gain": 0.62})
-	_knockdown.advance(rig, dt)
-	if before < Knockdown.KNEEL and _knockdown.age >= Knockdown.KNEEL:
+	if _wreckage != null:
+		var previous := _wreckage.age
+		_wreckage.step(dt, rate)
+		for pulse: float in [0.082, 0.26, 0.51, 0.91]:
+			if previous < pulse and _wreckage.age >= pulse:
+				_short_circuit()
+	elif _pending_armor_break and _knockdown.age >= Knockdown.ARMOR_RELEASE:
+		_break_armor(rate)
+	if _knockdown.body_contact_time == Knockdown.BODY_LAND and before < Knockdown.KNEEL and _knockdown.age >= Knockdown.KNEEL:
 		var knee_contact: Vector3 = rig.legs[0]["knee"].global_position
 		knee_contact.y = rig.global_position.y + 0.08
 		Snd.play_at("step", knee_contact, {"gain": 1.00, "rate": 0.84})
 		Fx.spark(knee_contact, -rig.global_basis.z, 0.35)
-	if before < Knockdown.WEAPON_LAND and _knockdown.age >= Knockdown.WEAPON_LAND:
+	if _knockdown.take_sword_impact(before):
 		var contact: Vector3 = rig.weapon_root.global_position
 		Snd.play_at("clang", contact, {"gain": 0.86})
 		Fx.spark(contact, Vector3.UP, 0.52)
-	if before < Knockdown.BODY_LAND and _knockdown.age >= Knockdown.BODY_LAND:
+	if before < _knockdown.body_contact_time and _knockdown.age >= _knockdown.body_contact_time:
 		var shoulder_contact: Vector3 = rig.arms[0]["shoulder"].global_position
 		shoulder_contact.y = rig.global_position.y + 0.12
-		Snd.play_at("hit", shoulder_contact, {"gain": 1.55, "rate": 0.70})
-		Fx.spark(shoulder_contact, -rig.global_basis.x, 0.58)
-		Fx.shake(1.10)
+		var power := 1.0 if _knockdown.launched else 0.62
+		Snd.play_at("hit", shoulder_contact, {"gain": 0.82 + power, "rate": 0.70})
+		Fx.spark(shoulder_contact, -rig.global_basis.x, power)
+		Fx.shake(0.6 + power)
+
+
+func _short_circuit() -> void:
+	var housing: Node3D = _wreckage.breach
+	var socket := housing.to_global(Vector3(0.05, -0.07, -0.11))
+	var bend := housing.to_global(Vector3(-0.10, 0.03, -0.16))
+	var wire := housing.to_global(Vector3(0.04, 0.13, -0.10))
+	Fx.beam(socket, bend, 0.068, Color("bef5ff"), 0.06)
+	Fx.beam(bend, wire, 0.049, Color("a2d9ff"), 0.06)
+	Fx.spark(socket, -housing.global_basis.z, 0.62)
 
 
 func pause_for_replay() -> void:

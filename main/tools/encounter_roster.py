@@ -9,6 +9,7 @@ ROOTS = {
     "duelist": ("mobs/mech_duelist", [
         "src/enemies/duelist/duelist_combat_rig.gd",
         "src/enemies/duelist/duelist_knockdown.gd",
+        "src/enemies/duelist/duelist_wreckage.gd",
     ]),
     "shard": ("mobs/shard_phantom", ["scripts/character.gd", "scripts/phantom/energy_shuriken.gd"]),
     "wheel": ("mobs/wheel_sentry", ["scenes/ranged/wheel_sentry_model.tscn", "src/enemies/ranged/wheel_sentry_beam.gd"]),

@@ -137,11 +137,11 @@ var _prewarm_thread: Thread = null
 var _prewarm_result: Dictionary = {}
 var _prewarm_kinds: Array = ["step", "swing_light", "swing_heavy", "arrow_whistle",
 	"arrow_hit", "clang", "parry", "hit", "qi", "qi_loop", "sentry_charge",
-	"laser", "slam", "death", "player_death", "chime", "ping"]
+	"laser", "slam", "armor_snap", "death", "player_death", "chime", "ping"]
 
 
 func _start_prewarm() -> void:
-	for k in ["step", "swing_light", "hit", "clang"]:
+	for k in ["step", "swing_light", "hit", "clang", "armor_snap"]:
 		_wave(k, 0)
 	_prewarm_thread = Thread.new()
 	_prewarm_thread.start(_prewarm_worker)

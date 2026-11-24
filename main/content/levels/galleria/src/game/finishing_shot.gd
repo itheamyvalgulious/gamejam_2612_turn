@@ -15,8 +15,10 @@ var hit_at := 0.0
 var active := false
 var impact_now := false
 var windup_now := false
+var early_reaction_dt := 0.0
 var point := Vector3.ZERO
 var normal := Vector3.UP
+var impact_force := Vector3.ZERO
 var _pose_start := 0.0
 var _pose_contact := 0.0
 var _pose_end := 0.0
@@ -25,6 +27,9 @@ var _fall_focus := Vector3.ZERO
 var _approach := Vector3.ZERO
 var _close := Vector3.ZERO
 var _exit := Vector3.ZERO
+var target: Node3D
+var _foe_start := Vector3.ZERO
+var _air_distance := Vector3.ZERO
 
 
 func begin(event: Dictionary, player, level, replay) -> bool:
@@ -38,21 +43,33 @@ func begin(event: Dictionary, player, level, replay) -> bool:
 		return false
 	var side := along.cross(Vector3.UP)
 	_focus = from.lerp(to, 0.56)
-	_fall_focus = _focus.lerp(to, 0.20) - Vector3.UP * 0.74
+	target = foe
+	_foe_start = foe.ground_position()
+	_air_distance = Vector3.ZERO
+	if foe.has_method("knockdown_landing_position"):
+		_air_distance = foe.knockdown_landing_position() - _foe_start
+	_fall_focus = _focus.lerp(to, 0.20) + _air_distance * 0.58 - Vector3.UP * 0.74
 	point = event.get("contact", event["pos"])
 	var travel: Vector3 = event.get("travel", Vector3.ZERO)
 	normal = (travel.normalized() + event.get("normal", Vector3.UP) * 0.28).normalized()
-	for side_sign: float in [1.0, -1.0]:
+	impact_force = event.get("force", travel)
+	# Keep the camera side stable when the entry is resolved on an earlier frame.
+	var camera_side_hint: Vector3 = event["pos"]
+	var near_side := -1.0 if (camera_side_hint - to).dot(side) < -0.11 else 1.0
+	for side_sign: float in [near_side, -near_side]:
 		var offset := side * side_sign * 8.45 - along * 1.6
 		_approach = _focus + offset.rotated(Vector3.UP, -side_sign * 0.30) * 1.18 + Vector3.UP * 2.95
 		_close = _focus + offset * 0.82 + Vector3.UP * 1.73
-		_exit = _fall_focus + offset.rotated(Vector3.UP, side_sign * 0.18) * 1.08 + Vector3.UP * 1.26
+		var pull_back := minf(_air_distance.length() * 0.045, 0.22)
+		_exit = _fall_focus + offset.rotated(Vector3.UP, side_sign * 0.18) * (1.08 + pull_back) + Vector3.UP * 1.26
 		if not _clear_camera_track(level, from, to):
 			continue
 		_pose_end = replay.frame_times[-1]
-		_pose_contact = lerpf(replay.frame_times[-2], _pose_end, event.get("contact_fraction", 1.0))
 		var buildup := minf(MAX_LEAD, player.rig.attack_elapsed)
 		_pose_start = maxf(replay.frame_times[0], _pose_end - buildup)
+		var confirmed := lerpf(replay.frame_times[-2], _pose_end, event.get("contact_fraction", 1.0))
+		_pose_contact = clampf(event.get("contact_time", confirmed), replay.frame_times[0], _pose_end)
+		_pose_start = minf(_pose_start, maxf(replay.frame_times[0], _pose_contact - 0.027))
 		var lead := _pose_contact - _pose_start
 		if lead < 0.001:
 			return false
@@ -70,6 +87,8 @@ func _clear_camera_track(level, from: Vector3, to: Vector3) -> bool:
 		var eye := _camera_position(float(sample) / 8.0)
 		if not level.melee_clear(eye, from) or not level.melee_clear(eye, to):
 			return false
+		if sample >= 4 and not _air_distance.is_zero_approx() and not level.melee_clear(eye, to + _air_distance - Vector3.UP):
+			return false
 		if sample > 0 and not level.melee_clear(previous, eye):
 			return false
 		previous = eye
@@ -83,8 +102,16 @@ func advance(delta: float, replay) -> float:
 	windup_now = before < hit_at * 0.82 and age >= hit_at * 0.82
 	var previous := _animation_time(before)
 	var now := _animation_time(age)
+	early_reaction_dt = 0.0
 	if previous <= _pose_end:
-		replay.apply_shot_pose(minf(now, _pose_end))
+		var pose_time := minf(now, _pose_end)
+		if target.has_method("advance_fatal_reaction"):
+			# The player still needs the recorded swing while the enemy reacts live.
+			var live_rig: Node3D = target.rig if before >= hit_at else null
+			replay.apply_shot_pose(_pose_contact if impact_now else pose_time, live_rig)
+			early_reaction_dt = maxf(0.0, pose_time - maxf(previous, _pose_contact))
+		else:
+			replay.apply_shot_pose(pose_time)
 	return maxf(0.0, now - maxf(previous, _pose_end))
 
 
@@ -125,6 +152,9 @@ func frame(camera: Camera3D, ground_shake: float) -> void:
 	var lean_in := smoothstep(0.0, 0.42, progress)
 	var aim := _focus.lerp(point, 0.36 * lean_in).lerp(_fall_focus, retreat)
 	var eye := _camera_position(progress)
+	if is_instance_valid(target) and not _air_distance.is_zero_approx():
+		var motion: Vector3 = target.ground_position() - _foe_start
+		aim += (motion - _air_distance * retreat) * 0.53
 	eye += Vector3.UP * (0.20 * kick + 0.024 * ground_shake * sin(age * 48.0) * retreat)
 	camera.fov = lerpf(lerpf(53.0, 44.0, lean_in), 50.0, retreat)
 	camera.look_at_from_position(eye, aim)
