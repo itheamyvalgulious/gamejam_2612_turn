@@ -79,6 +79,8 @@ func _sync_params() -> void:
 	rig.dash_cd = P.getf("dash.cooldown")
 	rig.accel_rate = P.getf("move.accel")
 	rig.decel_rate = P.getf("move.decel")
+	rig.air_accel_rate = P.getf("move.air_accel")
+	rig.air_decel_rate = P.getf("move.air_decel")
 	rig.turn_rate = P.getf("move.turn_rate")
 	rig.face_rate = P.getf("jump.air_steer") * 8.0 if rig.jump_state != "GROUND" else P.getf("move.turn_rate")
 	var t := {}
@@ -116,10 +118,6 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 	var move_speed := lerpf(P.getf("move.walk_speed"), P.getf("move.run_speed"), mag)
 	if P.getb("move.auto_sprint") and run_hold > 1.4:
 		move_speed = maxf(move_speed, P.getf("move.sprint_speed"))
-	if rig.is_attacking:
-		move_speed *= P.getf("move.attack_drag")
-	if rig.jump_state == "AIR" or rig.jump_state == "LANDING":
-		move_speed *= P.getf("move.air_control")
 	if dir.length() > 0.15:
 		rig.move_command = dir.normalized() * move_speed
 	else:
@@ -202,9 +200,6 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 		_platform_grace = 0.0
 		rig.ground_height = 0.0
 	rig.advance(dt)
-	# 攻击中允许按 move.attack_drag 慢慢位移（rig 在攻击时会锁住位移）
-	if rig.is_attacking and dir.length() > 0.15:
-		rig.position += dir.normalized() * (P.getf("move.run_speed") * P.getf("move.attack_drag")) * dt
 	# 格挡击退：被架住的那一刀把人推开
 	if block_push.length_squared() > 0.0001:
 		rig.position += block_push * dt
@@ -378,7 +373,7 @@ func _attack_from_input(mv: Vector2) -> void:
 
 
 func _attack(move_id: String) -> void:
-	if not alive or rig.is_attacking or rig.jump_state != "GROUND":
+	if not alive or rig.is_attacking:
 		return
 	rig.play_action(move_id, P.getf("attack.%s.lunge" % move_id))
 	last_attack = move_id

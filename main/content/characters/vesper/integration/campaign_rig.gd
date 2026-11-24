@@ -68,10 +68,6 @@ func _advance_jump(dt: float) -> void:
 	super._advance_jump(dt)
 
 
-func _steer_dash(forward: Vector3, dt: float) -> void:
-	_dash_dir = _dash_dir.slerp(forward, 1.0 - exp(-10.0 * dt)).normalized()
-
-
 func set_timings(timings: Dictionary) -> void:
 	_timings = timings
 

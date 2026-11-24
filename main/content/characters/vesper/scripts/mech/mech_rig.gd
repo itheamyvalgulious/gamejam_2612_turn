@@ -91,7 +91,8 @@ const CROSS_POLES := {
 
 # ---------------------------------------------------------------- public state
 var move_command := Vector3.ZERO       # desired world-space velocity (XZ)
-var speed := 0.0
+var speed := 0.0                       # |horizontal velocity| — read-only mirror for gait/thrusters
+var _vel_h := Vector3.ZERO             # actual horizontal velocity (world units/s)
 var strafe := 0.0
 var gait_sign := 1.0
 var lock_heading := false
@@ -170,8 +171,10 @@ var land_time := LAND_TIME
 var dash_distance := 2.0
 var dash_duration := 0.28
 var dash_cd := 0.50
-var accel_rate := 18.0
-var decel_rate := 26.0
+var accel_rate := 18.0        # ground, WASD held: accelerate toward move_command
+var decel_rate := 26.0        # ground, no input: strong braking
+var air_accel_rate := 14.0    # air, WASD held: thruster-assisted, weaker than ground
+var air_decel_rate := 3.0     # air, no input: light drag
 var turn_rate := 12.0
 var facing_override := false
 var facing_heading := 0.0
@@ -230,8 +233,7 @@ func _build_hair() -> void:
 
 # ============================================================== attack input
 func request_light_attack() -> void:
-	if jump_state != "GROUND":
-		return
+	# Attacks are allowed on the ground and in the air; they never damp motion.
 	if is_attacking:
 		if combo_step < 4 and _attack_queue.is_empty():
 			_attack_queue.append(combo_step + 1)
@@ -242,7 +244,7 @@ func request_light_attack() -> void:
 
 ## QA / demo helper: start a specific front attack (1..4).
 func request_front_attack(index: int) -> void:
-	if jump_state != "GROUND" or is_attacking:
+	if is_attacking:
 		return
 	var names := ["FRONT_R", "FRONT_L", "RISE_R", "RISE_L"]
 	combo_step = clampi(index, 1, 4)
@@ -250,36 +252,37 @@ func request_front_attack(index: int) -> void:
 
 
 func request_side_attack(side := 1.0) -> void:
-	if jump_state != "GROUND" or is_attacking:
+	if is_attacking:
 		return
 	combo_step = 0
 	_begin_attack(_clip("SIDE_THRUST_L" if side < 0.0 else "SIDE_THRUST_R"), false)
 
 
 func request_back_attack() -> void:
-	if jump_state != "GROUND" or is_attacking:
+	if is_attacking:
 		return
 	combo_step = 0
 	_begin_attack(_clip("BACK_THRUST"), true)
 
 
 func request_heavy_attack() -> void:
-	if jump_state != "GROUND" or is_attacking:
+	if is_attacking:
 		return
 	combo_step = 0
 	_begin_attack(_clip("HEAVY"), true)
 
 
 func request_spin_attack() -> void:
-	if jump_state != "GROUND" or is_attacking:
+	if is_attacking:
 		return
 	combo_step = 0
 	_begin_attack(_clip("SPIN"), true)
 
 
 ## local_dir is in the character's local space; default = forward (-Z).
+## Works on the ground and in the air.
 func request_dash(local_dir := Vector3(0, 0, -1)) -> void:
-	if jump_state != "GROUND" or _dash_cooldown > 0.0 or is_attacking:
+	if _dash_cooldown > 0.0 or is_attacking:
 		return
 	var d := local_dir
 	if d.length_squared() < 0.001:
@@ -381,18 +384,27 @@ func advance(dt: float) -> void:
 	_advance_jump(dt)
 
 	# ---------------- locomotion
+	# Horizontal motion is a real velocity integrator.  WASD picks a target
+	# velocity (move_command); the integrator accelerates toward it with one
+	# rate on the ground and a weaker thruster-driven rate in the air.  With no
+	# input the ground brakes hard while air drag stays light, so momentum
+	# carries through a jump instead of snapping to zero.  Attacks and dashes
+	# never damp _vel_h: the sword can be swung while moving and the dash is a
+	# separate fixed-speed displacement layered on top.
+	var in_air := jump_state == "AIR"
 	var moving := move_command.length() > 0.05
-	var target_speed := move_command.length()
-	if is_attacking:
-		target_speed *= 0.10
-		moving = false
 	if dash_time > 0.0:
-		target_speed = 0.0
-		moving = false
-	var accel := accel_rate if speed < target_speed else decel_rate
-	speed = move_toward(speed, target_speed, accel * dt)
-	if dash_time > 0.0:
-		speed = 0.0
+		# The dash owns displacement and sets _vel_h directly each frame below;
+		# skip the integrator so WASD can't fight the dash.
+		pass
+	else:
+		var accel := accel_rate
+		if not moving:
+			accel = air_decel_rate if in_air else decel_rate
+		elif in_air:
+			accel = air_accel_rate
+		_vel_h = _vel_h.move_toward(move_command, accel * dt)
+	speed = _vel_h.length()
 
 	if moving:
 		if lock_heading:
@@ -419,13 +431,10 @@ func advance(dt: float) -> void:
 	_yaw_rate = lerpf(_yaw_rate, angular_velocity, 1.0 - exp(-6.0 * dt))
 
 	var forward := -global_basis.z.normalized()
-	var vel := forward * speed
-	# Movement follows the input vector, never the facing alone: S must
-	# backpedal and A/D must strafe even while the body is locked forward.
-	if move_command.length() > 0.05:
-		vel = move_command.normalized() * speed
-	if speed > 0.08 and move_command.length() > 0.05:
-		var local_move := global_basis.orthonormalized().inverse() * move_command
+	# Strafe/backpedal pose follows the ACTUAL velocity, so turning corners,
+	# air drift and attack-motion all animate correctly.
+	if _vel_h.length() > 0.08:
+		var local_move := global_basis.orthonormalized().inverse() * _vel_h
 		strafe = clampf(local_move.x / maxf(speed, 0.1), -1.0, 1.0)
 		gait_sign = signf(-local_move.z)
 		if absf(gait_sign) < 0.05:
@@ -435,20 +444,23 @@ func advance(dt: float) -> void:
 		var d := lunge - _lunge_prev
 		_lunge_prev = lunge
 		position += forward * d
-		vel += forward * (d / maxf(dt, 0.0001))
 	if dash_time > 0.0:
 		var dash_t := 1.0 - dash_time / maxf(dash_duration, 0.01)
 		# integral of the old curve is ~9.92; convert distance to a scale
 		var dash_speed := (18.0 * pow(1.0 - dash_t, 1.6) + 3.0) \
 			* (dash_distance / maxf(9.923 * dash_duration, 0.001))
 		# direction is fixed for the whole dash: forward and lateral dashes are
-		# distinct authored inputs, not a steering blend.
+		# distinct authored inputs, not a steering blend.  The dash OVERWRITES
+		# the current velocity: when it ends the body keeps moving the way the
+		# dash went (dash back while running forward no longer snaps back
+		# to forward drift).
 		_steer_dash(forward, dt)
 		var dash_step := minf(dt, dash_time)
 		position += _dash_dir * dash_speed * dash_step
+		_vel_h = _dash_dir * (dash_distance / maxf(dash_duration, 0.01))
 		dash_time = maxf(0.0, dash_time - dash_step)
-	if not is_attacking:
-		position += vel * dt
+	else:
+		position += _vel_h * dt
 
 	_constrain_horizontal()
 
@@ -487,7 +499,10 @@ func advance(dt: float) -> void:
 	_special_w = lerpf(_special_w, sp_target, 1.0 - exp(-sp_rate * dt))
 
 	# ---------------- body mechanics
-	var lean_speed := clampf(speed_mps / RUN_SPEED, 0.0, 1.2) * 0.17
+	# Lean follows the velocity's signed forward component: running forward
+	# tips the body forward, a backward dash/backpedal tips it backward.
+	var fwd_speed := _vel_h.dot(-global_basis.z.normalized()) / maxf(scale.x, 0.001)
+	var lean_speed := clampf(fwd_speed / RUN_SPEED, -0.7, 1.2) * 0.17
 	var bob_amp := lerpf(0.006, 0.026, run_amt) * clampf(speed_mps / 1.2, 0.0, 1.0)
 	var bob := sin((gait_phase * 2.0 + 0.13) * TAU) * bob_amp
 	if speed_mps < 0.4:
@@ -1125,9 +1140,9 @@ func _update_thrusters(dt: float) -> void:
 	elif move_command.length() > 0.05:
 		desire = move_command
 	elif speed > 0.25:
-		desire = -global_transform.basis.z * gait_sign
+		desire = _vel_h
 	var local := global_transform.basis.inverse() * desire
-	var walk_w := clampf(speed / maxf(RUN_SPEED, 0.1), 0.0, 1.0)
+	var walk_w := clampf(speed / maxf(scale.x * RUN_SPEED, 0.1), 0.0, 1.0)
 	if dash_time > 0.0:
 		walk_w = 1.0
 	var target_pitch := 0.0
@@ -1268,6 +1283,7 @@ func reset_demo(pos: Vector3, new_heading: float) -> void:
 	heading = new_heading
 	rotation.y = new_heading
 	speed = 0.0
+	_vel_h = Vector3.ZERO
 	display_speed = 0.0
 	move_command = Vector3.ZERO
 	is_attacking = false
