@@ -6,6 +6,7 @@ const LEVELS := [
 	["灯墙之厅", "持续注视折相会加快虚化充能。", "shadow_chamber", "", [], "shadow_chamber"],
 	["货舱 02", "利用集装箱遮挡，趁位移敌人重组时接近。", "cargo", "", [], "cargo_hold_02"],
 	["霓虹街区", "沿街边小巷绕到掩体后方，肃清街区。", "city", "", [], "neon_district"],
+	["霓虹街道（草稿）", "读车流空档过街，穿过十字路口抵达东街角。灰盒草稿，无敌人。", "street", "", [], "city_street", "street", "neon_district"],
 	["坠击中庭", "从高台跳下，落地前按左键发动范围坠击。", "galleria", "", [], "galleria"],
 	["仓库", "沿货架、集装箱和环廊穿过装卸区。", "warehouse", "", [], "warehouse", "room_shared"],
 	["回廊实验舱", "绕中央玻璃罐，经环形长廊抵达检修台。", "panopticon", "", [], "panopticon", "room_shared"],

@@ -1,0 +1,53 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="ORION // City Street"
+config/description="Standalone street with live traffic."
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "Forward Plus")
+boot_splash/bg_color=Color(0.008, 0.01, 0.016, 1)
+boot_splash/show_image=false
+
+[autoload]
+
+P="*res://src/core/params.gd"
+B="*res://src/core/binds.gd"
+Fx="*res://src/fx/vfx.gd"
+Snd="*res://src/audio/audio.gd"
+
+[display]
+
+window/size/viewport_width=1600
+window/size/viewport_height=900
+window/size/window_width_override=1280
+window/size/window_height_override=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/vsync/vsync_mode=0
+
+[gui]
+
+; The UI font loads in main._ready after first-time imports finish.
+
+[layer_names]
+
+3d_physics/layer_1="world"
+3d_physics/layer_2="mech"
+
+[rendering]
+
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
+textures/default_filters/anisotropic_filtering_level=3
+anti_aliasing/quality/msaa_3d=2
+environment/defaults/default_clear_color=Color(0.006, 0.008, 0.013, 1)
+anti_aliasing/quality/screen_space_aa=1

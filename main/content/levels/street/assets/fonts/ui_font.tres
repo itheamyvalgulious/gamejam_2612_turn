@@ -1,0 +1,9 @@
+[gd_resource type="FontVariation" load_steps=4 format=3]
+
+[ext_resource type="FontFile" path="res://assets/fonts/OpenSans-Regular.ttf" id="1_lat"]
+[ext_resource type="FontFile" path="res://assets/fonts/DroidSansFallbackFull.ttf" id="2_cjk"]
+[ext_resource type="FontFile" path="res://assets/fonts/DejaVuSans.ttf" id="3_sym"]
+
+[resource]
+fallbacks = Array[Font]([ExtResource("2_cjk"), ExtResource("3_sym")])
+base_font = ExtResource("1_lat")
