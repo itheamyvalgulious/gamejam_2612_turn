@@ -1,6 +1,7 @@
 extends RefCounted
 ## Continue the double cut into two forward steps and a descending third cut.
 
+const HitMath = preload("res://src/core/hitgd.gd")
 const DoubleCut = preload("res://src/enemies/duelist/duelist_double_cut.gd")
 const NormalCut = preload("res://src/enemies/duelist/duelist_normal_cut.gd")
 const Alert = preload("res://src/enemies/duelist/duelist_alert_pose.gd")
@@ -88,7 +89,7 @@ static func prepare_run(model, state: Dictionary, focus: Vector3, cover: Array, 
 	var dest := root.origin + forward * clampf(gap - STANDOFF, 0.0, RUN_REACH * size)
 	for obstacle: Dictionary in cover:
 		var radius := maxf(0.35, float(obstacle["r"]) - 1.2) + 1.1 * size
-		dest = Hit.slide_around_body(root.origin, dest, obstacle["c"], radius)
+		dest = HitMath.slide_around_body(root.origin, dest, obstacle["c"], radius)
 	var shift := root.affine_inverse() * DoubleCut._inside(dest, bounds)
 	run["root"] = root
 	run["shift"] = shift

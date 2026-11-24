@@ -753,6 +753,17 @@ func set_charge_state(age: float, blade_discharge := 0.0, attack_glow := 0.0) ->
 	_blade_mount.rotation_degrees = Charge.vibration_at(age)
 
 
+func set_knockdown_power(power: float) -> void:
+	set_effects(0.0, 0.0)
+	set_charge_state(-1.0)
+	for lamp in [_core, _optic, _temple, _status, _arm_power, _shoulder_power, _exhaust_glow]:
+		lamp.emission_energy_multiplier *= power
+	_core_spill.light_energy *= power
+	_visor_spill.light_energy *= power
+	_blade_spill.light_energy *= power
+	_blade_inlay.set_shader_parameter("baseline", 3.2 * power)
+
+
 func _tint_lamp(material: StandardMaterial3D, idle: Color, red: float) -> void:
 	var color := idle.lerp(SIGNAL_TINT, red)
 	material.albedo_color = color

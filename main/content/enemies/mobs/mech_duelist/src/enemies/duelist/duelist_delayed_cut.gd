@@ -1,6 +1,7 @@
 extends RefCounted
 ## An outside lift, a planted lead step, then a diagonal cut from the chest turn.
 
+const HitMath = preload("res://src/core/hitgd.gd")
 const NormalCut = preload("res://src/enemies/duelist/duelist_normal_cut.gd")
 const Pace = preload("res://src/enemies/duelist/duelist_pace.gd")
 const DISPLAY_NAME := "延迟斜劈"
@@ -18,7 +19,7 @@ static func begin(model, focus: Vector3, cover: Array, bounds: AABB) -> Dictiona
 	var state := NormalCut.begin(model, focus)
 	var foot: Transform3D = state["feet"][0]
 	var planted: Vector3 = model.to_global(foot.origin + Vector3(-0.07, 0, -0.65))
-	planted = Hit.resolve_circles(planted, 0.23 * model.scale.x, cover, planted.y)
+	planted = HitMath.resolve_circles(planted, 0.23 * model.scale.x, cover, planted.y)
 	if bounds.size.length_squared() > 0.1:
 		planted.x = clampf(planted.x, bounds.position.x + 3.0, bounds.end.x - 3.0)
 		planted.z = clampf(planted.z, bounds.position.z + 3.0, bounds.end.z - 3.0)

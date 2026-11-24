@@ -6,6 +6,10 @@ import re
 ROOTS = {
     "fold": ("bosses/phase_boss", ["src/enemies/phase_boss/phase_boss_combat.gd"]),
     "arc": ("mobs/arc_sentinel", ["scripts/ch/arc_sentinel.gd"]),
+    "duelist": ("mobs/mech_duelist", [
+        "src/enemies/duelist/duelist_combat_rig.gd",
+        "src/enemies/duelist/duelist_knockdown.gd",
+    ]),
     "shard": ("mobs/shard_phantom", ["scripts/character.gd", "scripts/phantom/energy_shuriken.gd"]),
     "wheel": ("mobs/wheel_sentry", ["scenes/ranged/wheel_sentry_model.tscn", "src/enemies/ranged/wheel_sentry_beam.gd"]),
 }
@@ -45,6 +49,8 @@ def pack_designs(enemies):
             dest = design_path(design, path)
             if isinstance(value, str):
                 value = PATHS.sub(lambda m: "res://runtime/" + design_path(design, m[1]).as_posix(), value)
+                if design == "duelist" and dest.suffix == ".gd":
+                    value = re.sub(r"(?m)^class_name \w+\n", "", value)
                 if dest.suffix in {".tscn", ".tres"}:
                     value = re.sub(r'\s+uid="uid://[^"]+"', "", value)
                 value = value.encode("utf-8")
@@ -63,6 +69,8 @@ def adapters(episode, enemies):
         bindings["src/game/wheel_encounter.gd"] = "mobs/wheel_sentry/src/enemies/ranged/wheel_sentry_enemy.gd"
     if episode in {"cargo", "city"}:
         bindings["src/game/shard_encounter.gd"] = "mobs/shard_phantom/integration/shard_encounter.gd"
+    if episode == "galleria":
+        bindings["src/game/duelist_encounter.gd"] = "mobs/mech_duelist/src/game/enemy_duelist.gd"
     return {path: (enemies / source).read_text(encoding="utf-8-sig") for path, source in bindings.items()}
 
 
@@ -72,6 +80,13 @@ def adapt_wheel(text):
         text = text.replace("res://" + path, "res://team/wheel/" + path)
     text = text.replace('kind = "archer"', 'kind = "archer"\n\tenemy_id = "wheel_sentry"')
     return text
+
+
+def adapt_duelist(text):
+    text = text.replace('extends "res://src/game/enemy_base.gd"', 'extends "res://src/game/encounter_unit.gd"')
+    text = text.replace("res://src/enemies/duelist/", "res://team/duelist/src/enemies/duelist/")
+    text = text.replace("res://src/core/hitgd.gd", "res://team/duelist/src/core/hitgd.gd")
+    return text.replace('kind = "duelist"', 'kind = "duelist"\n\tenemy_id = "mech_duelist"')
 
 
 def adapt_host(episode, relative, text, enemies):

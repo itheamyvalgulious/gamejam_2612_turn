@@ -2,6 +2,7 @@ extends LevelUnit
 const SceneArena = preload("res://src/encounter/arena.gd")
 const Sentinel = preload("res://src/game/arc_encounter.gd")
 const Sentry = preload("res://src/game/wheel_encounter.gd")
+const Duelist = preload("res://src/game/duelist_encounter.gd")
 const ACTOR_RADIUS := 1.75
 var nav: AStarGrid2D
 var plunge_armed := false
@@ -9,8 +10,10 @@ var drop_start_height := 0.0
 var was_airborne := false
 var rng := RandomNumberGenerator.new()
 var player_previous := Vector3.ZERO
+var finishing_enemy: Node3D
 
 func start_level(_idx: int) -> void:
+	finishing_enemy = null
 	_clear_enemies()
 	index = 0
 	if arena_node == null:
@@ -34,14 +37,21 @@ func start_level(_idx: int) -> void:
 		match entry["kind"]:
 			"archer":
 				enemy = Sentry.new()
+			"duelist":
+				enemy = Duelist.new()
 			_:
 				enemy = Sentinel.new()
 		add_child(enemy)
 		enemy.level = self
-		enemy.global_position = arena["anchors"][entry["pad"]] if entry["kind"] == "phase" else entry["pos"]
-		if entry["kind"] == "archer":
-			enemy.setup_sentry(PI, 0.95 + float(archers.size()) * 0.35)
-			archers.append(enemy)
+		match entry["kind"]:
+			"duelist":
+				enemy.setup_duelist(player, _duelist_cover(), arena["bounds"], entry["pos"], entry["health"])
+			"archer":
+				enemy.global_position = entry["pos"]
+				enemy.setup_sentry(PI, 0.95 + float(archers.size()) * 0.35)
+				archers.append(enemy)
+			_:
+				enemy.global_position = arena["anchors"][entry["pad"]] if entry["kind"] == "phase" else entry["pos"]
 		enemies.append(enemy)
 	total_enemies = enemies.size()
 	state = "fight"
@@ -56,16 +66,36 @@ func step(dt: float, ctx: Dictionary) -> void:
 		for enemy in enemies:
 			var old: Vector3 = enemy.rig.global_position
 			enemy.step(dt, ctx)
-			if enemy.kind == "mob":
+			if (enemy.kind == "mob" or enemy.kind == "duelist") and enemy.alive:
 				enemy.rig.global_position = resolve_motion(old, enemy.rig.global_position, false)
 	elif state == "clear":
 		# Finish this independent room; never load the demo's next arena.
 		for enemy in enemies:
 			enemy.step(dt, ctx)
-		if state_t > 1.4:
+		var clear_time := 1.60 if is_instance_valid(finishing_enemy) else 1.4
+		if state_t > clear_time:
 			state = "finished"
 	elif state == "dead" and state_t > P.getf("rules.death_delay"):
 		start_level(0)
+
+func on_enemy_died(enemy) -> void:
+	var was_fighting := state == "fight"
+	super.on_enemy_died(enemy)
+	if was_fighting and state == "clear" and arena.get("height_test", false):
+		finishing_enemy = enemy
+
+
+func _duelist_cover() -> Array:
+	var cover: Array = []
+	for box: AABB in arena["solids"]:
+		if absf(box.position.y) > 0.05 or box.size.x >= 35.0 or box.size.z >= 35.0:
+			continue
+		var radius := Vector2(box.size.x, box.size.z).length() * 0.5
+		var at := box.get_center()
+		at.y = box.position.y
+		cover.append({"c": at, "r": radius + 0.65, "h": box.size.y})
+	return cover
+
 
 func constrain_player() -> void:
 	var rig = player.rig

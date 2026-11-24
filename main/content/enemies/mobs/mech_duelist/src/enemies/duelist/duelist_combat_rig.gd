@@ -1,6 +1,7 @@
 extends "res://src/enemies/duelist/duelist_model.gd"
 ## Adapts the humanoid sword and articulated model to the shared combat and parry code.
 
+const Sight = preload("res://src/core/vision.gd")
 const Lunge = preload("res://src/enemies/duelist/duelist_lunge.gd")
 const Sequence = preload("res://src/enemies/duelist/duelist_sequence.gd")
 const ReturnCut = preload("res://src/enemies/duelist/duelist_return_cut.gd")
@@ -72,7 +73,7 @@ func body_in_view(camera: Camera3D) -> bool:
 		var local_planes: Array[Plane] = []
 		for plane in frustum:
 			local_planes.append(from_world * plane)
-		if Vision.faces_in_frustum(piece["bounds"], piece["faces"], local_planes):
+		if Sight.faces_in_frustum(piece["bounds"], piece["faces"], local_planes):
 			return true
 	return false
 

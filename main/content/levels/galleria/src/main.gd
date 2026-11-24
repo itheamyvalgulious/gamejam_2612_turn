@@ -6,6 +6,7 @@ extends Node3D
 const GameHudScene = preload("res://src/game/hud.gd")
 const FpMaskScene = preload("res://src/game/fp_mask.gd")
 const ReplayScene = preload("res://src/game/replay.gd")
+const FinishingShot = preload("res://src/game/finishing_shot.gd")
 const Tuning = preload("res://src/ui/tuning.gd")
 const BindsPanel = preload("res://src/ui/binds_panel.gd")
 
@@ -18,6 +19,8 @@ var tuning
 var binds
 
 var hitstop := 0.0
+var _finish := FinishingShot.new()
+var _finish_hud_visible := true
 var fp_mask
 var _fp_mask_on := false
 var replay
@@ -160,7 +163,7 @@ func _process(delta: float) -> void:
 			_open_frame = frames + 1
 		if B.just("pause"):
 			_open_pause()
-		if B.just("cam_mode"):
+		if B.just("cam_mode") and not _finish.active:
 			cam.toggle_mode()
 		if B.just("fp_mask"):
 			_fp_mask_on = not _fp_mask_on
@@ -180,7 +183,7 @@ func _process(delta: float) -> void:
 	Snd.sync_params()
 	if B.just("audio_test"):
 		Snd.test_surround()
-	if B.just("replay_toggle"):
+	if B.just("replay_toggle") and not _finish.active:
 		if replay.active:
 			replay.stop()
 			P.set_value("cam.mode", _cam_mode_before)
@@ -191,11 +194,15 @@ func _process(delta: float) -> void:
 			hud.set_state("回放中")
 
 	var dt := minf(delta, 0.05) * P.getf("rules.time_scale")
+	if _finish.active:
+		dt = _advance_finishing_shot(minf(delta, 0.05))
+		if is_zero_approx(dt):
+			return
 	if Fx != null:
-		Fx.time_scale = 1.0
+		Fx.time_scale = _finish.rate() if _finish.active else 1.0
 	if hitstop > 0.0:
 		hitstop = maxf(0.0, hitstop - delta)
-		if P.getb("rules.hitstop"):
+		if P.getb("rules.hitstop") and not _finish.active:
 			dt *= 0.06
 			if Fx != null:
 				Fx.time_scale = 0.06
@@ -222,8 +229,13 @@ func _process(delta: float) -> void:
 		level.constrain_player()
 	level.step(dt, ctx)
 	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []))
+	var final_hit := {}
 	for ev in p_events:
-		_on_combat_event(ev)
+		if ev["kind"] == "kill" and ev["enemy"] == level.finishing_enemy:
+			final_hit = ev
+			replay.note_event("kill", ev["pos"])
+		else:
+			_on_combat_event(ev)
 	for e in level.enemies:
 		if is_instance_valid(e) and e.alive and level.melee_clear(e.center(), player.rig.global_position + Vector3(0, 2.3, 0)):
 			var r := Combat.enemy_swing(e, player)
@@ -234,10 +246,22 @@ func _process(delta: float) -> void:
 				hitstop = maxf(hitstop, 0.04)
 			elif bool(r.get("parried", false)):
 				_on_melee_parry(r)
-	replay.record()
-	var proj_events := proj.step(dt, ctx)
-	for ev in proj_events:
-		_on_projectile_event(ev)
+	replay.record(dt)
+	if not final_hit.is_empty():
+		if _finish.begin(final_hit, player, level, replay):
+			proj.clear_all()
+			hitstop = 0.0
+			_finish_hud_visible = hud.visible
+			hud.set_hud_visible(false)
+			player.rig.set_first_person_view(false)
+			player.rig.blade_trail.clear()
+			_advance_finishing_shot(0.0)
+			return
+		_on_combat_event(final_hit, false)
+	if not is_instance_valid(level.finishing_enemy):
+		var proj_events := proj.step(dt, ctx)
+		for ev in proj_events:
+			_on_projectile_event(ev)
 
 	# 死亡
 	if not player.alive and level.state != "dead" and level.state != "finished":
@@ -253,6 +277,8 @@ func _process(delta: float) -> void:
 	# ---------------- 相机 / HUD
 	cam.step(dt, level.arena)
 	level.constrain_camera()
+	if _finish.active:
+		_finish.frame(cam.camera, Fx.shake_amount)
 	_update_fp_mask()
 	hud.set_enemy_count(level.alive_count(), level.total_enemies)
 	hud.set_first_person(cam.first_person)
@@ -276,19 +302,51 @@ func _process(delta: float) -> void:
 		hud.set_state("")
 
 
-## 第三人称「第一人称视野黑幕」：Tab 开关，第一人称下自动关掉
-## （那里的画面本身就是答案，黑幕没有意义）。Replay 里也生效：回放查视野正好用得上。
+func _advance_finishing_shot(delta: float) -> float:
+	var simulation_dt := _finish.advance(delta, replay)
+	var rate := _finish.rate()
+	if _finish.windup_now:
+		Snd.play_at("swing_heavy", _finish.point, {"gain": 1.05, "rate": 0.78})
+	if _finish.impact_now:
+		Snd.play_at("clang", _finish.point, {"gain": 1.05, "rate": 0.84, "prio": 4})
+		Snd.play_at("hit", _finish.point, {"gain": 1.78, "rate": 0.76, "prio": 4})
+		Fx.spark(_finish.point, _finish.normal, 2.12)
+		Fx.screen_flash(0.085, Color(0.66, 0.88, 1.0))
+	if _finish.complete():
+		_end_finishing_shot()
+	elif is_zero_approx(simulation_dt):
+		Fx.time_scale = rate
+		var rig = player.rig
+		var drawing_arc := _finish.age > _finish.hit_at * 0.28
+		rig.blade_trail.tick(delta * rate, drawing_arc)
+		if drawing_arc:
+			rig.blade_trail.add_sample(rig.blade_base.global_position, rig.blade_tip.global_position, Color(0.55, 0.83, 1.0))
+		_finish.frame(cam.camera, 0.0)
+	_update_fp_mask()
+	return simulation_dt
+
+
+func _end_finishing_shot() -> void:
+	if _finish.active:
+		_finish.active = false
+		hud.set_hud_visible(_finish_hud_visible)
+		player.rig.set_first_person_view(cam.first_person)
+		cam.snap(level.arena)
+
+
+## 第三人称「第一人称视野黑幕」：Tab 开关，第一人称下自动关掉。回放中也生效。
 func _update_fp_mask() -> void:
-	var on: bool = _fp_mask_on and not cam.first_person
+	var on: bool = _fp_mask_on and not cam.first_person and not _finish.active
 	fp_mask.set_active(on)
 	if on:
 		fp_mask.step(cam.fp_proj_view(), P.getf("cam.mask_soft"))
 	hud.set_fp_mask(on)
 
 
-func _on_combat_event(ev: Dictionary) -> void:
+func _on_combat_event(ev: Dictionary, record_event := true) -> void:
 	var pos: Vector3 = ev.get("pos", Vector3.ZERO)
-	replay.note_event(String(ev["kind"]), pos)
+	if record_event:
+		replay.note_event(String(ev["kind"]), pos)
 	match String(ev["kind"]):
 		"block":
 			# 被格挡 = 它在你画面里。反馈要醒目到不可能忽略：
@@ -355,8 +413,10 @@ func _on_projectile_event(ev: Dictionary) -> void:
 
 
 func restart_level() -> void:
+	_end_finishing_shot()
 	level.start_level(level.index)
 	hitstop = 0.0
+	replay.clear()
 
 
 func next_level() -> void:

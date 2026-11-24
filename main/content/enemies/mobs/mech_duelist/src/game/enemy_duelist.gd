@@ -2,6 +2,7 @@ extends "res://src/game/enemy_base.gd"
 ## The elite duelist opens with one combo, then switches to melee pursuit.
 
 const Units = preload("res://src/core/units.gd")
+const HitMath = preload("res://src/core/hitgd.gd")
 const CombatRig = preload("res://src/enemies/duelist/duelist_combat_rig.gd")
 const Sequence = preload("res://src/enemies/duelist/duelist_sequence.gd")
 const Pace = preload("res://src/enemies/duelist/duelist_pace.gd")
@@ -9,6 +10,7 @@ const Brace = preload("res://src/enemies/duelist/duelist_ground_brace.gd")
 const Lunge = preload("res://src/enemies/duelist/duelist_lunge.gd")
 const ReturnCut = preload("res://src/enemies/duelist/duelist_return_cut.gd")
 const PursuitSweep = preload("res://src/enemies/duelist/duelist_pursuit_sweep.gd")
+const Knockdown = preload("res://src/enemies/duelist/duelist_knockdown.gd")
 const MODEL_SCALE := 1.36
 const PACE_CENTER := Vector3(0.0, 0.0, 5.60)
 const WAKE_RANGE := 20.0 / Units.M_PER_UNIT
@@ -19,12 +21,14 @@ enum Phase { PACING, SETTLING, OPENING, MELEE }
 var sequence := Sequence.new()
 var phase := Phase.PACING
 var _normal_strike := 0
+var _knockdown: Knockdown
+var _blade_impulse := Vector3.ZERO
 
 
-func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB()) -> void:
+func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn := Vector3.INF, health := 3.0) -> void:
 	player = p_player
 	kind = "duelist"
-	max_hp = 3.0
+	max_hp = health
 	hp = max_hp
 	damage = 35.0
 	scale_factor = MODEL_SCALE
@@ -36,8 +40,19 @@ func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB()) -> void
 	add_child(rig)
 	add_child(sequence)
 	sequence.normal_attack_rate = NORMAL_ATTACK_RATE
-	sequence.setup(rig, PACE_CENTER, cover, bounds)
+	var pace_center := PACE_CENTER
+	if spawn.is_finite():
+		pace_center = spawn - Vector3(sin(Pace.START_ANGLE), 0, cos(Pace.START_ANGLE)) * Pace.RADIUS
+	sequence.setup(rig, pace_center, cover, bounds, Snd, func() -> float: return P.getf("audio.master"))
 	sequence.advance_pacing(0.0, _focus(), false)
+
+
+func ground_position() -> Vector3:
+	return rig.global_position
+
+
+func hit_parts() -> Array:
+	return rig.hit_parts()
 
 
 func center() -> Vector3:
@@ -59,7 +74,7 @@ func blocks_when_seen() -> bool:
 func constrain_player_motion(start: Vector3, goal: Vector3, radius: float) -> Vector3:
 	if minf(start.y, goal.y) > rig.head.global_position.y + 0.45 * scale_factor:
 		return goal
-	return Hit.slide_around_body(start, goal, rig.global_position, radius + 1.1 * scale_factor)
+	return HitMath.slide_around_body(start, goal, rig.global_position, radius + 1.1 * scale_factor)
 
 
 func on_attack_blocked() -> void:
@@ -78,9 +93,7 @@ func on_attack_parried(normal: Vector3) -> void:
 
 func step(dt: float, ctx: Dictionary) -> void:
 	if not alive:
-		_dead_t = maxf(0.0, _dead_t - dt)
-		if _dead_t <= 0.0:
-			hide()
+		_step_knockdown(dt)
 		return
 	player = ctx.get("player")
 	if not player.alive:
@@ -89,7 +102,8 @@ func step(dt: float, ctx: Dictionary) -> void:
 	sequence.show()
 	match phase:
 		Phase.PACING, Phase.SETTLING:
-			if phase == Phase.PACING and dist_to_player() <= WAKE_RANGE:
+			var to_player: Vector3 = player.rig.global_position - rig.global_position
+			if phase == Phase.PACING and to_player.slide(Vector3.UP).length() <= WAKE_RANGE:
 				phase = Phase.SETTLING
 			if sequence.advance_pacing(dt, _focus(), phase == Phase.SETTLING):
 				phase = Phase.OPENING
@@ -151,22 +165,50 @@ func _step_normal(dt: float) -> void:
 
 func hurt(amount: float, normal := Vector3.UP, _knock := 0.0) -> void:
 	# Valid off-screen hits can weaken the opening, but cannot cancel the two cuts by killing the duelist.
-	if phase == Phase.SETTLING or phase == Phase.OPENING:
+	if max_hp > 1.0 and (phase == Phase.SETTLING or phase == Phase.OPENING):
 		amount = minf(amount, maxf(0.0, hp - 1.0))
 	super.hurt(amount, normal, 0.0)
+
+
+func hurt_by_blade(amount: float, normal: Vector3, knock: float, travel: Vector3) -> void:
+	_blade_impulse = travel if travel.slide(Vector3.UP).length_squared() > 0.001 else -normal
+	hurt(amount, normal, knock)
+	_blade_impulse = Vector3.ZERO
 
 
 func die() -> void:
 	if not alive:
 		return
 	alive = false
-	_dead_t = 0.85
+	rig.cancel_strike()
 	sequence.sync_audio(true)
 	sequence.hide()
-	Snd.play_at("death", center(), {"gain": 1.0})
-	Fx.death_burst(center())
+	_knockdown = Knockdown.new()
+	_knockdown.begin(rig, _blade_impulse)
 	if level != null:
 		level.on_enemy_died(self)
+
+
+func _step_knockdown(dt: float) -> void:
+	var before := _knockdown.age
+	if before == 0.0 and dt > 0.0:
+		Snd.play_at("death", center(), {"gain": 0.62})
+	_knockdown.advance(rig, dt)
+	if before < Knockdown.KNEEL and _knockdown.age >= Knockdown.KNEEL:
+		var knee_contact: Vector3 = rig.legs[0]["knee"].global_position
+		knee_contact.y = rig.global_position.y + 0.08
+		Snd.play_at("step", knee_contact, {"gain": 1.00, "rate": 0.84})
+		Fx.spark(knee_contact, -rig.global_basis.z, 0.35)
+	if before < Knockdown.WEAPON_LAND and _knockdown.age >= Knockdown.WEAPON_LAND:
+		var contact: Vector3 = rig.weapon_root.global_position
+		Snd.play_at("clang", contact, {"gain": 0.86})
+		Fx.spark(contact, Vector3.UP, 0.52)
+	if before < Knockdown.BODY_LAND and _knockdown.age >= Knockdown.BODY_LAND:
+		var shoulder_contact: Vector3 = rig.arms[0]["shoulder"].global_position
+		shoulder_contact.y = rig.global_position.y + 0.12
+		Snd.play_at("hit", shoulder_contact, {"gain": 1.55, "rate": 0.70})
+		Fx.spark(shoulder_contact, -rig.global_basis.x, 0.58)
+		Fx.shake(1.10)
 
 
 func pause_for_replay() -> void:

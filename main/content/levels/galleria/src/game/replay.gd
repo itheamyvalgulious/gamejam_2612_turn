@@ -11,7 +11,7 @@ class_name Replay
 ##    飞行物槽 0..PROJ-1 (每个 1+3)]
 
 const SECONDS := 20.0
-const ACTORS := 5          # 0=玩家, 1..4=敌人
+const ACTORS := 7          # 0=玩家, 1..6=敌人
 const PROJ := 16
 const EVENTS := 4           # 每帧最多记 4 条战斗事件：kind + 位置
 const NODES_PER_ACTOR := 24   # 6 根(body/torso/head/weapon×2/root) + 4 腿×3 + 2 臂×3
@@ -22,6 +22,7 @@ const _KIND_ID := {"hit": 1.0, "block": 2.0, "kill": 3.0, "parry": 4.0}
 const _ID_KIND := {1.0: "命中", 2.0: "被格挡", 3.0: "击破", 4.0: "弹反"}
 
 var buf := PackedFloat32Array()
+var frame_times := PackedFloat32Array()
 var head := 0              # 已写入帧数（环形）
 var stride := 0
 var level_index := -1
@@ -49,7 +50,9 @@ func setup(player, level, proj) -> void:
 
 func clear() -> void:
 	head = 0
+	frame_times.clear()
 	_cache.clear()
+	_pending.clear()
 
 
 ## 战斗判决事件：kind = "hit" / "block" / "kill" / "parry"
@@ -59,12 +62,13 @@ func note_event(kind: String, pos: Vector3) -> void:
 
 
 ## 每个模拟帧调一次
-func record() -> void:
+func record(dt := 1.0 / 60.0) -> void:
 	if active or _player == null or _level == null:
 		return
 	if _level.index != level_index:
 		level_index = _level.index
 		head = 0
+		frame_times.clear()
 		_cache.clear()
 	var n := stride
 	var need := (head + 1) * n
@@ -75,6 +79,7 @@ func record() -> void:
 		var tmp := buf.slice(keep)
 		buf = tmp
 		buf.resize(stride * int(SECONDS * 70.0))
+		frame_times = frame_times.slice(keep_frames)
 		head = keep_frames
 		need = (head + 1) * n
 	var o := head * n
@@ -120,6 +125,17 @@ func record() -> void:
 			buf[p] = 0.0
 			p += 4
 	head += 1
+	frame_times.append(frame_times[-1] + dt if not frame_times.is_empty() else 0.0)
+
+
+func apply_shot_pose(time: float) -> void:
+	var frame := head - 1
+	while frame > 0 and frame_times[frame] > time:
+		frame -= 1
+	var blend := 0.0
+	if frame + 1 < head:
+		blend = clampf(inverse_lerp(frame_times[frame], frame_times[frame + 1], time), 0.0, 1.0)
+	_apply(frame, blend)
 
 
 func _nodes_for(rig) -> Array:
@@ -128,8 +144,11 @@ func _nodes_for(rig) -> Array:
 	if _cache.has(rig):
 		return _cache[rig]
 	if rig.has_method("replay_nodes"):
-		_cache[rig] = rig.replay_nodes()
-		return _cache[rig]
+		var nodes: Array = rig.replay_nodes().slice(0, NODES_PER_ACTOR)
+		while nodes.size() < NODES_PER_ACTOR:
+			nodes.append(rig)
+		_cache[rig] = nodes
+		return nodes
 	if not rig.has_method("predict_weapon_xf"):
 		var nodes: Array = [rig]
 		_collect_actor_nodes(rig, nodes)
@@ -312,7 +331,7 @@ func _line(st: SurfaceTool, a: Vector3, b: Vector3, c: Color) -> void:
 	st.add_vertex(b)
 
 
-func _apply(i: int) -> void:
+func _apply(i: int, blend := 0.0) -> void:
 	var o := i * stride
 	var p := o + 2
 	var rigs: Array = [_player.rig]
@@ -329,11 +348,18 @@ func _apply(i: int) -> void:
 				var pos := Vector3(buf[q], buf[q + 1], buf[q + 2])
 				var quat := Quaternion(buf[q + 3], buf[q + 4], buf[q + 5], buf[q + 6])
 				var sc := Vector3(buf[q + 7], buf[q + 8], buf[q + 9])
+				if blend > 0.0 and buf[p + stride] > 0.5:
+					var next := q + stride
+					pos = pos.lerp(Vector3(buf[next], buf[next + 1], buf[next + 2]), blend)
+					quat = quat.normalized().slerp(Quaternion(buf[next + 3], buf[next + 4], buf[next + 5], buf[next + 6]).normalized(), blend)
+					sc = sc.lerp(Vector3(buf[next + 7], buf[next + 8], buf[next + 9]), blend)
 				# 直接写全局变换：录制的是结果，回放不该再受父级驱动。
 				# 缩放必须一起还原：torso ×1.45 / head ×1.42 / 大怪 rig ×2 都在节点缩放里，
 				# 只写「位置 + 旋转」会把机体压成细柱子。
 				nd.global_transform = Transform3D(Basis(quat.normalized()).scaled(sc), pos)
 				q += NODE_FLOATS
+			if rigs[a].has_method("sync_replay_pose"):
+				rigs[a].sync_replay_pose()
 		else:
 			p += 1 + NODES_PER_ACTOR * NODE_FLOATS
 			continue

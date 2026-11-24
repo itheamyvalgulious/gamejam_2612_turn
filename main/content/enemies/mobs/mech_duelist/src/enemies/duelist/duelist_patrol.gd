@@ -1,6 +1,7 @@
 extends RefCounted
 ## Keeps each support foot planted while the second cut flows into combat footwork.
 
+const HitMath = preload("res://src/core/hitgd.gd")
 const Rig = preload("res://src/enemies/duelist/duelist_display_pose.gd")
 const Pace = preload("res://src/enemies/duelist/duelist_pace.gd")
 const Alert = preload("res://src/enemies/duelist/duelist_alert_pose.gd")
@@ -18,6 +19,7 @@ const STEP_DURATIONS := [0.34, 0.22, 0.27, 0.32, 0.37, 0.28, 0.25]
 const FOOT_LIFTS := [0.18, 0.43, 0.20, 0.15, 0.18, 0.105, 0.26]
 const FORWARD_LEANS := [0.0, 0.265, 0.16, -0.065, 0.025, -0.068, 0.185]
 
+var audio: Node
 var motion := Step.ORBIT
 var age := 0.0
 var active := false
@@ -152,7 +154,8 @@ func advance(model, dt: float, focus: Vector3, cover: Array, bounds: AABB, stop_
 		_feet[1 - _swing] = _support_foot(1.0)
 		_toes[_swing] = 0.0
 		var emphatic := _is_forward_step(motion) or motion == Step.BRAKE
-		Snd.play_at("step", _foot_to.origin, {"gain": 0.49 if emphatic else 0.34})
+		if is_instance_valid(audio):
+			audio.play_at("step", _foot_to.origin, {"gain": 0.49 if emphatic else 0.34})
 		_swing = 1 - _swing
 		landed = true
 		_start_step(model, focus, cover, bounds)
@@ -459,12 +462,12 @@ func _pose_arms(model, blend: float, tilt: float, lean: float, run: float, arm_s
 func _clear_travel(destination: Vector3, cover: Array, bounds: AABB, radius: float) -> Vector3:
 	for obstacle: Dictionary in cover:
 		var physical_radius := maxf(0.35, float(obstacle["r"]) - 1.2)
-		destination = Hit.slide_around_body(_root_from, destination, obstacle["c"], physical_radius + radius)
+		destination = HitMath.slide_around_body(_root_from, destination, obstacle["c"], physical_radius + radius)
 	return _clear_position(destination, cover, bounds, radius)
 
 
 func _clear_position(position: Vector3, cover: Array, bounds: AABB, radius: float) -> Vector3:
-	var floor_position := Hit.resolve_circles(position, radius, cover, position.y)
+	var floor_position := HitMath.resolve_circles(position, radius, cover, position.y)
 	if bounds.size.length_squared() > 0.1:
 		var edge := bounds.end
 		floor_position.x = clampf(floor_position.x, bounds.position.x + 3.0, edge.x - 3.0)

@@ -1,6 +1,7 @@
 extends RefCounted
 ## The first cut falls across the body. The return rises to the outside and finishes behind the shoulder.
 
+const HitMath = preload("res://src/core/hitgd.gd")
 const NormalCut = preload("res://src/enemies/duelist/duelist_normal_cut.gd")
 const Alert = preload("res://src/enemies/duelist/duelist_alert_pose.gd")
 const Pace = preload("res://src/enemies/duelist/duelist_pace.gd")
@@ -78,7 +79,7 @@ static func place_steps(model, state: Dictionary, focus: Vector3, cover: Array, 
 	var end := start.origin - start.basis.z.normalized() * distance
 	for obstacle: Dictionary in cover:
 		var radius := maxf(0.35, float(obstacle["r"]) - 1.2) + 1.1 * size
-		end = Hit.slide_around_body(start.origin, end, obstacle["c"], radius)
+		end = HitMath.slide_around_body(start.origin, end, obstacle["c"], radius)
 	var shift := start.affine_inverse() * _inside(end, bounds)
 	var right := Vector3(shift.x + 0.59, 0.0, shift.z - 0.60)
 	var rear := Vector3(shift.x - 0.60, 0.0, shift.z + 0.10)
@@ -229,7 +230,7 @@ static func _blade_basis(angles: Vector3) -> Basis:
 static func _foot_at(model, root: Transform3D, local: Vector3, yaw: float, cover: Array, bounds: AABB) -> Transform3D:
 	var point := root * local
 	var scale := root.basis.get_scale().x
-	point = _inside(Hit.resolve_circles(point, 0.23 * scale, cover, point.y), bounds)
+	point = _inside(HitMath.resolve_circles(point, 0.23 * scale, cover, point.y), bounds)
 	point.y = model.floor_height(point) + Pace.SOLE_HEIGHT * scale
 	var basis := root.basis * Basis(Vector3.UP, deg_to_rad(yaw))
 	var foot: Transform3D = model.keep_sole_above_floor(Transform3D(basis, point))

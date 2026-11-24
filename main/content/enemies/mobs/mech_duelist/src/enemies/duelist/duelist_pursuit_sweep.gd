@@ -1,6 +1,7 @@
 extends RefCounted
 ## Side and front takes from the reference define the two strokes and their foot contacts.
 
+const HitMath = preload("res://src/core/hitgd.gd")
 const NormalCut = preload("res://src/enemies/duelist/duelist_normal_cut.gd")
 const DoubleCut = preload("res://src/enemies/duelist/duelist_double_cut.gd")
 const Pace = preload("res://src/enemies/duelist/duelist_pace.gd")
@@ -87,7 +88,7 @@ static func begin(model, focus: Vector3, cover: Array, bounds: AABB) -> Dictiona
 	var goal := origin.origin + forward * distance
 	for obstacle: Dictionary in cover:
 		var radius := maxf(0.35, float(obstacle["r"]) - 1.2) + 1.1 * size
-		goal = Hit.slide_around_body(origin.origin, goal, obstacle["c"], radius)
+		goal = HitMath.slide_around_body(origin.origin, goal, obstacle["c"], radius)
 	goal = _keep_inside(goal, bounds)
 	var shift := origin.affine_inverse() * goal
 

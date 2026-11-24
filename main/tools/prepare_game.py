@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 import re
 
-from encounter_roster import adapt_host, adapt_wheel, adapters, dependencies, design_path, pack_designs
+from encounter_roster import adapt_duelist, adapt_host, adapt_wheel, adapters, dependencies, design_path, pack_designs
 
 MAIN = Path(__file__).resolve().parents[1]
 REPO = MAIN.parent
@@ -33,6 +33,7 @@ FOLDERS = ("src", "assets", "gfx", "scripts", "shaders")
 ENEMY_PACKAGES = {
     "encounter_unit.gd": "shared",
     "arc_encounter.gd": "mobs/arc_sentinel",
+    "duelist_encounter.gd": "mobs/mech_duelist",
     "wheel_encounter.gd": "mobs/wheel_sentry",
     "shard_encounter.gd": "mobs/shard_phantom",
     "enemy_phase_boss.gd": "bosses/phase_boss",
@@ -113,9 +114,6 @@ def content_path(episode, relative):
 def relocate_resources(text, episode, relative, destinations):
     def relocate(match):
         original = match[1]
-        if original.startswith(("core/", "ui/", "assets/")):
-            # Project-level files live outside runtime/ and already resolve.
-            return "res://" + original
         if original == "src/game/hud.gd" and relative.as_posix() == "src/main.gd":
             return "res://ui/hud/combat_hud.gd"
         if original.startswith("team/vesper/"):
@@ -126,6 +124,9 @@ def relocate_resources(text, episode, relative, destinations):
         destination = destinations.get(original)
         if destination is not None:
             return "res://runtime/" + destination.as_posix()
+        if original.startswith(("core/", "ui/", "assets/")) and (MAIN / original).is_file():
+            # Shared project files resolve at the root after checking the module's own assets.
+            return "res://" + original
         # The map builders select a shader at runtime from these directories.
         if original.endswith("/") and original.startswith("gfx/"):
             generated = content_path(episode, Path(original) / "_")
@@ -308,7 +309,11 @@ def build():
         def read(relative):
             if relative.as_posix() in supplied:
                 value = supplied[relative.as_posix()]
-                return adapt_wheel(value) if relative.name == "wheel_encounter.gd" else value
+                if relative.name == "wheel_encounter.gd":
+                    return adapt_wheel(value)
+                if relative.name == "duelist_encounter.gd":
+                    return adapt_duelist(value)
+                return value
             return sources[relative].read_text(encoding="utf-8-sig")
 
         names = {}

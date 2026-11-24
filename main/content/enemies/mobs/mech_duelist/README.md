@@ -25,6 +25,7 @@ godot --path . res://main.tscn -- --duelist
 - 模型入口是 `scenes/duelist/duelist_model.tscn`，机体、刀、关节和甲片实现在 `src/enemies/duelist/`，专用材质在 `gfx/`。
 - 实战由 `src/game/enemy_duelist.gd` 接入。开场蓄力只触发一次，巡战随后在近身二连斩、直刺接横扫、三刀冲刺斩之间选择。
 - 普攻先亮红并用约 0.3 秒举刀，最后一刀结束后恢复蓝光。架住首刀不会打断后续连段。
+- 第 10 关「坠击中庭 · 高低差」的下层中央有一名 1 点生命的刀客。击倒动作由 `src/enemies/duelist/duelist_knockdown.gd` 从当前姿势接起。胸肩顺着刀势偏转，右脚补一步，左膝卸力、左掌撑地，随后松刀，髋肩落地。机身灯光随动作熄灭，常速约 1.27 秒。
 - [横扫挥斩动作拆解](docs/横扫挥斩动作拆解.md) · [开场两段连招设计](docs/人形刀客两段连招方案.md)
 
 基础四足主角、操作与对照关卡可见 [基础动作原型](../../../levels/actdemo/README.md)。

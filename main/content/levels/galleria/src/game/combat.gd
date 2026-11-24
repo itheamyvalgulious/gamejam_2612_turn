@@ -30,7 +30,8 @@ static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_
 		var point: Vector3 = res.get("point", rig.global_position)
 		var normal: Vector3 = res.get("normal", Vector3.UP)
 		# —— 视野格挡：只要它在你画面里，这一刀就 100% 被挡
-		var seen := cam != null and Vision.is_visible(cam.camera, e.center(), e.mark_radius())
+		var seen: bool = cam != null and (e.is_in_view(cam.camera) if e.has_method("is_in_view")
+			else Vision.is_visible(cam.camera, e.center(), e.mark_radius()))
 		if seen and P.getb("rules.vision_occlusion") and cam != null:
 			var ca := Vector2(cam.camera.global_position.x, cam.camera.global_position.z)
 			var ec: Vector3 = e.center()
@@ -39,13 +40,20 @@ static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_
 		if e.blocks_when_seen() and seen:
 			if e.has_method("on_seen_block"):
 				e.on_seen_block(rig.global_position)
+			elif e.has_method("on_attack_blocked"):
+				e.on_attack_blocked()
 			events.append({"kind": "block", "pos": point, "normal": normal, "enemy": e, "damage": 0.0})
 			continue
 		var dmg: float = P.getf("attack.%s.damage" % player.last_attack)
 		var knock: float = P.getf("attack.%s.knockback" % player.last_attack)
-		e.hurt(dmg, normal, knock)
+		var travel: Vector3 = res.get("travel", Vector3.ZERO)
+		if e.has_method("hurt_by_blade"):
+			e.hurt_by_blade(dmg, normal, knock, travel)
+		else:
+			e.hurt(dmg, normal, knock)
 		events.append({"kind": "kill" if not e.alive else "hit", "pos": point, "normal": normal,
-			"enemy": e, "damage": dmg})
+			"enemy": e, "damage": dmg, "contact": res.get("blade_point", point),
+			"contact_fraction": res.get("t", 1.0), "travel": travel})
 	return events
 
 
@@ -76,6 +84,8 @@ static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
 				push = -rig.global_transform.basis.z
 			push = push.normalized()
 			player.on_block(push, P.getf("parry.block_knockback"))
+			if enemy.has_method("on_attack_parried"):
+				enemy.on_attack_parried(clash.get("normal", Vector3.UP))
 			return {"hit": false, "parried": true, "melee": true,
 				"pos": clash.get("point", Vector3.ZERO),
 				"normal": clash.get("normal", Vector3.UP),
