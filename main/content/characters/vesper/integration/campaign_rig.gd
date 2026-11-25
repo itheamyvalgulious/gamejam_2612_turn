@@ -194,18 +194,19 @@ func _solve_intercept(point: Vector3, axis: Vector3, face: Vector3,
 		var basis := blade_basis * weapon_spin.basis.inverse()
 		var along := clampf((point_local - rest).dot(blade_axis), span.x, span.y)
 		var candidate := _reachable_hilt(point_local - blade_axis * along, blade_axis)
-		var miss := (candidate + blade_axis * along).distance_to(point_local)
+		# 钳位后的刀柄不一定回到 rest：覆盖点要按真实 hilt 重算，否则把可达
+		# 域边界上的落点误判成「还差一整条刀身」。
+		var along2 := clampf((point_local - candidate).dot(blade_axis), span.x, span.y)
+		var miss := (candidate + blade_axis * along2).distance_to(point_local)
 		var score := miss * 3.0 + candidate.distance_to(rest) + 0.45 * candidate.distance_to(weapon_root.position)
 		if score < best_score:
 			best_score = score
 			hilt = candidate
 			root_basis = basis
-			blade_point = along / hilt_scale
-	var travel := weapon_root.position.distance_to(hilt) * target_torso.basis.get_scale().x
-	var duration := clampf(travel / maxf(speed, 1.0), 0.03, maxf(deadline, 0.03))
-	_blade_path.plan(weapon_root.position, weapon_root.basis, hilt, root_basis, duration,
-		torso.rotation.y, yaw)
-	return {"hilt": hilt, "yaw": yaw, "t": blade_point, "dur": duration, "travel": travel}
+			blade_point = along2 / hilt_scale
+			best_miss = miss
+	return {"hilt": hilt, "yaw": yaw, "basis": root_basis, "t": blade_point,
+		"miss": best_miss, "torso_scale": target_torso.basis.get_scale().x}
 
 
 func _reachable_hilt(hilt: Vector3, axis: Vector3) -> Vector3:
@@ -283,6 +284,15 @@ func foot_points_xz() -> Array:
 		var ankle: Vector3 = leg["ankle"].global_position
 		points.append(Vector2(ankle.x, ankle.z))
 	return points
+
+
+## 回放/终结演出会直接写各关节的全局变换而不走 advance()：top_level 的
+## 头发骨架不会跟着 head 走，必须在这里手动对齐，否则回放中头发脱节。
+func sync_replay_pose() -> void:
+	if hair != null and is_instance_valid(hair):
+		hair.update(0.0, self)
+		# 机体瞬移后 rig 速度积分会爆一帧，清掉上帧位置让滑移力重新起步。
+		hair._has_prev_rig = false
 
 
 func replay_nodes() -> Array:
