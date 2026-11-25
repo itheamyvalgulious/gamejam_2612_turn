@@ -1,0 +1,127 @@
+extends "res://src/main.gd"
+## 轨道船背：默认第一视角。
+##
+## 路线整体在 y=4 的背脊甲板上，船壳顶在 y=0；掉下甲板就会落回船壳，
+## 这里把“低于甲板 0.8 m”当作跌落，送回最近检查点。
+##
+## 三道防空门禁：炮和光闸通电时走进门禁范围会被推回，并提示先拆供能节点。
+## 初稿没有敌人，F8 直接切“全部断电”，用来预览清完怪 / 拆完节点后的状态。
+## F9 = 截图到 user://space_live.png。
+
+const U := 1.0 / 0.547
+const DECK_Y := 4.0
+const FALL_Y := 3.2
+const GATE_Y_MAX := 12.0
+
+var _cps: Array = []
+var _cp := 0
+var _grace := 1.0
+var _off_t := 0.0
+var _done := false
+var _dbg := 0.0
+
+
+func _ready() -> void:
+	super()
+	P.set_value("cam.mode", "first")
+	cam.set_first_person(true)
+	# 地球在 ~2.3 km 外，默认 500 单位远裁面会把它切掉
+	cam.camera.far = 6000.0
+	if level != null and not level.arena.is_empty():
+		_cps = level.arena.get("checkpoints", [])
+	# room_shared 的 player.reset() 会把 rig.ground_height 归零，
+	# mech_rig.reset_demo() 最后又把 position.y 压回 ground_height；
+	# 所以 y=4 的背脊甲板必须在 reset 之后手动抬回去一次。
+	if not _cps.is_empty():
+		_lift_to(Vector3(float(_cps[0]["x"]), DECK_Y, float(_cps[0]["z"])))
+
+
+func _process(delta: float) -> void:
+	super(delta)
+	if player == null or level == null or level.arena.is_empty():
+		return
+	if _cps.is_empty():
+		_cps = level.arena.get("checkpoints", [])
+	if _cps.is_empty():
+		return
+	if _grace > 0.0:
+		_grace -= delta
+
+	var w: Vector3 = player.rig.position / U
+
+	if _grace <= 0.0:
+		# 通电的防空门禁：踏进去就推回
+		for g in level.arena.get("gates", []):
+			var st = g.get("state")
+			if st == null or not st.online:
+				continue
+			if (w.x >= float(g["x0"]) - 0.40 and w.x <= float(g["x1"]) + 0.40
+					and w.z >= float(g["z0"]) and w.z <= float(g["z1"])
+					and w.y < GATE_Y_MAX):
+				_respawn("防空火力封锁", "先拆掉区内的供能节点（初稿 F8 预览断电）")
+				return
+
+		# 跌落：路线在 y=4，船壳顶在 y=0
+		if w.y < FALL_Y:
+			_off_t += delta
+			if _off_t > 0.30:
+				_respawn("跌落", "已送回最近的检查点")
+				return
+		else:
+			_off_t = 0.0
+			_checkpoint(w)
+			if not _done and w.x > 188.2 and absf(w.z) < 15.0:
+				_done = true
+				hud.show_banner("抵达船坞大门", "场景初稿终点 · 门后是最终 Boss 关", 2.4)
+				print("[hull] finish")
+
+	_dbg += delta
+	if _dbg >= 1.0:
+		_dbg = 0.0
+		var aa = level.arena.get("aa")
+		var state: String = "on" if aa != null and aa.online else "off"
+		print("[hull] p=(%.1f, %.2f, %.1f) cp=%d aa=%s" % [w.x, w.y, w.z, _cp, state])
+
+
+func _checkpoint(w: Vector3) -> void:
+	if _cp + 1 >= _cps.size():
+		return
+	var nxt: Dictionary = _cps[_cp + 1]
+	if w.x >= float(nxt["x"]) - 0.8 and absf(w.z - float(nxt["z"])) < 6.0:
+		_cp += 1
+		hud.show_banner("检查点", "%d / %d" % [_cp, _cps.size() - 1], 1.0)
+
+
+func _respawn(title: String, sub: String) -> void:
+	var cp: Dictionary = _cps[_cp]
+	var spawn := Transform3D(Basis(Vector3.UP, deg_to_rad(-90.0)),
+		Vector3(float(cp["x"]), DECK_Y, float(cp["z"])) * U)
+	player.reset(spawn)
+	_lift_to(Vector3(float(cp["x"]), DECK_Y, float(cp["z"])))
+	hud.show_banner(title, sub, 1.2)
+	_grace = 0.8
+	_off_t = 0.0
+
+
+func _lift_to(p: Vector3) -> void:
+	# reset 之后重新落到甲板面，而不是引擎默认的 y=0
+	if player == null or player.rig == null:
+		return
+	player.rig.position = p * U
+	player.rig.ground_height = p.y * U
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F8:
+			var aa = level.arena.get("aa") if level != null else null
+			if aa != null:
+				aa.set_online(not aa.online)
+				hud.show_banner("防空火力", "全部离线（初稿预览）" if not aa.online else "全部上线", 1.2)
+			return
+		if event.keycode == KEY_F9:
+			var img := get_viewport().get_texture().get_image()
+			img.save_png("user://space_live.png")
+			hud.show_banner("已截图", "user://space_live.png", 1.0)
+			return
+	super(event)
