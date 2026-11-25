@@ -20,7 +20,7 @@ MODULES = {
     "shadow_chamber": ("main/content/levels/shadow_chamber", "Fold"),
     "room_shared": ("main/content/levels/shared", "Room"),
 }
-ROOM_LEVELS = ("warehouse", "panopticon", "ward", "hangar")
+ROOM_LEVELS = ("warehouse", "panopticon", "ward", "hangar", "rooftop")
 ROOM_AUTOLOADS = {
     "P": "src/core/params.gd",
     "B": "src/core/binds.gd",

@@ -1,0 +1,10 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://rooftop/src/main.gd" id="1"]
+[ext_resource type="Script" path="res://rooftop/src/arena/rooftop_arena.gd" id="2"]
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1")
+arena_builder = ExtResource("2")
+camera_distance = 7.11
+camera_height = 2.3
