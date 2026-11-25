@@ -35,7 +35,6 @@ var hp := 100.0
 var invuln := 0.0
 var air_jumps := 0
 var jump_buffer_dt := 0.0
-var run_hold := 0.0
 var coyote_left := 0.0
 var _was_in_window := false
 var projectiles = null
@@ -82,8 +81,7 @@ func _sync_params() -> void:
 	rig.decel_rate = P.getf("move.decel")
 	rig.air_accel_rate = P.getf("move.air_accel")
 	rig.air_decel_rate = P.getf("move.air_decel")
-	rig.turn_rate = P.getf("move.turn_rate")
-	rig.face_rate = P.getf("jump.air_steer") * 8.0 if rig.jump_state != "GROUND" else P.getf("move.turn_rate")
+	rig.move_speed = P.getf("move.speed")
 	var t := {}
 	for id in ["slash_fwd", "slash_left", "slash_right", "slash_back", "heavy", "spin"]:
 		t[id] = {
@@ -112,16 +110,9 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 	var dir := right * mv.x + fwd * (-mv.y)
 
 	var impact_control := smoothstep(IMPACT_BRACE_TIME, IMPACT_SLIDE_TIME, _impact_elapsed)
-	var mag := clampf(mv.length(), 0.0, 1.0)
-	if mag > 0.15:
-		run_hold += dt
-	else:
-		run_hold = 0.0
-	var move_speed := lerpf(P.getf("move.walk_speed"), P.getf("move.run_speed"), mag)
-	if P.getb("move.auto_sprint") and run_hold > 1.4:
-		move_speed = maxf(move_speed, P.getf("move.sprint_speed"))
+	# 单一移动速度：没有走/跑/冲刺分层，也没有持续移动自动提速。
 	if dir.length() > 0.15:
-		rig.move_command = dir.normalized() * move_speed * impact_control
+		rig.move_command = dir.normalized() * P.getf("move.speed") * impact_control
 	else:
 		rig.move_command = Vector3.ZERO
 
@@ -429,7 +420,6 @@ func reset(pos: Transform3D) -> void:
 	hp = P.getf("rules.player_hp")
 	invuln = 0.0
 	air_jumps = 0
-	run_hold = 0.0
 	jump_buffer_dt = 0.0
 	hurt_serial = -1
 	swing_serial = 0

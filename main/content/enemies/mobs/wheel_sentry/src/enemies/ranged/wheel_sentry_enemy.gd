@@ -255,9 +255,8 @@ func _navigate(dt: float) -> float:
 
 func _wants_retreat(flat: Vector3) -> bool:
 	var keep := P.getf("archer.keep_dist")
-	var velocity: Vector3 = player.rig.move_command
-	if player.rig.dash_time > 0.0:
-		velocity = player.rig._dash_dir * P.getf("move.sprint_speed")
+	# 用实际水平速度（含冲刺的真实瞬时速度），比 move_command 目标值更准
+	var velocity: Vector3 = player.rig._vel_h
 	var pressing := velocity.dot(-flat.normalized()) >= APPROACH_SPEED
 	var factor := 0.94
 	if pressing:

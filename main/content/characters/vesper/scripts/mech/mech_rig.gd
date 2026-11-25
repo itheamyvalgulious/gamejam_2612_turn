@@ -171,14 +171,13 @@ var land_time := LAND_TIME
 var dash_distance := 2.0
 var dash_duration := 0.28
 var dash_cd := 0.50
+var move_speed := 5.6         # 单一移动速度（世界单位/s），WASD 满输入时的目标速度
 var accel_rate := 18.0        # ground, WASD held: accelerate toward move_command
 var decel_rate := 26.0        # ground, no input: strong braking
 var air_accel_rate := 14.0    # air, WASD held: thruster-assisted, weaker than ground
 var air_decel_rate := 3.0     # air, no input: light drag
-var turn_rate := 12.0
 var facing_override := false
 var facing_heading := 0.0
-var face_rate := 7.0
 var vfx_enabled := false
 
 func _ready() -> void:
@@ -406,27 +405,21 @@ func advance(dt: float) -> void:
 		_vel_h = _vel_h.move_toward(move_command, accel * dt)
 	speed = _vel_h.length()
 
-	if moving:
+	# 转向无限快：机体朝向瞬时对齐到目标方向（相机朝向优先，其次移动方向），
+	# 不再做角度插值。angular_velocity 仍记录本帧转向量供机身前倾/腰环跟随用。
+	if moving or facing_override:
 		if lock_heading:
 			angular_velocity = 0.0
 		else:
-			var desired := move_command.normalized()
-			var target_heading := atan2(-desired.x, -desired.z)
-			if facing_override:
-				target_heading = facing_heading
-			var turn_speed := lerpf(turn_rate * 0.42, turn_rate, clampf(speed / RUN_SPEED, 0.0, 1.0))
-			if facing_override:
-				turn_speed = face_rate
+			var target_heading := facing_heading
+			if not facing_override:
+				var desired := move_command.normalized()
+				target_heading = atan2(-desired.x, -desired.z)
 			var before := heading
-			heading = lerp_angle(heading, target_heading, 1.0 - exp(-turn_speed * dt))
+			heading = target_heading
 			angular_velocity = wrapf(heading - before, -PI, PI) / maxf(dt, 0.0001)
 	else:
-		if facing_override:
-			var before_f := heading
-			heading = lerp_angle(heading, facing_heading, 1.0 - exp(-face_rate * dt))
-			angular_velocity = wrapf(heading - before_f, -PI, PI) / maxf(dt, 0.0001)
-		else:
-			angular_velocity = lerpf(angular_velocity, 0.0, 1.0 - exp(-8.0 * dt))
+		angular_velocity = lerpf(angular_velocity, 0.0, 1.0 - exp(-8.0 * dt))
 	rotation.y = heading
 	_yaw_rate = lerpf(_yaw_rate, angular_velocity, 1.0 - exp(-6.0 * dt))
 
@@ -446,9 +439,12 @@ func advance(dt: float) -> void:
 		position += forward * d
 	if dash_time > 0.0:
 		var dash_t := 1.0 - dash_time / maxf(dash_duration, 0.01)
-		# integral of the old curve is ~9.92; convert distance to a scale
-		var dash_speed := (18.0 * pow(1.0 - dash_t, 1.6) + 3.0) \
-			* (dash_distance / maxf(9.923 * dash_duration, 0.001))
+		# 冲刺是一段单调衰减的加速：v(t) = move_speed + A·(1-t)^2，
+		# ∫v dt 恰为 dash_distance → A = 3·(distance/duration - move_speed)。
+		# 结束时 _vel_h 恰好 = _dash_dir·move_speed，平滑接回地面速度，
+		# 不会出现旧曲线那种「冲刺末段减速后又突然被写回平均高速」的二次跃升。
+		var dash_speed := move_speed \
+			+ maxf(dash_distance / maxf(dash_duration, 0.01) - move_speed, 0.0) * 3.0 * pow(1.0 - dash_t, 2.0)
 		# direction is fixed for the whole dash: forward and lateral dashes are
 		# distinct authored inputs, not a steering blend.  The dash OVERWRITES
 		# the current velocity: when it ends the body keeps moving the way the
@@ -457,7 +453,7 @@ func advance(dt: float) -> void:
 		_steer_dash(forward, dt)
 		var dash_step := minf(dt, dash_time)
 		position += _dash_dir * dash_speed * dash_step
-		_vel_h = _dash_dir * (dash_distance / maxf(dash_duration, 0.01))
+		_vel_h = _dash_dir * dash_speed
 		dash_time = maxf(0.0, dash_time - dash_step)
 	else:
 		position += _vel_h * dt
