@@ -13,6 +13,8 @@ extends RefCounted
 ## 通关：本样段没有敌人，也不推进关卡状态；走到东南气闸即看完空间。
 
 const Kit := preload("res://src/arena/kit.gd")
+const Phase2Rig := preload("res://hangar/src/arena/hangar_phase2.gd")
+const Gpu := preload("res://hangar/src/arena/hangar_gpu.gd")
 const U := 1.0 / 0.547
 const BALL := 1.2
 
@@ -96,6 +98,7 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 	_lift(root, cover, platforms)
 	_crane(root)
 	_lights(root)
+	var phase2 := _phase2(root)
 	_props(root)
 	_boss_placeholder(root)
 	if "--rings" in OS.get_cmdline_user_args():
@@ -130,6 +133,7 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 		"wall_slots": [],
 		"lamps": [],
 		"player_spawn": spawn,
+		"phase2": phase2,
 	}
 
 
@@ -181,6 +185,12 @@ static func _mats() -> void:
 			{"noise": 4.5, "grime": 0.24, "bump": 0.20, "streak": 0.22}),
 		"hull": Kit.std(Color(0.180, 0.192, 0.208), 0.66, 0.26,
 			{"noise": 5.5, "grime": 0.20, "bump": 0.26, "streak": 0.26}),
+		"screen": Kit.std(Color(0.235, 0.242, 0.250), 0.96, 0.0,
+			{"noise": 16.0, "grime": 0.10, "bump": 0.04}),
+		"gpu": Kit.std(Color(0.400, 0.420, 0.400), 0.52, 0.42,
+			{"noise": 3.0, "grime": 0.20, "bump": 0.12, "streak": 0.18}),
+		"display": Kit.emissive(Color(0.16, 0.72, 0.56), 0.65, 0.22),
+		"gauge": Kit.emissive(Color(0.82, 0.84, 0.80), 0.32, 0.40),
 	}
 
 
@@ -232,6 +242,7 @@ static func _environment(root: Node3D) -> void:
 	env.ssr_fade_out = 2.4
 
 	var we := WorldEnvironment.new()
+	we.name = "Env"
 	we.environment = env
 	root.add_child(we)
 
@@ -400,8 +411,8 @@ static func _shell(root: Node3D) -> void:
 	# ---- 结构门架：立柱贴墙，顶梁横跨
 	for x in range(-32, 33, 8):
 		var fx := float(x)
-		_b(root, Vector3(0.55, H, 0.55), Vector3(fx, H * 0.5, -HZ + 0.35), steel)
-		_b(root, Vector3(0.55, H, 0.55), Vector3(fx, H * 0.5, HZ - 0.35), steel)
+		_b(root, Vector3(0.55, H, 0.55), Vector3(fx, H * 0.5, -HZ + 0.20), steel)
+		_b(root, Vector3(0.55, H, 0.55), Vector3(fx, H * 0.5, HZ - 0.20), steel)
 
 	# ---- 墙面舱段标识
 	_label(root, "03", Vector3(-HX + 0.06, 16.0, -6.0), 3.0, Color(0.52, 0.58, 0.64), 0.0, Vector3(0.0, 90.0, 0.0))
@@ -429,9 +440,9 @@ static func _wall_details(g: Node3D, ranges: Array, fixed: float, inward: float,
 		var t := a + 1.5
 		while t < b - 1.0:
 			if along_x:
-				_b(g, Vector3(0.07, H - 1.4, 0.10), Vector3(t, H * 0.5, fixed + inward * 0.05), steel)
+				_b(g, Vector3(0.07, H, 0.10), Vector3(t, H * 0.5, fixed + inward * 0.05), steel)
 			else:
-				_b(g, Vector3(0.10, H - 1.4, 0.07), Vector3(fixed + inward * 0.05, H * 0.5, t), steel)
+				_b(g, Vector3(0.10, H, 0.07), Vector3(fixed + inward * 0.05, H * 0.5, t), steel)
 			t += 3.0
 
 
@@ -475,9 +486,7 @@ static func _bay(root: Node3D, cover: Array, platforms: Array) -> void:
 	_b(root, Vector3(0.4, BH, BZ1 - BZ0 + 0.4), Vector3(BX1 - 0.2, BH * 0.5, (BZ0 + BZ1) * 0.5 - 0.2), wall)
 	_b(root, Vector3(BX1 - BX0, BH, 0.4), Vector3((BX0 + BX1) * 0.5, BH * 0.5, BZ1 - 0.2), _M["bay_back"])
 	_b(root, Vector3(BX1 - BX0, 0.4, BZ1 - BZ0), Vector3((BX0 + BX1) * 0.5, BH, (BZ0 + BZ1) * 0.5), _M["wall"])
-	# 开口两侧的短墙（主厅北墙上 24 m 的洞）
-	_b(root, Vector3(BAY_OPEN0 - (BX0 + 0.4), BH, 0.5), Vector3((BX0 + 0.4 + BAY_OPEN0) * 0.5, BH * 0.5, BZ0), wall)
-	_b(root, Vector3(BX1 - 0.4 - BAY_OPEN1, BH, 0.5), Vector3((BAY_OPEN1 + BX1 - 0.4) * 0.5, BH * 0.5, BZ0), wall)
+
 	# 门楣
 	_b(root, Vector3(BAY_OPEN1 - BAY_OPEN0 + 0.8, H - BH, 0.7), Vector3((BAY_OPEN0 + BAY_OPEN1) * 0.5, (BH + H) * 0.5, BZ0), _M["hull"])
 
@@ -488,113 +497,35 @@ static func _bay(root: Node3D, cover: Array, platforms: Array) -> void:
 		_b(root, Vector3(0.5, 0.45, BZ1 - BZ0 - 1.2), Vector3(gx, 8.2, (BZ0 + BZ1) * 0.5), _M["steel"])
 		_b(root, Vector3(0.9, 0.16, 1.4), Vector3(gx, 7.9, BZ0 + 3.2), _M["warm"])
 
-	# 穿梭机：圆截面机身 + 鼻锥 + 尾锥 + 座舱脊 + 后掠翼 + 发动机舱（沿 x 停放）
-	var sh := Node3D.new()
-	sh.name = "Shuttle"
-	root.add_child(sh)
-	var hullm: Material = _M["shuttle"]
-	var dark: Material = _M["wall_dark"]
-
-	# 机身（圆截面，沿 X）
-	var fus := CylinderMesh.new()
-	fus.top_radius = 1.32 * U
-	fus.bottom_radius = 1.32 * U
-	fus.height = 10.0 * U
-	fus.radial_segments = 16
-	var fmi := MeshInstance3D.new()
-	fmi.mesh = fus
-	fmi.material_override = hullm
-	fmi.position = Vector3(-12.0, 3.05, 39.0) * U
-	fmi.rotation = Vector3(0.0, 0.0, PI * 0.5)
-	sh.add_child(fmi)
-
-	# 鼻锥 + 尾锥
-	var nose := Kit.cone(sh, 1.32 * U, 2.6 * U, Vector3(-5.7, 3.05, 39.0) * U, hullm)
-	nose.rotation = Vector3(0.0, 0.0, -PI * 0.5)
-	var tail_c := CylinderMesh.new()
-	tail_c.top_radius = 0.86 * U
-	tail_c.bottom_radius = 1.32 * U
-	tail_c.height = 2.2 * U
-	tail_c.radial_segments = 16
-	var tmi := MeshInstance3D.new()
-	tmi.mesh = tail_c
-	tmi.material_override = hullm
-	tmi.position = Vector3(-18.1, 3.05, 39.0) * U
-	tmi.rotation = Vector3(0.0, 0.0, -PI * 0.5)
-	sh.add_child(tmi)
-
-	# 座舱脊（半埋的圆柱）
-	var can := CylinderMesh.new()
-	can.top_radius = 0.78 * U
-	can.bottom_radius = 0.78 * U
-	can.height = 3.0 * U
-	can.radial_segments = 14
-	var cmi := MeshInstance3D.new()
-	cmi.mesh = can
-	cmi.material_override = _M["glass"]
-	cmi.position = Vector3(-9.2, 4.05, 39.0) * U
-	cmi.rotation = Vector3(0.0, 0.0, PI * 0.5)
-	sh.add_child(cmi)
-
-	# 机翼：内段 + 外段（后掠、渐缩），比单块平板像机翼
-	for side in [-1.0, 1.0]:
-		_b(sh, Vector3(5.4, 0.24, 2.4), Vector3(-12.2, 2.85, 39.0 + side * 1.95), hullm)
-		_b(sh, Vector3(2.8, 0.18, 1.6), Vector3(-13.2, 2.90, 39.0 + side * 3.18), hullm)
-		# 翼尖小翼
-		_b(sh, Vector3(1.2, 0.52, 0.12), Vector3(-14.3, 3.10, 39.0 + side * 3.62), hullm)
-		# 发动机舱 + 喷口
-		Kit.cylinder(sh, 0.52 * U, 2.6 * U, Vector3(-16.6, 2.35, 39.0 + side * 2.6) * U, hullm,
-			Vector3(0.0, 0.0, PI * 0.5))
-		Kit.cylinder(sh, 0.44 * U, 0.22 * U, Vector3(-17.9, 2.35, 39.0 + side * 2.6) * U, dark,
-			Vector3(0.0, 0.0, PI * 0.5))
-		# 机翼外侧黄色标记
-		_b(sh, Vector3(2.2, 0.05, 0.40), Vector3(-13.2, 3.01, 39.0 + side * 3.05), _M["paint"])
-
-	# 垂尾
-	_b(sh, Vector3(2.4, 2.6, 0.18), Vector3(-18.55, 4.45, 39.0), hullm, Vector3(0.0, 0.0, 0.16))
-	_b(sh, Vector3(1.1, 0.7, 0.24), Vector3(-19.0, 5.4, 39.0), _M["paint"])
-
-	# 腹部整流罩（打破“香肠”感）+ 深色鼻锥雷达罩
-	_b(sh, Vector3(8.2, 0.55, 1.9), Vector3(-13.0, 2.05, 39.0), _M["wall_dark"])
-	_b(sh, Vector3(0.9, 0.55, 1.1), Vector3(-4.6, 3.05, 39.0), _M["wall_dark"])
-	# 驾驶舱风挡
-	for side in [-1.0, 1.0]:
-		_b(sh, Vector3(1.5, 0.42, 0.05), Vector3(-7.3, 3.85, 39.0 + side * 0.62),
-			_M["glass"], Vector3(0.0, side * 0.55, 0.0))
-	# 发动机进气环
-	for side in [-1.0, 1.0]:
-		Kit.torus(sh, 0.52 * U, 0.05 * U, Vector3(-15.3, 2.35, 39.0 + side * 2.6) * U,
-			_M["steel"], 20)
-
-	# 机身环向板缝
-	for px in [-16.0, -13.0, -10.0, -7.0]:
-		Kit.torus(sh, 1.33 * U, 0.035 * U, Vector3(px, 3.05, 39.0) * U, dark, 24)
-	# 侧舷窗带
-	for side in [-1.0, 1.0]:
-		_b(sh, Vector3(3.6, 0.30, 0.05), Vector3(-8.6, 3.65, 39.0 + side * 1.28), _M["glass"])
-
-	# 起落架：支柱 + 撬板
-	for dz in [-1.35, 1.35]:
-		_b(sh, Vector3(0.16, 1.75, 0.16), Vector3(-15.5, 1.62, 39.0 + dz), _M["steel"])
-		_b(sh, Vector3(0.16, 1.75, 0.16), Vector3(-9.0, 1.62, 39.0 + dz), _M["steel"])
-		_b(sh, Vector3(7.0, 0.18, 0.30), Vector3(-12.2, 0.85, 39.0 + dz), _M["steel"])
-
-	# 检修台架（黄漆，不发光）
-	for dz in [-4.45, 4.45]:
-		_b(sh, Vector3(8.0, 0.14, 0.8), Vector3(-15.0, 1.42, 39.0 + dz), _M["paint"])
+	# 空检修位：飞机已拖走，只留轴架、移动平台和料箱
+	# 检修台架（黄漆，不发光）：只留靠后墙的一排，入口留空
+	for dz in [3.0]:
+		_b(root, Vector3(8.0, 0.14, 0.8), Vector3(-15.0, 1.42, 39.0 + dz), _M["paint"])
 		for k in 3:
-			_b(sh, Vector3(0.14, 1.42, 0.14), Vector3(-18.5 + float(k) * 3.5, 0.71, 39.0 + dz), _M["steel"])
+			_b(root, Vector3(0.14, 1.42, 0.14), Vector3(-18.5 + float(k) * 3.5, 0.71, 39.0 + dz), _M["steel"])
 
-	# 上机翼的三级检修梯（机翼东南角）
-	for k in 3:
-		var sx2: float = -7.0 - float(k) * 0.9
-		var stop: float = 0.65 * float(k + 1)
-		_b(root, Vector3(0.9, 0.10, 0.9), Vector3(sx2, stop, 35.9), _M["paint"])
-		_b(root, Vector3(0.08, stop, 0.08), Vector3(sx2 - 0.4, stop * 0.5, 35.9), _M["steel"])
-		_b(root, Vector3(0.08, stop, 0.08), Vector3(sx2 + 0.4, stop * 0.5, 35.9), _M["steel"])
-		platforms.append({"c": Vector3(sx2, 0.0, 35.9) * U,
-			"hx": 0.45 * U, "hz": 0.45 * U, "h": stop * U})
-		_cov(cover, Vector3(sx2, 0.0, 35.9), 0.42, stop - 0.34)
+
+	# 移动检修平台（可站）：四周侧墙只到 0.72，跳上去不会被推
+	_b(root, Vector3(2.50, 0.10, 1.10), Vector3(-9.6, 0.97, 39.0), _M["paint"])
+	for sx in [-10.7, -8.5]:
+		for sz in [38.5, 39.5]:
+			Kit.cylinder(root, 0.14 * U, 0.10 * U, Vector3(sx, 0.14, sz) * U, _M["rubber"],
+				Vector3(0.0, 0.0, PI * 0.5))
+	_b(root, Vector3(2.20, 0.10, 0.10), Vector3(-9.6, 0.88, 38.5), _M["steel_hot"])
+	_b(root, Vector3(2.20, 0.10, 0.10), Vector3(-9.6, 0.88, 39.5), _M["steel_hot"])
+	platforms.append({"c": Vector3(-9.6, 0.0, 39.0) * U, "hx": 1.25 * U, "hz": 0.55 * U, "h": 1.02 * U})
+	for a in [Vector2(-10.85, 38.45), Vector2(-8.35, 38.45), Vector2(-10.85, 39.55), Vector2(-8.35, 39.55)]:
+		_chain_h(cover, a, a + Vector2(0.0, 0.01), 0.10, 0.72)
+	_chain_h(cover, Vector2(-10.85, 38.45), Vector2(-8.35, 38.45), 0.10, 0.72)
+	_chain_h(cover, Vector2(-10.85, 39.55), Vector2(-8.35, 39.55), 0.10, 0.72)
+	_chain_h(cover, Vector2(-10.85, 38.45), Vector2(-10.85, 39.55), 0.10, 0.72)
+	_chain_h(cover, Vector2(-8.35, 38.45), Vector2(-8.35, 39.55), 0.10, 0.72)
+	# 高位料箱（1.6 m，不可站）
+	_b(root, Vector3(1.20, 1.60, 1.20), Vector3(-5.8, 0.80, 40.2), _M["wall_dark"])
+	_b(root, Vector3(1.26, 0.08, 1.26), Vector3(-5.8, 1.62, 40.2), _M["steel_hot"])
+	_rect_sides(cover, -5.8, 40.2, 0.60, 0.60, 1.36)
+	platforms.append({"c": Vector3(-5.8, 0.0, 40.2) * U,
+		"hx": 0.60 * U, "hz": 0.60 * U, "h": 1.66 * U})
 
 	# 舱内背光条（让开口里有层次，不是黑洞）
 	_slab(root, BX0 + 0.5, BX1 - 0.5, 8.4, 8.55, BZ1 - 0.45, BZ1 - 0.32,
@@ -603,14 +534,24 @@ static func _bay(root: Node3D, cover: Array, platforms: Array) -> void:
 		_b(root, Vector3(6.0, 0.10, 0.26), Vector3(lx, BH - 0.45, BZ0 + 1.2), _M["warm"])
 
 	# 工具间：柜列 + 工作台 + 零件架
-	_b(root, Vector3(0.8, 2.2, 7.0), Vector3(BX0 + 0.9, 1.1, 36.0), _M["steel_hot"])
+	_b(root, Vector3(1.1, 2.2, 4.0), Vector3(BX0 + 1.05, 1.1, 36.5), _M["steel_hot"])
+	# 柜门竖缝：贴新的东侧面（x=-24.4），并落在 4 m 柜身范围内
 	for k in 4:
-		_b(root, Vector3(0.06, 1.9, 0.06), Vector3(BX0 + 1.32, 1.0, 33.4 + float(k) * 1.7), _M["wall_dark"])
+		_b(root, Vector3(0.06, 1.9, 0.06), Vector3(BX0 + 1.62, 1.0, 34.9 + float(k) * 0.90), _M["wall_dark"])
 	_b(root, Vector3(3.2, 0.12, 1.4), Vector3(BX0 + 2.6, 1.0, 42.0), _M["steel_hot"])
-	_b(root, Vector3(0.12, 1.0, 0.12), Vector3(BX0 + 1.2, 0.5, 42.0), _M["steel"])
-	_b(root, Vector3(3.0, 2.4, 0.5), Vector3(-4.0, 1.2, BZ1 - 0.7), _M["wall_dark"])
+	for lx in [BX0 + 1.2, BX0 + 4.0]:
+		_b(root, Vector3(0.12, 1.0, 0.12), Vector3(lx, 0.5, 42.0), _M["steel"])
+	# 开放式零件架：侧板 + 背板 + 四层板 + 顶板 + 几个料箱
+	var rxc := -7.0
+	var rzc := 42.0
+	for sx in [-1.5, 1.5]:
+		_b(root, Vector3(0.10, 2.28, 1.10), Vector3(rxc + sx, 1.14, rzc), _M["wall_dark"])
+	_b(root, Vector3(3.00, 2.20, 0.06), Vector3(rxc, 1.10, rzc + 0.52), _M["wall_dark"])
+	for k in 4:
+		_b(root, Vector3(2.80, 0.06, 1.00), Vector3(rxc, 0.45 + float(k) * 0.60, rzc), _M["rust"])
+	_b(root, Vector3(3.00, 0.08, 1.10), Vector3(rxc, 2.36, rzc), _M["steel_hot"])
 	for k in 3:
-		_b(root, Vector3(2.8, 0.10, 0.6), Vector3(-4.0, 0.6 + float(k) * 0.7, BZ1 - 0.75), _M["rust"])
+		_b(root, Vector3(0.70, 0.45, 0.70), Vector3(rxc - 0.8 + float(k) * 0.80, 0.73, rzc), _M["rust"])
 
 	# 舱内地面标线 + 编号
 	_dash_line(root, Vector2(BX0 + 1.4, 35.0), Vector2(BX1 - 1.0, 35.0), 0.12, 1.4, 1.0, 0.022, _M["amber"])
@@ -815,25 +756,32 @@ static func _east(root: Node3D) -> void:
 static func _booth(root: Node3D, platforms: Array) -> void:
 	var qy := QY0
 	# 楼板 + 悬挑桁架
-	_b(root, Vector3(QBX1 - QBX0, 0.20, QBZ1 - QBZ0), Vector3((QBX0 + QBX1) * 0.5, qy - 0.10, (QBZ0 + QBZ1) * 0.5), _M["hull"])
+	_b(root, Vector3(QBX1 - QBX0 + 0.06, 0.20, QBZ1 - QBZ0 + 0.06), Vector3((QBX0 + QBX1) * 0.5, qy - 0.10, (QBZ0 + QBZ1) * 0.5), _M["hull"])
 	for k in 4:
 		var px := QBX0 + 1.4 + float(k) * 4.0
 		_tube(root, Vector3(px, qy - 0.3, QBZ0 + 0.2), Vector3(px, 1.5, QBZ1 - 0.3), 0.10, _M["steel"])
 		_tube(root, Vector3(px, qy - 0.3, QBZ0 + 0.2), Vector3(px, qy - 0.3, QBZ1 - 0.2), 0.08, _M["steel"])
-	# 玻璃盒
+	# 玻璃盒：玻璃上下各沉 0.05，避免与楼板/顶板共面；四块玻璃在角部对接，不互相叠
 	var gy := QY1 - QY0
-	_b(root, Vector3(QBX1 - QBX0, gy, 0.14), Vector3((QBX0 + QBX1) * 0.5, qy + gy * 0.5, QBZ0 + 0.07), _M["glass"])
-	_b(root, Vector3(0.14, gy, QBZ1 - QBZ0), Vector3(QBX0 + 0.07, qy + gy * 0.5, (QBZ0 + QBZ1) * 0.5), _M["glass"])
-	# 东侧玻璃留出上人的门洞（z 30.0…33.4）
-	_b(root, Vector3(0.14, gy, 4.0), Vector3(QBX1 - 0.07, qy + gy * 0.5, QBZ0 + 2.0), _M["glass"])
-	_b(root, Vector3(0.14, gy, 0.6), Vector3(QBX1 - 0.07, qy + gy * 0.5, QBZ1 - 0.3), _M["glass"])
+	var gy2 := gy - 0.10
+	var gcy := qy + gy * 0.5 - 0.05
+	# 南面落地窗：两端各让 0.14 m 给角柱
+	_b(root, Vector3(QBX1 - QBX0 - 0.28, gy2, 0.14), Vector3((QBX0 + QBX1) * 0.5, gcy, QBZ0 + 0.07), _M["glass"])
+	# 西玻璃：从 z 26.14 起，和南玻璃对接
+	_b(root, Vector3(0.14, gy2, QBZ1 - (QBZ0 + 0.14)), Vector3(QBX0 + 0.07, gcy, (QBZ0 + 0.14 + QBZ1) * 0.5), _M["glass"])
+	# 东侧玻璃：门洞 z 30.0…33.4
+	_b(root, Vector3(0.14, gy2, 30.0 - (QBZ0 + 0.14)), Vector3(QBX1 - 0.07, gcy, (QBZ0 + 0.14 + 30.0) * 0.5), _M["glass"])
+	_b(root, Vector3(0.14, gy2, 0.6), Vector3(QBX1 - 0.07, gcy, QBZ1 - 0.3), _M["glass"])
+	# 两根角柱，填掉玻璃对接处的 0.14 方角
+	for cxp in [QBX0 + 0.07, QBX1 - 0.07]:
+		_b(root, Vector3(0.16, gy + 0.10, 0.16), Vector3(cxp, qy + gy * 0.5, QBZ0 + 0.07), _M["steel"])
 	_b(root, Vector3(0.18, 0.22, 3.4), Vector3(QBX1 - 0.07, qy + 3.5, 31.7), _M["steel"])
-	_b(root, Vector3(0.18, 0.10, 0.7), Vector3(QBX1 - 0.07, qy + 0.05, 30.2), _M["green"])
-	_b(root, Vector3(QBX1 - QBX0, 0.18, QBZ1 - QBZ0), Vector3((QBX0 + QBX1) * 0.5, QY1, (QBZ0 + QBZ1) * 0.5), _M["hull"])
-	# 竖框
+	_b(root, Vector3(0.18, 0.10, 0.7), Vector3(QBX1 - 0.07, qy + 0.06, 30.45), _M["green"])
+	_b(root, Vector3(QBX1 - QBX0 + 0.06, 0.18, QBZ1 - QBZ0 + 0.06), Vector3((QBX0 + QBX1) * 0.5, QY1, (QBZ0 + QBZ1) * 0.5), _M["hull"])
+	# 竖框：移到玻璃南侧 0.10 m，不再埋进玻璃里
 	for k in 5:
 		var px2 := QBX0 + float(k) * (QBX1 - QBX0) / 4.0
-		_b(root, Vector3(0.12, gy, 0.12), Vector3(px2, qy + gy * 0.5, QBZ0 + 0.08), _M["steel"])
+		_b(root, Vector3(0.12, gy + 0.10, 0.12), Vector3(px2, qy + gy * 0.5, QBZ0 - 0.10), _M["steel"])
 	# 室内：控制台 + 座椅 + 暖光
 	for k in 3:
 		var cx := QBX0 + 3.0 + float(k) * 5.0
@@ -989,11 +937,16 @@ static func _crane(root: Node3D) -> void:
 
 # ================================================================== 灯光
 static func _lights(root: Node3D) -> void:
+	# 顶灯灯具单独挂一组：名字带 fx 会被静态合批跳过，二阶段可整组隐藏
+	var lamp_rig := Node3D.new()
+	lamp_rig.name = "fx_lamps"
+	root.add_child(lamp_rig)
 	# 高棚灯：7 × 2 排，每盏都有实体灯具 + 光源
 	for x in [-36.0, -24.0, -12.0, 0.0, 12.0, 24.0, 36.0]:
 		for z in [-16.0, 16.0]:
 			_b(root, Vector3(2.8, 0.26, 0.8), Vector3(x, H - 1.05, z), _M["wall_dark"])
-			var lamp := _b(root, Vector3(2.5, 0.07, 0.46), Vector3(x, H - 1.20, z), _M["lamp"])
+			var lamp := _b(lamp_rig, Vector3(2.5, 0.07, 0.46), Vector3(x, H - 1.20, z), _M["lamp"])
+			lamp.name = "CeilLamp"
 			lamp.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			_b(root, Vector3(0.06, 1.0, 0.06), Vector3(x - 1.1, H - 0.55, z), _M["steel"])
 			_b(root, Vector3(0.06, 1.0, 0.06), Vector3(x + 1.1, H - 0.55, z), _M["steel"])
@@ -1049,38 +1002,8 @@ static func _omni(root: Node3D, p: Vector3, col: Color, energy: float, rng: floa
 
 # ================================================================== 地面设备
 static func _props(root: Node3D) -> void:
-	# 地面电源车：滑撬底座 + 机组箱 + 控制面板 + 散热格栅 + 电缆卷盘 + 吊耳
-	_b(root, Vector3(2.30, 0.14, 1.60), Vector3(31.0, 0.07, 7.0), _M["wall_dark"])
-	for sx in [29.95, 32.05]:
-		for sz in [6.30, 7.70]:
-			_b(root, Vector3(0.16, 0.16, 0.16), Vector3(sx, 0.20, sz), _M["steel"])
-	# 机组箱体（上小下大，形成台阶感）
-	_b(root, Vector3(1.90, 1.10, 1.30), Vector3(31.0, 0.69, 7.0), _M["shuttle"])
-	_b(root, Vector3(1.55, 0.16, 1.10), Vector3(31.0, 1.30, 7.0), _M["steel_hot"])
-	# 散热格栅（西侧面）
-	for k in 7:
-		_b(root, Vector3(0.05, 0.07, 1.05), Vector3(30.03, 0.35 + float(k) * 0.12, 7.0), _M["wall_dark"])
-	# 控制面板（东侧，朝甲板）
-	_b(root, Vector3(0.06, 0.55, 0.75), Vector3(31.97, 1.00, 7.0), _M["wall_dark"])
-	for gz2 in [6.80, 7.20]:
-		Kit.cylinder(root, 0.11 * U, 0.05 * U, Vector3(32.02, 1.12, gz2) * U, _M["tank_band"],
-			Vector3(0.0, 0.0, PI * 0.5))
-	_b(root, Vector3(0.05, 0.16, 0.16), Vector3(32.02, 0.88, 7.0), _M["paint"])
-	_b(root, Vector3(0.05, 0.10, 0.10), Vector3(32.02, 0.88, 6.72), _M["green"])
-	_b(root, Vector3(0.05, 0.10, 0.10), Vector3(32.02, 0.88, 7.28), _M["red"])
-	# 顶部警示灯 + 吊耳 + 铭牌
-	_b(root, Vector3(0.16, 0.12, 0.16), Vector3(30.6, 1.44, 7.0), _M["amber"])
-	for sx2 in [30.2, 31.8]:
-		for sz2 in [6.45, 7.55]:
-			Kit.torus(root, 0.10 * U, 0.025 * U, Vector3(sx2, 1.42, sz2) * U, _M["steel"], 12)
-	_b(root, Vector3(0.55, 0.20, 0.03), Vector3(31.0, 0.95, 7.66), _M["tank_band"])
-	# 电缆卷盘（南侧）+ 拖出的电缆
-	Kit.cylinder(root, 0.40 * U, 0.26 * U, Vector3(32.45, 0.70, 7.55) * U, _M["cabinet_red"],
-		Vector3(0.0, 0.0, PI * 0.5))
-	Kit.cylinder(root, 0.30 * U, 0.30 * U, Vector3(32.45, 0.70, 7.55) * U, _M["steel_hot"],
-		Vector3(0.0, 0.0, PI * 0.5))
-	Kit.cable(root, Vector3(32.55, 0.55, 7.30) * U, Vector3(29.2, 0.28, 4.6) * U,
-		0.55 * U, 0.05 * U, _M["hose"])
+	# 地面电源车：圆角机组箱 / 百叶 / 控制面板 / 卷盘 / 轮子 / 牵引杆（见 hangar_gpu.gd）
+	Gpu.build(root, _M)
 
 	# 拖杆 + 壁挂支架（靠东墙）
 	_b(root, Vector3(0.16, 0.16, 3.2), Vector3(33.2, 0.55, 3.6), _M["steel_hot"])
@@ -1200,32 +1123,41 @@ static func _debug_rings(root: Node3D) -> void:
 # ================================================================== 实体碰撞
 ## 场景里每一件“看起来是实体”的东西都在这里登记，尺寸与建模型处一致。
 static func _solids(cover: Array, platforms: Array) -> void:
-	# 穿梭机（机身 + 起落架），沿 x 停放
-	for x in [-18.0, -14.0, -10.0, -6.0, -2.6]:
-		_cov(cover, Vector3(x, 0.0, 39.0), 2.0, 4.4)
-	for dz in [-1.55, 1.55]:
-		_cov(cover, Vector3(-16.0, 0.0, 39.0 + dz), 0.7, 2.8)
-		_cov(cover, Vector3(-8.0, 0.0, 39.0 + dz), 0.7, 2.8)
-	# 机翼：整片可站（顶面 3.04 m）
-	platforms.append({"c": Vector3(-12.0, 0.0, 39.0) * U,
-		"hx": 2.5 * U, "hz": 3.8 * U, "h": 3.04 * U})
+	# 空检修位的碰撞在 _bay 里随模型登记（轴架 / 移动平台 / 料箱）
 
-	# 检修台架：可跳上去（平台）+ 侧面碰撞
-	for dz in [-4.45, 4.45]:
-		platforms.append({"c": Vector3(-15.0, 0.0, 39.0 + dz) * U,
+	# 检修台架：可跳上去（平台）+ 四周侧墙（台面高 1.42，侧墙只到 1.20）
+	# 原来只有四条腿的碰撞，机甲能从腿之间走进台面下方，上半身穿出台面。
+	for dz in [3.0]:
+		var bz: float = 39.0 + dz
+		platforms.append({"c": Vector3(-15.0, 0.0, bz) * U,
 			"hx": 4.0 * U, "hz": 0.4 * U, "h": 1.42 * U, "strict": true})
+		_chain_h(cover, Vector2(-19.0, bz - 0.40), Vector2(-11.0, bz - 0.40), 0.10, 1.20)
+		_chain_h(cover, Vector2(-19.0, bz + 0.40), Vector2(-11.0, bz + 0.40), 0.10, 1.20)
+		_chain_h(cover, Vector2(-19.0, bz - 0.40), Vector2(-19.0, bz + 0.40), 0.10, 1.20)
+		_chain_h(cover, Vector2(-11.0, bz - 0.40), Vector2(-11.0, bz + 0.40), 0.10, 1.20)
 		for sx in [-18.0, -16.0, -14.0, -12.0]:
-			_cov(cover, Vector3(sx, 0.0, 39.0 + dz), 0.45, 1.12)
+			_cov(cover, Vector3(sx, 0.0, bz), 0.45, 1.12)
+	# 大厅结构门架立柱（贴南北墙，每 8 m）：只有视觉，原来没有碰撞
+	for gx in range(-32, 33, 8):
+		for gz in [HZ - 0.20, -HZ + 0.20]:
+			_cov(cover, Vector3(float(gx), 0.0, float(gz)), 0.40, H)
 	# 维修舱门架立柱
 	for gx in [-22.0, -10.0, 2.0]:
 		for gz in [BZ0 + 0.6, BZ1 - 0.6]:
 			_cov(cover, Vector3(gx, 0.0, gz), 0.35, 8.2)
-	# 工具柜 / 工作台 / 零件架
-	for gz in [35.4, 41.6]:
-		_cov(cover, Vector3(BX0 + 1.0, 0.0, gz), 0.9, 1.86)
-		platforms.append({"c": Vector3(BX0 + 1.0, 0.0, gz) * U, "hx": 0.40 * U, "hz": 3.50 * U, "h": 2.20 * U})
-	_block(cover, platforms, BX0 + 2.6, 42.0, 1.6, 0.7, 1.06)
-	_block(cover, platforms, -4.0, BZ1 - 0.75, 1.5, 0.25, 2.4)
+	# 工具柜 / 工作台 / 零件架：都按真实矩形登记整圈侧墙，别用一个大圆近似
+	# 工具柜 1.1 × 7.0，顶面 2.2（可从工作台跳上去）
+	_rect_sides(cover, BX0 + 1.05, 36.5, 0.55, 2.00, 1.90)
+	platforms.append({"c": Vector3(BX0 + 1.05, 0.0, 36.5) * U,
+		"hx": 0.55 * U, "hz": 2.00 * U, "h": 2.20 * U})
+	# 工作台 3.2 × 1.4，顶面 1.06（可站）
+	_rect_sides(cover, BX0 + 2.6, 42.0, 1.60, 0.70, 0.76)
+	platforms.append({"c": Vector3(BX0 + 2.6, 0.0, 42.0) * U,
+		"hx": 1.60 * U, "hz": 0.70 * U, "h": 1.06 * U})
+	# 零件架 3.0 × 1.1，顶面 2.4（可从后墙台架跳上去）
+	_rect_sides(cover, -7.0, 42.0, 1.50, 0.55, 2.10)
+	platforms.append({"c": Vector3(-7.0, 0.0, 42.0) * U,
+		"hx": 1.50 * U, "hz": 0.55 * U, "h": 2.40 * U})
 
 	# 储罐 + 围堰
 	for tx in [-3.6, 0.8, 11.0, 15.6]:
@@ -1244,8 +1176,9 @@ static func _solids(cover: Array, platforms: Array) -> void:
 
 
 
-	# 地面电源车（可站）+ 拖杆
-	_block(cover, platforms, 31.0, 7.0, 1.05, 0.70, 1.38)
+	# 地面电源车：顶面 1.75（高于跳跃高度，不可站），只做侧墙
+	_rect_sides(cover, 31.0, 7.0, 1.30, 0.75, 1.45)
+	_cov(cover, Vector3(29.5, 0.0, 7.0), 0.22, 0.95)
 	_cov(cover, Vector3(33.2, 0.0, 3.6), 0.35, 0.40)
 	platforms.append({"c": Vector3(33.2, 0.0, 3.6) * U, "hx": 0.22 * U, "hz": 1.55 * U, "h": 0.70 * U, "strict": true})
 	# 防撞护栏
@@ -1351,12 +1284,78 @@ static func _block(cover: Array, platforms: Array, cx: float, cz: float,
 	platforms.append({"c": Vector3(cx, 0.0, cz) * U, "hx": hx * U, "hz": hz * U, "h": top * U})
 
 
+## 矩形实体的整圈侧墙（用来替代大圆近似，端角不会漏）
+static func _rect_sides(cover: Array, cx: float, cz: float, hx: float, hz: float,
+		h: float, phys := 0.10) -> void:
+	_chain_h(cover, Vector2(cx - hx, cz - hz), Vector2(cx + hx, cz - hz), phys, h)
+	_chain_h(cover, Vector2(cx + hx, cz - hz), Vector2(cx + hx, cz + hz), phys, h)
+	_chain_h(cover, Vector2(cx + hx, cz + hz), Vector2(cx - hx, cz + hz), phys, h)
+	_chain_h(cover, Vector2(cx - hx, cz + hz), Vector2(cx - hx, cz - hz), phys, h)
+
+
 static func _cov(cover: Array, c: Vector3, phys_r: float, h: float) -> void:
 	cover.append({"c": c * U, "r": phys_r * U + BALL, "h": h * U, "cam": true})
 
 
 static func _cov_y(cover: Array, c: Vector3, phys_r: float, h: float) -> void:
 	cover.append({"c": c * U, "r": phys_r * U + BALL, "h": h * U, "cam": true})
+
+
+# ================================================================== 二阶段投影
+## 东门内侧挂一块哑光投影幕；西门内侧一盏投影灯，把 Boss 的影子投到幕上。
+## 场景只提供“切过去之后的样子”，Boss 流程调用 set_phase2(true/false) 即可。
+static func _phase2(root: Node3D) -> Node:
+	var env := (root.get_node("Env") as WorldEnvironment).environment
+	var aux: Array = root.find_children("*", "Light3D", true, false)
+	var lamps: Array = []
+	var lamp_rig := root.get_node_or_null("fx_lamps")
+	if lamp_rig != null:
+		lamps.append(lamp_rig)
+
+	# 投影幕（贴在舰载机大门内侧，挡在门筋前面）
+	var scr := _b(root, Vector3(0.08, 13.8, 28.0), Vector3(HX - 0.50, 7.40, 0.0), _M["screen"])
+	# 幕布不投影，避免 0.08 m 厚的板在 70 m 外自遮挡
+	scr.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_b(root, Vector3(0.12, 0.18, 28.3), Vector3(HX - 0.54, 14.34, 0.0), _M["steel"])
+	_b(root, Vector3(0.12, 0.18, 28.3), Vector3(HX - 0.54, 0.46, 0.0), _M["steel"])
+	_b(root, Vector3(0.12, 13.8, 0.18), Vector3(HX - 0.54, 7.40, 14.15), _M["steel"])
+	_b(root, Vector3(0.12, 13.8, 0.18), Vector3(HX - 0.54, 7.40, -14.15), _M["steel"])
+	# 幕布横向分缝
+	for k in 3:
+		_b(root, Vector3(0.02, 0.03, 27.8), Vector3(HX - 0.505, 3.6 + float(k) * 3.4, 0.0), _M["steel"])
+
+	# 投影灯：西门内侧支架 + 灯体 + 镜头
+	_b(root, Vector3(1.4, 0.34, 0.34), Vector3(-37.2, 9.0, -6.0), _M["steel"])
+	_b(root, Vector3(0.10, 0.80, 0.10), Vector3(-37.9, 9.4, -6.0), _M["steel"])
+	_b(root, Vector3(0.90, 0.72, 0.72), Vector3(-36.55, 9.0, -6.0), _M["wall_dark"])
+	_b(root, Vector3(0.16, 0.44, 0.44), Vector3(-36.02, 9.0, -6.0), _M["wall_dark"])
+	var lens := Kit.cylinder(root, 0.24 * U, 0.06 * U, Vector3(-35.92, 9.0, -6.0) * U,
+		_M["lamp"], Vector3(0.0, 0.0, PI * 0.5))
+	lens.name = "ProjectorLens"
+
+	var sp := SpotLight3D.new()
+	sp.name = "Phase2Spot"
+	sp.position = Vector3(-35.80, 9.00, -6.0) * U
+	sp.light_color = Color(0.88, 0.94, 1.0)
+	sp.light_energy = 120.0
+	sp.spot_range = 200.0 * U
+	sp.spot_angle = 13.0
+	sp.spot_attenuation = 0.5
+	sp.light_volumetric_fog_energy = 1.1
+	sp.shadow_enabled = true
+	sp.shadow_bias = 0.35
+	sp.shadow_normal_bias = 0.05
+	root.add_child(sp)
+	sp.look_at_from_position(Vector3(-35.80, 9.00, -6.0) * U,
+		Vector3(HX - 0.50, 6.50, 0.0) * U, Vector3.UP)
+
+	var rig = Phase2Rig.new()
+	rig.name = "Phase2"
+	root.add_child(rig)
+	rig.setup(aux, lamps, sp, env)
+	if "--phase2" in OS.get_cmdline_user_args():
+		rig.set_phase2(true)
+	return rig
 
 
 # ================================================================== 小工具
