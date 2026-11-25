@@ -38,6 +38,7 @@ var projectiles = null
 # 弹反拦截规划的运行状态
 var _intercept_on := false
 var _intercept_kind := ""
+var _intercept_enemy = null
 var _plan_point := Vector3.ZERO
 var _plan_body_yaw := 0.0
 var _plan_left := 0.0
@@ -236,6 +237,43 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 	_plan_idle = 0.0
 	var point: Vector3 = best["point"]
 	var eta: float = float(best["eta"])
+	# 落点在机械臂可达域外时（如高劈/头顶刺），在敌刀剩余预测轨迹上重选
+	# 落点：预测轨迹上的刀身点必然被敌刀扫过，从最深穿入的时刻往回挑
+	# 第一个够得着的点；够不着时也比原落点更接近敌刀的实际路径。
+	if rig.has_method("blade_reach_miss") and float(best["axis"].length_squared()) > 0.0:
+		var torso_turn := P.getf("parry.torso_turn")
+		var miss: float = rig.blade_reach_miss(point, best["axis"], best["normal"], torso_turn)
+		if miss > 0.12:
+			var erig = best.get("enemy")
+			if erig != null and not erig.has_method("predict_weapon_xf"):
+				erig = erig.get("rig")
+			if erig != null and erig.has_method("predict_weapon_xf") \
+					and erig.has_method("get"):
+				var rr_off := clampf(0.24 * float(erig.get("weapon_scale")) + 0.14, 0.05, margin)
+				var t_to: float = float(erig.get("attack_hit_to"))
+				var t_now2: float = float(erig.get("attack_elapsed"))
+				var discs: Array = erig.get("blade_discs")
+				var chosen := point
+				var chosen_miss := miss
+				for step in 7:
+					var e: float = lerpf(t_to, t_now2, float(step) / 6.0)
+					var xf: Transform3D = erig.predict_weapon_xf(e)
+					var step_best := point
+					var step_miss := 1e9
+					for d in discs:
+						var dp: Vector3 = xf * Vector3(0.0, float(d["y"]), 0.0) \
+							- best["normal"] * rr_off
+						var m: float = rig.blade_reach_miss(dp, best["axis"],
+							best["normal"], torso_turn)
+						if m < step_miss:
+							step_miss = m
+							step_best = dp
+					if step_miss < chosen_miss:
+						chosen_miss = step_miss
+						chosen = step_best
+					if step_miss < 0.12:
+						break
+				point = chosen
 	# 躯干在世界里的朝向（机体 + 腰环）：身体还在转的时候，刀要跟着重新规划
 	var body_yaw: float = rig.heading + rig.torso.rotation.y
 	var turned: float = absf(wrapf(body_yaw - _plan_body_yaw, -PI, PI))
@@ -254,6 +292,9 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 		return
 	_intercept_on = true
 	_intercept_kind = String(best["kind"])
+	# 远程威胁没有 enemy 字段：保留上一个近战目标，格挡兜底不掉线。
+	if best.get("enemy") != null:
+		_intercept_enemy = best["enemy"]
 	_plan_point = point
 	_plan_body_yaw = body_yaw
 	_plan_left = float(res.get("dur", dur))
@@ -262,6 +303,7 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 func _end_intercept() -> void:
 	_intercept_on = false
 	_intercept_kind = ""
+	_intercept_enemy = null
 	_plan_left = 0.0
 	_plan_idle = 999.0
 	_return_left = 0.0
@@ -334,6 +376,12 @@ func is_parrying() -> bool:
 ## 判定用的是刀的真实几何，所以只要是举着刀这个状态，物理上就该挡得住。
 func is_guard_up() -> bool:
 	return _intercept_on
+
+
+## 本帧拦截规划正在跟踪的近战敌人；预测到敌刀会命中但刀身几何上够不到
+## （如高劈越过手臂可达域）时，combat 仍按格挡处理。
+func guard_target():
+	return _intercept_enemy
 
 
 ## 当前正在架什么（HUD 显示用）：""=没在架，"它的刀"=近战，"飞行物"=远程

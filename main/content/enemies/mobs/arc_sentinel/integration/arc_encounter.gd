@@ -203,6 +203,13 @@ func resolve_attack(target) -> Dictionary:
 				_consumed = true
 				target.on_block(push, P.getf("parry.block_knockback"))
 				return {"hit": false, "parried": true, "melee": true, "pos": contact, "normal": guard["normal"], "push": push}
+	# 预测兜底：拦截规划已确认这一刀会命中且玩家在格挡，但刀身接触点在
+	# 机械臂可达域外（如高位下劈）时仍算格挡——与 combat.enemy_swing 一致。
+	if target.is_guard_up() and P.getb("parry.melee_block") \
+			and target.has_method("guard_target") and target.guard_target() == self:
+		_consumed = true
+		target.on_block(push, P.getf("parry.block_knockback"))
+		return {"hit": false, "parried": true, "melee": true, "pos": center(), "normal": -push, "push": push}
 	var cap: Dictionary = target.capsule()
 	var hit: Dictionary = Hit.sweep_blade(_blade_prev, _blade_now, blade_discs, weapon_scale, cap["a"], cap["b"], cap["r"])
 	if not hit.get("hit", false):
