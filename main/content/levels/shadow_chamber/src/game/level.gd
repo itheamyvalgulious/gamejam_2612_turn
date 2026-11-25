@@ -134,8 +134,9 @@ func _setup_shadows() -> void:
 	shadow = WallShadow.new()
 	shadow.name = "BossShadow"
 	add_child(shadow)
+	# 灯墙之厅是本关玩法的核心视觉：保留高保真遮罩（2048），其余关卡默认 512。
 	shadow.setup(slots, {"intensity": clampf(P.getf("boss.shadow_intensity"), 0.0, 1.0),
-		"softness": P.getf("boss.shadow_softness")})
+		"softness": P.getf("boss.shadow_softness"), "mask_width": 2048})
 	shadow.set_caster_scale(P.getf("boss.shadow_size"))
 	shadow.set_lamps(lamps)
 	# 影子层：玩家 + 这一关的所有敌人（真几何，谁在场上谁就有影子）

@@ -1030,7 +1030,7 @@ static func _lights(root: Node3D) -> void:
 	s1.spot_range = 42.0 * U
 	s1.spot_angle = 46.0
 	s1.rotation_degrees = Vector3(-90.0, 18.0, 0.0)
-	s1.shadow_enabled = true
+	s1.shadow_enabled = false   # 顶灯只做照明；阴影由主光提供（省 GPU）
 	root.add_child(s1)
 
 

@@ -42,6 +42,10 @@ var _plan_point := Vector3.ZERO
 var _plan_body_yaw := 0.0
 var _plan_left := 0.0
 var _plan_idle := 0.0      # 已经多久没看到威胁了（收势的触发条件）
+var _reach_enemy := 0      # 换刀路径搜索的缓存：敌人 instance id
+var _reach_from := -1.0    # 该刀的判定窗口起点
+var _reach_to := -1.0      # 该刀的判定窗口终点
+var _reach_alt := {}       # 该刀的可达拦截点（搜一次，全刀复用，空=用原方案）
 var _return_left := 0.0
 
 var _last_swing_before := Transform3D.IDENTITY
@@ -239,14 +243,62 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 	# 躯干在世界里的朝向（机体 + 腰环）：身体还在转的时候，刀要跟着重新规划
 	var body_yaw: float = rig.heading + rig.torso.rotation.y
 	var turned: float = absf(wrapf(body_yaw - _plan_body_yaw, -PI, PI))
+	# 本击签名：一刀只搜一次可达拦截点（连段里每一击窗口不同）。
+	# 用 instance id + 判定窗口做键（纯整数比较，零分配）。
+	var erig = null
+	if String(best["kind"]) == "melee":
+		var enemy = best.get("enemy")
+		if enemy != null and enemy.has_method("predict_weapon_xf"):
+			erig = enemy
+		elif enemy != null and enemy.has_method("get"):
+			erig = enemy.get("rig")
+	var eid := 0
+	var win_from := -1.0
+	var win_to := -1.0
+	if erig != null:
+		eid = erig.get_instance_id()
+		win_from = float(erig.get("attack_hit_from"))
+		win_to = float(erig.get("attack_hit_to"))
+	# 换了一击必须重新规划，哪怕接触点位置几乎没变。
+	var new_strike := eid != 0 and (eid != _reach_enemy \
+		or not is_equal_approx(win_from, _reach_from) or not is_equal_approx(win_to, _reach_to))
 	# 新威胁 / 落点跑掉了 / 身体转过角度了 / 上一条路径已经走完 → 重新规划
-	if _intercept_on and _plan_left > 0.0 and _plan_point.distance_to(point) <= 0.22 \
-			and turned <= 0.12:
+	if not new_strike and _intercept_on and _plan_left > 0.0 \
+			and _plan_point.distance_to(point) <= 0.22 and turned <= 0.12:
 		_plan_left -= dt
 		return
 	var dur := clampf(eta * 0.9, 0.05, 0.20)
-	var res: Dictionary = rig.plan_blade_intercept(point, best["axis"], best["normal"],
-		P.getf("parry.torso_turn"), dur, P.getf("parry.plan_speed"))
+	# 接触点够不到时（突进下劈等差离的招），在敌刀路径上换可达拦截点。
+	# 搜索按「敌人 + 第几刀」缓存，一次出刀只搜一次：全帧搜索会拖垮帧率，
+	# 而敌刀轨迹（predict 采样表）在整刀内不变，一个解可以一直用到刀走完。
+	var plan_point := point
+	var plan_axis: Vector3 = best["axis"]
+	var plan_eta := eta
+	if rig.has_method("intercept_blade_segment") and eid != 0:
+		if new_strike:
+			_reach_enemy = eid
+			_reach_from = win_from
+			_reach_to = win_to
+			_reach_alt = _find_reachable_intercept(erig, best, P.getf("parry.torso_turn"))
+		# 每次重规划都复核，缓存也要验：替换点只是「敌刀路径上有静态交点」
+		# 远远不够 —— 换到机械臂够不到的点，表现就是格挡手被放到错误位置
+		# （横斩举到头顶、上段劈垂到腰），刀明明举了却挡不住。
+		if not _reach_alt.is_empty():
+			# 只要求「机械臂够得着」：落点是否合适由 _find_reachable_intercept
+			# 内部约束（判定窗、敌我之间、离原威胁点的距离）保证。
+			var tt: float = P.getf("parry.torso_turn")
+			var alt_miss: float = rig.blade_reach_miss(_reach_alt["point"], _reach_alt["axis"],
+				best["normal"], tt)
+			if alt_miss > 0.32:
+				_reach_alt = {}
+		# 缓存命中时也要每个重规划都用它，否则路径走完重新规划会退回原落点。
+		if not _reach_alt.is_empty():
+			plan_point = _reach_alt["point"]
+			plan_axis = _reach_alt["axis"]
+			plan_eta = float(_reach_alt["eta"])
+	var dur2 := clampf(plan_eta * 0.9, 0.05, 0.20)
+	var res: Dictionary = rig.plan_blade_intercept(plan_point, plan_axis, best["normal"],
+		P.getf("parry.torso_turn"), dur2, P.getf("parry.plan_speed"))
 	if res.is_empty():
 		# 规划失败也要保持架着并立刻重试；否则刀停在上一帧的落点，
 		# 会眼睁睁看着敌刀从旁边擦过去（_intercept_on 已是 true）。
@@ -254,9 +306,211 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 		return
 	_intercept_on = true
 	_intercept_kind = String(best["kind"])
-	_plan_point = point
+	_plan_point = plan_point
 	_plan_body_yaw = body_yaw
-	_plan_left = float(res.get("dur", dur))
+	_plan_left = float(res.get("dur", dur2))
+
+
+
+## 在敌刀剩余预测路径上找「真碰撞可达」的拦截点（一次出刀算一次）。
+##
+## 格挡不是把刀架在接触点，而是挥刀砍向敌刀来路把它打歪。所以落点取
+## 敌刀扫掠体与机械臂可达域的交集——时刻 × 刀身 disc × 刀轴联合搜索，
+## 且只保留「敌刀砍到胶囊之前」的点。返回的候选必须比原落点的预测
+## 段距明显更好才采用，否则返回空（调用方保持原方案，零回归）。
+func _find_reachable_intercept(erig, best: Dictionary, torso_turn: float, t_start := -1.0) -> Dictionary:
+	if erig == null or not erig.has_method("predict_weapon_xf"):
+		return {}
+	var hit_to: float = float(erig.get("attack_hit_to"))
+	# 落点优先落在「判定窗内」：窗外的交叠不算格挡，刀架到窗外经过的
+	# 位置，等窗口打开敌刀早已掠过去 → 看起来举刀了却没挡住。
+	var hit_from: float = float(erig.get("attack_hit_from"))
+	var t_elapsed: float = float(erig.get("attack_elapsed"))
+	var t_now := t_start
+	if t_now < 0.0:
+		var strict := _find_reachable_intercept(erig, best, torso_turn,
+			maxf(t_elapsed, hit_from))
+		if not strict.is_empty() or hit_from <= t_elapsed + 0.001:
+			return strict
+		# 窗内没有可达解（连段窗口极短）时才放宽到「从此刻起」。
+		t_now = t_elapsed
+	var discs: Array = erig.get("blade_discs")
+	var wscale: float = float(erig.get("weapon_scale"))
+	if hit_to <= t_now or discs.is_empty():
+		return {}
+	var out_dir: Vector3 = best["normal"]
+	var cap: Dictionary = capsule()
+	var espan := _piece_span(discs)
+	# 敌刀全程刀段缓存 + 胶囊接触时刻（第一次有 disc 碰到胶囊）。
+	const STEPS := 8
+	var e_times: Array = []
+	var e_segs: Array = []
+	var e_contact := hit_to
+	for i in STEPS + 1:
+		var e: float = lerpf(t_now, hit_to, float(i) / float(STEPS))
+		var xf: Transform3D = erig.predict_weapon_xf(e)
+		e_times.append(e)
+		e_segs.append([xf * Vector3(0.0, espan.x, 0.0), xf * Vector3(0.0, espan.y, 0.0)])
+		if i > 0 and e_contact >= hit_to:
+			for d in discs:
+				var dp: Vector3 = xf * Vector3(0.0, float(d["y"]), 0.0)
+				if _pt_seg_dist(dp, cap["a"], cap["b"]) <= float(d["r"]) * wscale + float(cap["r"]):
+					e_contact = e
+					break
+	if e_contact <= t_now + 0.02:
+		return {}
+	# 不回归的判据：原方案若静止姿态就能切进敌刀路径（gap≈0），一律不动。
+	# 只有原方案静态不相交、而新候选静态真相交（gap≈0）时才替换。
+	var orig_gap := _predicted_gap(rig, best["point"], best["axis"], out_dir, torso_turn, e_segs, e_times)
+	# 与 blade_vs_blade 同口径：刀轴间距 ≤ 双方刀半径和 + slack 就算「切进去了」。
+	# 之前用 0.06（几乎要刀轴重合）会把本来挡得住的落点误判成挡不住，
+	# 于是把刀换到远处够不到的位置 —— 那就是「手放错位置还挡不住」。
+	const CLASH_GAP := 0.30
+	if orig_gap <= CLASH_GAP:
+		return {}
+	var best_gap := CLASH_GAP
+	# 由上到下（时间升序）找第一个可行解就返回：越早拦越安全，也省算力。
+	# 落点离胸口超过 ~2.7u（刀柄可达 + 整条刀长）时直接跳过，不做完整求解。
+	var chest: Vector3 = rig.global_position + Vector3(0, 2.2, 0)
+	# ── 优先：落点不动，只改刀轴 ──
+	# 手要留在「敌刀真正威胁身体的位置」，只把刀转成横切来路。这样既挡得住，
+	# 又不会出现「横斩把手举到头顶 / 上劈把刀垂到腰」这种明显错误的位置。
+	var pick := {}
+	var pick_miss := 1e9
+	var base_pt: Vector3 = best["point"]
+	var base_reach: float = rig.blade_reach_miss(base_pt, best["axis"], out_dir, torso_turn)
+	var max_shift: float = 1.80 if base_reach > 0.30 else 0.90
+	var base_axes: Array = [best["axis"], Vector3.UP, Vector3.FORWARD, Vector3.RIGHT]
+	if erig.has_method("predict_weapon_xf"):
+		base_axes.append((erig.predict_weapon_xf(t_now).basis * Vector3(0, 1, 0)).normalized())
+	for ax0 in base_axes:
+		if ax0.length_squared() < 0.01:
+			continue
+		if _predicted_gap(rig, base_pt, ax0, out_dir, torso_turn, e_segs, e_times) > CLASH_GAP:
+			continue
+		var m0: float = rig.blade_reach_miss(base_pt, ax0, out_dir, torso_turn)
+		if m0 <= 0.32 and m0 < pick_miss:
+			pick_miss = m0
+			pick = {"point": base_pt, "axis": ax0, "eta": maxf(float(best.get("eta", 0.05)), 0.04)}
+	if not pick.is_empty():
+		return pick
+	pick_miss = 1e9
+	const CANDIDATE_RANGE := 2.9
+	# 贴脸点不许要：落在身体周围 1.45u 以内的话，刀放过去也来不及、
+	# 而且会被身体自身挡住，表现就是「举起来了但没挡住」。
+	const MIN_CANDIDATE_GAP := 1.45
+	for i in e_times.size():
+		var e: float = e_times[i]
+		if e >= e_contact:
+			continue
+		var xf: Transform3D = erig.predict_weapon_xf(e)
+		# disc 抽稀采样（每 3 个取 1）：34 个 disc 全枚举会让这一次搜索
+		# 变成一帧卡顿；抽稀后仍能覆盖整条刀身，精度足够。
+		for di in range(0, discs.size(), 3):
+			var y: float = float(discs[di]["y"])
+			if y < 0.05:
+				continue
+			var pt: Vector3 = xf * Vector3(0.0, y, 0.0)
+			var chest_gap := pt.distance_to(chest)
+			if chest_gap > CANDIDATE_RANGE or chest_gap < MIN_CANDIDATE_GAP:
+				continue
+			# 必须在我和敌人之间：跑到敌人身后（或超出敌我距离）的点
+			# 看起来就是「手放到错误位置」，而且根本拦不到朝我来的刀。
+			var mine_flat: Vector3 = (pt - rig.global_position).slide(Vector3.UP)
+			var to_enemy_flat: Vector3 = (erig.global_position - rig.global_position).slide(Vector3.UP)
+			if mine_flat.length() > to_enemy_flat.length() - 0.20:
+				continue
+			# 局部范围约束：原落点本来就够得到时只许微调（手不许乱跑）；
+			# 原落点够不到时才放开半径去找真正可达的交点。
+			if pt.distance_to(best["point"]) > max_shift:
+				continue
+			# 刀尖前指 / 横切来路摆前面：这是拦预接触路径最有效的两个姿态
+			var daxes: Array = []
+			var jab: Vector3 = pt - chest
+			if jab.length_squared() > 0.01:
+				daxes.append(jab.normalized())
+				var step_t: float = minf(e + 0.016, hit_to)
+				var xf2: Transform3D = erig.predict_weapon_xf(step_t)
+				var motion: Vector3 = xf2 * Vector3(0, 1.2, 0) - xf * Vector3(0, 1.2, 0)
+				if motion.length_squared() > 0.0001:
+					var chop: Vector3 = motion.normalized().cross(jab.normalized())
+					if chop.length_squared() > 0.01:
+						daxes.append(chop.normalized())
+			daxes.append(best["axis"])
+			daxes.append((xf.basis * Vector3(0, 1, 0)).normalized())
+			daxes.append(Vector3.UP)
+			daxes.append(Vector3.FORWARD)
+			daxes.append(Vector3.RIGHT)
+			for ax in daxes:
+				if ax.length_squared() < 0.01:
+					continue
+				var gap := _predicted_gap(rig, pt, ax, out_dir, torso_turn, e_segs, e_times)
+				if gap < best_gap:
+					# 兜底路径：沿敌刀路径取最早可达的交点（改刀轴失败的极端情况）
+					return {"point": pt, "axis": ax, "eta": clampf(e - t_now, 0.04, 0.20)}
+	return {}
+
+
+## 预测「刀架在该落点后，敌刀全程扫过来」的最小刀段间隙。
+## 只算刀最终停在落点上的静止姿态——这是「真碰撞」的保守判据：
+## 刀停在那里都碰不到敌刀路径，就肯定挡不住；能碰到（≈0）才是真架住。
+func _predicted_gap(rig, point: Vector3, axis: Vector3, face: Vector3,
+		torso_turn: float, e_segs: Array, _e_times: Array) -> float:
+	var seg: Array = rig.intercept_blade_segment(point, axis, face, torso_turn)
+	if seg.is_empty():
+		return 1e9
+	var gap := 1e9
+	for k in e_segs.size():
+		gap = minf(gap, _seg_seg_dist(seg[0], seg[1], e_segs[k][0], e_segs[k][1]))
+	return gap
+
+
+## 刀身 discs 的 y 范围 → 刀段端点参数
+static func _piece_span(discs: Array) -> Vector2:
+	var lo := 1e9
+	var hi := -1e9
+	for d in discs:
+		lo = minf(lo, float(d["y"]))
+		hi = maxf(hi, float(d["y"]))
+	return Vector2(lo, hi)
+
+
+static func _pt_seg_dist(p: Vector3, a: Vector3, b: Vector3) -> float:
+	var ab := b - a
+	var t := clampf((p - a).dot(ab) / maxf(ab.length_squared(), 0.000001), 0.0, 1.0)
+	return (p - (a + ab * t)).length()
+
+
+## 两线段最短距离（Ericson, Real-Time Collision Detection）
+static func _seg_seg_dist(p1: Vector3, q1: Vector3, p2: Vector3, q2: Vector3) -> float:
+	var d1 := q1 - p1
+	var d2 := q2 - p2
+	var r := p1 - p2
+	var a := d1.dot(d1)
+	var e := d2.dot(d2)
+	var f := d2.dot(r)
+	var s := 0.0
+	var t := 0.0
+	if a <= 0.000001 and e <= 0.000001:
+		return r.length()
+	if a <= 0.000001:
+		t = clampf(f / e, 0.0, 1.0)
+	else:
+		var c := d1.dot(r)
+		if e <= 0.000001:
+			s = clampf(-c / a, 0.0, 1.0)
+		else:
+			var b := d1.dot(d2)
+			var denom := a * e - b * b
+			s = clampf((b * f - c * e) / denom, 0.0, 1.0) if denom > 0.000001 else 0.0
+			t = (b * s + f) / e
+			if t < 0.0:
+				t = 0.0
+				s = clampf(-c / a, 0.0, 1.0)
+			elif t > 1.0:
+				t = 1.0
+				s = clampf((b - c) / a, 0.0, 1.0)
+	return ((p1 + d1 * s) - (p2 + d2 * t)).length()
 
 
 func _end_intercept() -> void:

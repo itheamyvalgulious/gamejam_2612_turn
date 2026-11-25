@@ -48,8 +48,10 @@ func _ready() -> void:
 	_inset.albedo_color = Color("3c454f")
 	_accent = Materials.paint().duplicate()
 	_accent.albedo_color = Color("482b65")
-	_purple = Materials.emissive(Color("9759f3"), 3.2)
-	_cyan = Materials.emissive(Color("6adafb"), 2.1)
+	# 发光材质会被 set_defeat_power 运行时调暗 —— Materials.emissive 是
+	# 静态缓存共享的，直接拿来用会「一台死全场暗」。每台 duplicate 成实例私有。
+	_purple = (Materials.emissive(Color("9759f3"), 3.2) as StandardMaterial3D).duplicate()
+	_cyan = (Materials.emissive(Color("6adafb"), 2.1) as StandardMaterial3D).duplicate()
 	_build_wheel()
 	_build_suspension()
 	_build_turret()
@@ -236,8 +238,8 @@ func _build_drive_surface(tire: Node3D, shoulder: Material) -> void:
 	var panel_insert := ceramic.duplicate() as StandardMaterial3D
 	panel_insert.albedo_color = Color("151e31")
 	panel_insert.roughness = 0.35
-	var center_light := Materials.emissive(Color("68d5fa"), 2.5)
-	var outer_light := Materials.emissive(Color("9b5aff"), 2.65)
+	var center_light := (Materials.emissive(Color("68d5fa"), 2.5) as StandardMaterial3D).duplicate()
+	var outer_light := (Materials.emissive(Color("9b5aff"), 2.65) as StandardMaterial3D).duplicate()
 	_wheel_lamps[center_light] = center_light.emission_energy_multiplier
 	_wheel_lamps[outer_light] = outer_light.emission_energy_multiplier
 	_build_drive_channel(tire, 0.0, 1.273, 0.025, center_light)
@@ -260,7 +262,7 @@ func _build_drive_surface(tire: Node3D, shoulder: Material) -> void:
 	var pitch := TAU / PLATE_COUNT
 	var seat_radius := WHEEL_RADIUS - 0.025
 	var ceramic_tab := MeshKit.slab(0.068, 0.053, 0.008, 0.003)
-	var tab_light := Materials.emissive(Color("a586ed"), 1.8)
+	var tab_light := (Materials.emissive(Color("a586ed"), 1.8) as StandardMaterial3D).duplicate()
 	_wheel_lamps[tab_light] = tab_light.emission_energy_multiplier
 	for i in PLATE_COUNT:
 		var angle := pitch * i
@@ -303,8 +305,8 @@ func _build_drive_channel(tire: Node3D, axial: float, radius: float, width: floa
 func _build_wheel_face(side: float) -> void:
 	var axle := Vector3(0, 0, 90)
 	var outward := Vector3.RIGHT * side
-	var driver := Materials.emissive(Color("7250fc"), 1.9)
-	var status := Materials.emissive(Color("f59352"), 1.15)
+	var driver := (Materials.emissive(Color("7250fc"), 1.9) as StandardMaterial3D).duplicate()
+	var status := (Materials.emissive(Color("f59352"), 1.15) as StandardMaterial3D).duplicate()
 	_wheel_lamps[driver] = driver.emission_energy_multiplier
 	_wheel_lamps[status] = status.emission_energy_multiplier
 	var alloy := Materials.frame_light().duplicate() as StandardMaterial3D

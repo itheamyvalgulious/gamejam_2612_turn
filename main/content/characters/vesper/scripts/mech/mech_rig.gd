@@ -1409,6 +1409,66 @@ func body_aabb() -> AABB:
 	return out
 
 
+func hit_parts() -> Array:
+	var parts: Array = []
+	if body == null:
+		return parts
+	var s := global_transform.basis.get_scale().x
+	if s < 0.001:
+		s = 1.0
+	# 骨盆（腰环以下，四条腿的挂点都在这圈上）
+	parts.append({"a": body.global_position - Vector3(0, 0.18 * s, 0),
+		"b": body.global_position + Vector3(0, 0.20 * s, 0), "r": 0.56 * s, "label": "pelvis"})
+	# 胸口 / 头 / 背包 / 肩甲：跟着腰环转
+	if torso != null:
+		parts.append({"a": torso.global_transform * Vector3(0, 0.12, 0),
+			"b": torso.global_transform * Vector3(0, 0.60, 0), "r": 0.44 * s, "label": "chest"})
+		parts.append({"a": torso.global_transform * Vector3(0, 0.30, 0.14),
+			"b": torso.global_transform * Vector3(0, 0.34, 0.46), "r": 0.42 * s, "label": "pack"})
+	if head != null:
+		var hc: Vector3 = head.global_position
+		var hs := head.global_transform.basis.get_scale().x
+		parts.append({"a": hc, "b": hc + Vector3(0, 0.18 * hs, 0), "r": 0.22 * hs, "label": "head"})
+	for p in pauldrons:
+		if not is_instance_valid(p):
+			continue
+		var ps: float = p.global_transform.basis.get_scale().x
+		parts.append({"a": p.global_position, "b": p.global_position + Vector3(0, 0.10 * ps, 0),
+			"r": 0.30 * ps, "label": "pauldron"})
+	# 四条腿：关节到关节（腿骨在世界里是斜着撑开的，所以必须跟着关节走）
+	for leg in legs:
+		var hip = leg.get("hip")
+		var knee = leg.get("knee")
+		var ankle = leg.get("ankle")
+		if hip == null or knee == null or ankle == null:
+			continue
+		if not (is_instance_valid(hip) and is_instance_valid(knee) and is_instance_valid(ankle)):
+			continue
+		parts.append({"a": hip.global_position, "b": knee.global_position,
+			"r": 0.30 * s, "label": "leg"})
+		parts.append({"a": knee.global_position, "b": ankle.global_position,
+			"r": 0.25 * s, "label": "leg"})
+		var toe: Vector3 = ankle.global_position \
+			+ ankle.global_transform.basis.x.normalized() * 0.34 * s
+		parts.append({"a": ankle.global_position, "b": toe, "r": 0.24 * s, "label": "foot"})
+	# 双臂：肩→肘→腕，最后给拳头一个球
+	for arm in arms:
+		var sh = arm.get("shoulder")
+		var el = arm.get("elbow")
+		var wr = arm.get("wrist")
+		if sh == null or el == null or wr == null:
+			continue
+		if not (is_instance_valid(sh) and is_instance_valid(el) and is_instance_valid(wr)):
+			continue
+		parts.append({"a": sh.global_position, "b": el.global_position,
+			"r": 0.24 * s, "label": "arm"})
+		parts.append({"a": el.global_position, "b": wr.global_position,
+			"r": 0.21 * s, "label": "arm"})
+		parts.append({"a": wr.global_position, "b": wr.global_position,
+			"r": 0.20 * s, "label": "hand"})
+	return parts
+
+
 func get_knee_angle(index: int) -> float:
 	if index < 0 or index >= legs.size():
 		return 0.0

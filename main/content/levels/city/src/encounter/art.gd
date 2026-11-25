@@ -280,5 +280,6 @@ func downlight(pos: Vector3,color: Color,energy: float,reach: float) -> void:
 	lamp.spot_attenuation=1.4
 	lamp.light_size=0.4
 	lamp.light_specular=0.25
-	lamp.shadow_enabled=true
+	# 阴影由主光负责；这里的聚光灯只做照明（range 24 的投影每帧重画全场）
+	lamp.shadow_enabled=false
 	root.add_child(lamp)

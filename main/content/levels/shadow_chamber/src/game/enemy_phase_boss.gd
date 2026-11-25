@@ -157,7 +157,7 @@ func resolve_fold_attack(player: PlayerUnit) -> Dictionary:
 	if push.is_zero_approx():
 		push = -rig.global_basis.z.normalized()
 	var displacement: float = attack["displacement"]
-	if attack["blockable"] and P.getb("parry.melee_block") and player.is_guard_up():
+	if attack["blockable"] and P.getb("parry.melee_block"):  # 碰到刀即格挡
 		if Combat.blade_contacts_point(player.rig, source, controller.contact_radius() + 0.25):
 			player.launch_impact(push, displacement)
 			return {"hit": false, "parried": true, "melee": true, "pos": source, "normal": -push, "push": push}

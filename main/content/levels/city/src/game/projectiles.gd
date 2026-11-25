@@ -130,7 +130,7 @@ func step(dt: float, ctx: Dictionary) -> Array:
 			continue
 
 		if String(it["owner"]) == "enemy" and not bool(it["spent"]) and player != null and player.alive:
-			if player.is_guard_up() and Combat.blade_blocks(player.rig, prev, pos, float(it["radius"])):
+			if Combat.blade_blocks(player.rig, prev, pos, float(it["radius"])):  # 碰到刀即格挡
 				_reflect(it, player, events)
 				continue
 

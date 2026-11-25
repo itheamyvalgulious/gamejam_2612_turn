@@ -231,7 +231,8 @@ static func lighting(root: Node3D) -> void:
 		door_light.light_energy = 1.5
 		door_light.omni_range = 7.0
 		door_light.omni_attenuation = 1.8
-		door_light.shadow_enabled = true
+		# 阴影交给主光（Key）：这几盏只负责照明，省掉每帧重画的阴影图
+		door_light.shadow_enabled = false
 		root.add_child(door_light)
 
 
@@ -259,7 +260,8 @@ static func lit_tube(kit: CargoMeshKit, root: Node3D, key: String, points: Array
 			lamp.position.y -= 0.18
 			lamp.light_energy = 2.5 if key == "white" else 1.5
 			lamp.omni_range = 19.0 if key != "laser_violet" else 14.0
-			lamp.shadow_enabled = key == "white" or key == "cyan"
+			# 顶部灯管数量多、range 大：全部投影会拖垮 GPU，只留照明
+			lamp.shadow_enabled = false
 			lamp.shadow_blur = 1.5
 		else:
 			lamp.position.y += 0.08

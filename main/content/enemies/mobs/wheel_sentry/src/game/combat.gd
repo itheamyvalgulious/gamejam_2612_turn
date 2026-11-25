@@ -69,11 +69,12 @@ static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
 	if enemy == null or not enemy.alive or not player.alive:
 		return {"hit": false}
 	var rig = enemy.rig
-	if rig == null or not rig.in_hit_window():
+	if rig == null or not rig.has_method("in_hit_window") or not rig.in_hit_window():
 		return {"hit": false}
 	if enemy.swung_serial == player.hurt_serial:
 		return {"hit": false}
-	if P.getb("parry.melee_block") and player.is_guard_up():
+	# 碰到刀即格挡：不要求先举起；格挡成功立刻消耗这一刀。
+	if P.getb("parry.melee_block"):
 		var clash: Dictionary = Hit.blade_vs_blade_swept(
 			player.rig.weapon_prev_xf, player.rig.weapon_xf, player.rig.blade_discs,
 			player.rig.weapon_scale, player.rig.blade_span(),
@@ -91,9 +92,10 @@ static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
 				"pos": clash.get("point", Vector3.ZERO),
 				"normal": clash.get("normal", Vector3.UP),
 				"push": push}
-	var cap: Dictionary = player.capsule()
-	var res: Dictionary = Hit.sweep_blade(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_discs,
-		rig.weapon_scale, cap["a"], cap["b"], cap["r"])
+	# 受击判定走机体原件分段（骨盆/胸/头/肩/四肢），不再用单颗大胶囊：
+	# 高过头顶的横斩不会蹭到空气判定，贴腿扫过来的刀也打得到。
+	var res: Dictionary = Hit.sweep_blade_parts(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_discs,
+		rig.weapon_scale, player.rig.hit_parts())
 	if not bool(res.get("hit", false)):
 		return {"hit": false}
 	player.hurt_serial = enemy.swung_serial

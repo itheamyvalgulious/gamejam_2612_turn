@@ -130,7 +130,7 @@ func step(dt: float, ctx: Dictionary) -> void:
 		if distance <= 3.25 and clear and _cooldown <= 0.0:
 			_attack += 1
 			swung_serial += 1
-			rig.play_anim("attack1" if _attack % 2 else "attack2")
+			rig.play_anim(_choose_attack(player))
 			_cooldown = rig.anim_duration() + 0.43
 			_consumed = false
 			Snd.play_at("swing_light", center(), {"gain": 0.44})
@@ -192,7 +192,7 @@ func resolve_attack(target) -> Dictionary:
 	if not is_attacking or not target.alive or attack_elapsed < attack_hit_from or attack_elapsed > attack_hit_to:
 		return {"hit": false}
 	var push: Vector3 = (target.rig.global_position - rig.global_position).slide(Vector3.UP).normalized()
-	if target.is_guard_up() and P.getb("parry.melee_block"):
+	if P.getb("parry.melee_block"):  # 碰到刀即格挡：不再要求先举起
 		var guard: Dictionary = Hit.blade_vs_blade_swept(
 			target.rig.weapon_prev_xf, target.rig.weapon_xf, target.rig.blade_discs,
 			target.rig.weapon_scale, target.rig.blade_span(),
@@ -203,8 +203,12 @@ func resolve_attack(target) -> Dictionary:
 				_consumed = true
 				target.on_block(push, P.getf("parry.block_knockback"))
 				return {"hit": false, "parried": true, "melee": true, "pos": contact, "normal": guard["normal"], "push": push}
-	var cap: Dictionary = target.capsule()
-	var hit: Dictionary = Hit.sweep_blade(_blade_prev, _blade_now, blade_discs, weapon_scale, cap["a"], cap["b"], cap["r"])
+	var parts: Array = target.rig.hit_parts() if target.rig != null and target.rig.has_method("hit_parts") \
+		else []
+	var hit: Dictionary = Hit.sweep_blade_parts(_blade_prev, _blade_now, blade_discs, weapon_scale, parts) \
+		if not parts.is_empty() \
+		else Hit.sweep_blade(_blade_prev, _blade_now, blade_discs, weapon_scale,
+			target.capsule()["a"], target.capsule()["b"], target.capsule()["r"])
 	if not hit.get("hit", false):
 		return {"hit": false}
 	var location: Vector3 = hit.get("point", center())
@@ -214,6 +218,58 @@ func resolve_attack(target) -> Dictionary:
 	var previous: float = target.hp
 	target.hurt(damage, push, "被 ARC Sentinel 击中")
 	return {"hit": not target.alive or target.hp < previous, "pos": location}
+
+
+## 按「现在的姿势能不能打中、会不会撞上你的刀」在两个挥击 clip 之间做选择。
+## attack1 是上段劈、attack2 是侧扫：先对每个 clip 的判定窗取样几个刀位，
+## 看扫掠体是贴近身体（hit_parts）还是贴近玩家刀身（blade 段）；
+## 能命中且不送格挡的最好，打不中的不选，全一样就照旧交替保变化。
+func _choose_attack(target) -> String:
+	var parts: Array = target.rig.hit_parts() if target.rig != null and target.rig.has_method("hit_parts") \
+		else []
+	if parts.is_empty() or not rig.has_method("predict_blade_pose_for"):
+		return "attack1" if _attack % 2 else "attack2"
+	# 玩家当前刀段：起手这一瞬的静止刀身就是「他现在怎么架」。
+	var pspan: Vector2 = target.rig.blade_span()
+	var pb0: Vector3 = target.rig.weapon_xf * Vector3(0, pspan.x, 0)
+	var pb1: Vector3 = target.rig.weapon_xf * Vector3(0, pspan.y, 0)
+	const CLIPS := ["attack1", "attack2"]
+	var scores: Array = []
+	for clip in CLIPS:
+		var dur: float = rig.anim.duration(clip)
+		var t0: float = dur * HIT_FROM
+		var t1: float = dur * HIT_TO
+		var touch_body := false
+		var touch_blade := false
+		var prev_xf := Transform3D.IDENTITY
+		var have_prev := false
+		for i in 6:
+			var e: float = lerpf(t0, t1, float(i) / 5.0)
+			var joints: Dictionary = rig.predict_blade_pose_for(clip, e)
+			var xf: Transform3D = _blade_transform(rig.to_global(joints["tool"]),
+				rig.to_global(joints["tip"]))
+			if have_prev:
+				# 这一小段扫掠会不会扫到身体 / 扫到我的刀
+				var hb: Dictionary = Hit.sweep_blade_parts(prev_xf, xf, blade_discs,
+					weapon_scale, parts)
+				if bool(hb.get("hit", false)):
+					touch_body = true
+				var hg: Dictionary = Hit.blade_vs_blade_swept(prev_xf, xf, blade_discs,
+					weapon_scale, Vector2(0.0, _blade_length),
+					target.rig.weapon_prev_xf, target.rig.weapon_xf,
+					target.rig.blade_discs, target.rig.weapon_scale, pspan)
+				if bool(hg.get("hit", false)):
+					touch_blade = true
+			prev_xf = xf
+			have_prev = true
+		var score := 0
+		if touch_body:
+			score += 2
+		if touch_blade:
+			score -= 3
+		scores.append(score)
+	var pick_idx := _attack % 2 if scores[0] == scores[1] else (0 if scores[0] > scores[1] else 1)
+	return CLIPS[pick_idx]
 
 
 func _blade() -> Transform3D:

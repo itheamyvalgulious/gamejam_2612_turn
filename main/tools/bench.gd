@@ -16,7 +16,7 @@ extends Node
 ##   wall-time of the restart call itself (arena + enemies rebuilt synchronously)
 
 const LEVEL_NAMES := ["霓虹窄巷", "雨夜广场", "灯墙之厅", "货舱02", "霓虹街区",
-	"坠击中庭", "仓库", "回廊实验舱", "病房夜班", "坠击中庭高低差"]
+	"坠击中庭", "仓库", "回廊实验舱", "病房夜班", "坠击中庭高低差", "三号船坞"]
 
 var _args := {}
 var _report := {}

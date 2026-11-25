@@ -170,7 +170,7 @@ func _setup_shadows() -> void:
 	shadow.name = "BossShadow"
 	add_child(shadow)
 	shadow.setup(slots, {"intensity": clampf(P.getf("boss.shadow_intensity"), 0.0, 1.0),
-		"softness": P.getf("boss.shadow_softness")})
+		"softness": P.getf("boss.shadow_softness"), "mask_hz": 2})
 	shadow.set_caster_scale(P.getf("boss.shadow_size"))
 	shadow.set_lamps(lamps)
 	# 影子层：玩家 + 这一关的所有敌人（真几何，谁在场上谁就有影子）

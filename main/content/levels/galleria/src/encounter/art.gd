@@ -267,9 +267,12 @@ func solid_box(center: Vector3,size: Vector3,walkable := false) -> void:
 		var d: Vector2 = edge[1]-edge[0]
 		walls.append({"a":edge[0],"b":edge[1],"h":box.end.y,"base_y":box.position.y,"n":Vector2(-d.y,d.x).normalized()})
 
-func downlight(pos: Vector3,color: Color,energy: float,reach: float) -> void:
+func downlight(pos: Vector3,color: Color,energy: float,reach: float, shadow := false) -> void:
 	# A mounted luminaire illuminates the floor in one cone, with one shadow map
 	# instead of six omnidirectional faces (and no upward light through the housing).
+	# 阴影默认关：这几盏 range=32 的聚光灯每帧要给整座中庭重画一遍阴影图，
+	# 实测占 GPU 时间约 30ms（GTX 1650 上 p50 78→48ms）。落地感由 mmm
+	# 的平行光（moon）负责，不靠这几盏。
 	var lamp := SpotLight3D.new()
 	lamp.position=pos
 	lamp.rotation_degrees=Vector3(-90,0,0)
@@ -280,5 +283,5 @@ func downlight(pos: Vector3,color: Color,energy: float,reach: float) -> void:
 	lamp.spot_attenuation=1.4
 	lamp.light_size=0.4
 	lamp.light_specular=0.25
-	lamp.shadow_enabled=true
+	lamp.shadow_enabled=shadow
 	root.add_child(lamp)

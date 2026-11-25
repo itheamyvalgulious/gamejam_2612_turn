@@ -62,7 +62,30 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 		else:
 			lo = mid
 	var e_hit := hi
-	var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e_hit), rig, a, b, r)
+	# 迎击时刻：不要等敌刀贴到身上才架。e_hit 那一刻敌刀离身体只剩 margin，
+	# 落点会落到「贴脸死角」——刀放过去也来不及、也挡不住。
+	# 往敌刀来路上提前到「还差 lead_gap」的位置迎上去。
+	var e_meet := e_hit
+	var lead_gap: float = clampf(0.85 + 0.30 * rig.weapon_scale, margin + 0.12, 1.8)
+	if lead_gap > margin + 0.02:
+		var lo2 := e0
+		for i2 in n + 1:
+			var e2: float = lerpf(e0, e_hit, float(i2) / float(n))
+			var nm2: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e2), rig, a, b, r)
+			if float(nm2["gap"]) <= lead_gap:
+				var l2 := lo2
+				var h2 := e2
+				for k in 4:
+					var m2: float = (l2 + h2) * 0.5
+					var n3: Dictionary = nearest_on_blade(rig.predict_weapon_xf(m2), rig, a, b, r)
+					if float(n3["gap"]) <= lead_gap:
+						h2 = m2
+					else:
+						l2 = m2
+				e_meet = h2
+				break
+			lo2 = e2
+	var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e_meet), rig, a, b, r)
 	var blade_pt: Vector3 = near["blade_pt"]
 	var body_pt: Vector3 = near["body_pt"]
 	var y: float = near["y"]
@@ -70,7 +93,9 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	# 而不是从我方表面往外让 —— 后者会在敌刀间隙(gap)>0 时把刀架在敌刀后面，
 	# 出现「刀举上去了、也在路径上，但没挡住」的漏判。
 	var out_dir: Vector3 = blade_pt - body_pt
-	out_dir.y *= 0.45                      # 别为了架头顶/脚下的刀把机体拧断
+	# 上段劈 / 下段扫的来向主要在竖直方向：压太多会把落点摊到侧面，
+	# 刀架在头旁边、劈下来的刀从头顶过去 —— 看起来举刀了却没挡住。
+	out_dir.y *= 0.85
 	if out_dir.length_squared() < 0.0001:
 		out_dir = blade_pt - (prig.global_position + Vector3(0, 2.2, 0))
 	if out_dir.length_squared() < 0.0001:
@@ -81,9 +106,9 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	var ip: Vector3 = blade_pt - out_dir * clampf(rr, 0.05, margin)
 	# 那一刻敌人的刀在往哪走 → 刀轴横在它前面
 	var step := maxf(rig.last_dt, 1.0 / 120.0)
-	var p0: Vector3 = rig.predict_weapon_xf(e_hit) * Vector3(0.0, y, 0.0)
-	var p1: Vector3 = rig.predict_weapon_xf(e_hit + step) * Vector3(0.0, y, 0.0)
-	return _finish(ip, p1 - p0, out_dir, e_hit - t_now, "melee", enemy)
+	var p0: Vector3 = rig.predict_weapon_xf(e_meet) * Vector3(0.0, y, 0.0)
+	var p1: Vector3 = rig.predict_weapon_xf(e_meet + step) * Vector3(0.0, y, 0.0)
+	return _finish(ip, p1 - p0, out_dir, e_meet - t_now, "melee", enemy)
 
 
 ## 远程：飞行物下一步会飞到哪 → 拦截点/刀轴

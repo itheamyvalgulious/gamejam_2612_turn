@@ -126,11 +126,8 @@ func build_scene(height_test: bool) -> Dictionary:
 	]
 	if height_test:
 		title = "坠击中庭 · 高低差"
-		hint = "下层 · 人形刀客与单轮巡射机甲"
-		encounters = [
-			{"kind": "duelist", "pos": Vector3(2, 0, -1), "health": 1.0},
-			{"kind": "archer", "pos": Vector3(17, 0, 7)},
-		]
+		hint = "下层中央 · 1 生命刀客 · 侧斩终结触发慢放"
+		encounters = [{"kind": "duelist", "pos": Vector3(2, 0, -1), "health": 1.0}]
 	var result := finish(title, hint, Vector2(HALF_WIDTH, HALF_DEPTH), Vector3(0, 8, 25), encounters)
 	result["vertical"] = true
 	result["height_test"] = height_test

@@ -19,6 +19,7 @@ var attack_elapsed := 0.0
 var attack_hit_from := 0.0
 var attack_hit_to := 0.0
 var weapon_xf := Transform3D.IDENTITY
+var last_intercept_miss := 0.0
 var weapon_prev_xf := Transform3D.IDENTITY
 var weapon_scale := 1.0
 var blade_discs: Array = []
@@ -128,9 +129,11 @@ func blade_span() -> Vector2:
 
 func combat_capsule() -> Dictionary:
 	# These dimensions are in level units. The model's metre conversion must not rescale them.
+	# 胶囊顶对齐机体身高：body_aabb 实测 0→3.74u，b+r 给到 3.8 包住头顶为止；
+	# 之前 b=4.4（命中面到 5.5）会让明显高过头顶的横斩也判命中。
 	return {
 		"a": global_position + Vector3.UP,
-		"b": global_position + Vector3.UP * 4.4,
+		"b": global_position + Vector3.UP * 2.7,
 		"r": 1.1,
 		"scale": 1.0,
 	}
@@ -138,6 +141,48 @@ func combat_capsule() -> Dictionary:
 
 func plan_blade_intercept(point: Vector3, axis: Vector3, face: Vector3,
 		torso_turn: float, deadline: float, speed := 26.0) -> Dictionary:
+	var res := _solve_intercept(point, axis, face, torso_turn)
+	if res.is_empty():
+		return {}
+	var hilt: Vector3 = res["hilt"]
+	var yaw: float = res["yaw"]
+	var travel: float = weapon_root.position.distance_to(hilt) * float(res["torso_scale"])
+	var duration := clampf(travel / maxf(speed, 1.0), 0.03, maxf(deadline, 0.03))
+	last_intercept_miss = res["miss"]
+	_blade_path.plan(weapon_root.position, weapon_root.basis, hilt, res["basis"], duration,
+		torso.rotation.y, yaw)
+	return {"hilt": hilt, "yaw": yaw, "t": res["t"], "dur": duration, "travel": travel,
+		"miss": res["miss"]}
+
+
+## 落点可达性探针：返回「按这套落点+刀轴规划后，刀身到落点的剩余距离」。
+## > 0 说明点在机械臂可达域外，调用方应在敌刀路径上换可达拦截点。
+func blade_reach_miss(point: Vector3, axis: Vector3, face: Vector3, torso_turn: float) -> float:
+	var res := _solve_intercept(point, axis, face, torso_turn)
+	if res.is_empty():
+		return 1e9
+	return float(res["miss"])
+
+
+## 规划完成后我方刀身在世界里的线段端点 [p0, p1]。
+## 用于直接度量「架好这把刀之后，敌刀扫过来时两把刀的真实间隙」。
+func intercept_blade_segment(point: Vector3, axis: Vector3, face: Vector3,
+		torso_turn: float) -> Array:
+	var res := _solve_intercept(point, axis, face, torso_turn)
+	if res.is_empty():
+		return []
+	var target_torso := _torso_transform(
+		Vector3(torso.rotation.x, res["yaw"], torso.rotation.z))
+	var wx: Transform3D = target_torso \
+		* Transform3D(res["basis"], res["hilt"]) * weapon_spin.transform
+	var span := blade_span()
+	return [wx * Vector3(0.0, span.x, 0.0), wx * Vector3(0.0, span.y, 0.0)]
+
+
+## 纯几何求解：挑刀轴正/反两种握法里「刀身最贴近落点」的一种。
+## 返回 hilt(躯干局部) / basis(weapon_root 局部基) / yaw / t / miss / torso_scale。
+func _solve_intercept(point: Vector3, axis: Vector3, face: Vector3,
+		torso_turn: float) -> Dictionary:
 	if axis.length_squared() < 0.000001:
 		return {}
 	var from_body := body.to_local(point)
@@ -153,6 +198,7 @@ func plan_blade_intercept(point: Vector3, axis: Vector3, face: Vector3,
 	var hilt := rest
 	var root_basis := weapon_root.basis.orthonormalized()
 	var blade_point := 0.0
+	var best_miss := 1e9
 	for side in [1.0, -1.0]:
 		var blade_axis: Vector3 = up * side
 		var normal := (to_torso.basis * face).slide(blade_axis)

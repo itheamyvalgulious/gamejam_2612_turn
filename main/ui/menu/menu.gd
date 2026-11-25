@@ -24,6 +24,10 @@ func _ready() -> void:
 		var repro = load("res://tools/repro.gd").new()
 		repro.name = "ReproDriver"
 		get_tree().root.add_child.call_deferred(repro)
+	if "--repro-stab" in OS.get_cmdline_user_args():
+		var repro_stab = load("res://tools/repro_stab.gd").new()
+		repro_stab.name = "ReproStab"
+		get_tree().root.add_child.call_deferred(repro_stab)
 	if "--repro3" in OS.get_cmdline_user_args():
 		var repro3 = load("res://tools/repro3.gd").new()
 		repro3.name = "Repro3"
