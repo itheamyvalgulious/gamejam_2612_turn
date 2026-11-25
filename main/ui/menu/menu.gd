@@ -20,6 +20,18 @@ func _ready() -> void:
 		var bench := preload("res://tools/bench.gd").new()
 		bench.name = "BenchDriver"
 		get_tree().root.add_child.call_deferred(bench)
+	if "--repro" in OS.get_cmdline_user_args():
+		var repro = load("res://tools/repro.gd").new()
+		repro.name = "ReproDriver"
+		get_tree().root.add_child.call_deferred(repro)
+	if "--repro3" in OS.get_cmdline_user_args():
+		var repro3 = load("res://tools/repro3.gd").new()
+		repro3.name = "Repro3"
+		get_tree().root.add_child.call_deferred(repro3)
+	if "--repro2" in OS.get_cmdline_user_args():
+		var repro2 = load("res://tools/repro2.gd").new()
+		repro2.name = "Repro2"
+		get_tree().root.add_child.call_deferred(repro2)
 	theme = Style.theme()
 	ThemeDB.fallback_font = theme.default_font
 	_selected = TurnSession.selected_level_index
