@@ -9,6 +9,7 @@ boot_splash/show_image=false
 
 [autoload]
 TurnSession="*res://core/session.gd"
+TurnEnemyAudio="*res://core/enemy_audio.gd"
 
 [display]
 window/size/mode=3

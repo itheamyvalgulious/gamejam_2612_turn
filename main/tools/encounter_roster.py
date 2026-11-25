@@ -18,6 +18,8 @@ ROOTS = {
         "src/enemies/ranged/wheel_sentry_knockdown.gd",
     ]),
 }
+AUDIO_EXTENSIONS = {".wav", ".ogg", ".mp3"}
+AUDIO_DESIGNS = {"duelist", "wheel", "fold"}
 PATHS = re.compile(r'''(?<=["'])res://([^"'\s]+)(?=["'])''')
 
 
@@ -60,6 +62,11 @@ def pack_designs(enemies):
                     value = re.sub(r'\s+uid="uid://[^"]+"', "", value)
                 value = value.encode("utf-8")
             generated[dest] = value
+        if design in AUDIO_DESIGNS:
+            folder = enemies / directory
+            for clip in sorted((folder / "assets" / "audio").glob("*")):
+                if clip.is_file() and clip.suffix.lower() in AUDIO_EXTENSIONS:
+                    generated[design_path(design, clip.relative_to(folder))] = clip.read_bytes()
     return generated
 
 

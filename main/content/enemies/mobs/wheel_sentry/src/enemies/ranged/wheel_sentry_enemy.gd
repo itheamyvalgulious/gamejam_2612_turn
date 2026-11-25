@@ -47,6 +47,8 @@ var _wheel_speed := 0.0
 var _brace_amount := 0.0
 var _beam_hit := false
 var _charge_sound := 0
+var _recorded_audio: Node
+var _charge_player: AudioStreamPlayer3D
 var _locked_turret := Transform3D.IDENTITY
 var _locked_position := Vector3.ZERO
 var _locked_wheel_yaw := 0.0
@@ -61,6 +63,7 @@ func setup_sentry(yaw: float, first_shot_delay := 0.95) -> void:
 	kind = "archer"
 	_spawn_yaw = yaw
 	_spawn_delay = first_shot_delay
+	_recorded_audio = get_node_or_null("/root/TurnEnemyAudio")
 	_fire_cd = first_shot_delay
 	max_hp = P.getf("archer.hp")
 	hp = max_hp
@@ -92,7 +95,8 @@ func _on_respawn() -> void:
 	_locked_position = Vector3.ZERO
 	_locked_wheel_yaw = 0.0
 	_clear_beam()
-	stop_charge_sound()
+	if _recorded_audio != null:
+		_recorded_audio.stop_one_shots(self)
 	if _knockdown != null:
 		_knockdown.restore(rig, self)
 		_knockdown = null
@@ -432,7 +436,7 @@ func _charge_light(dt: float) -> void:
 		_light_count += 1
 		Fx.sentry_bolt_flash(origin, direction)
 		Fx.shake(0.24)
-		Snd.play_at("laser", origin, {"gain": 0.40})
+		_play_sound("laser_small", "laser", origin, {"gain": 0.40})
 	rig.set_attack_charge(0.0, false)
 	_fire_cd = P.getf("archer.fire_interval")
 	_enter(Phase.PATROL)
@@ -465,7 +469,7 @@ func _charge_beam(dt: float) -> void:
 	beam.show_warning(progress)
 	rig.set_attack_charge(progress, true)
 	if phase_age >= BEAM_CHARGE * 0.78 and phase_age - dt < BEAM_CHARGE * 0.78:
-		Snd.play_at("ping", beam.start, {"gain": 1.05, "rate": 1.32})
+		_play_sound("laser_warning", "ping", beam.start, {"gain": 1.05, "rate": 1.32})
 	if phase_age < BEAM_CHARGE:
 		_update_charge_sound(progress, true)
 		return
@@ -476,7 +480,7 @@ func _charge_beam(dt: float) -> void:
 	Fx.spark(beam.start, direction, 1.85)
 	Fx.impact_ring(rig.global_position, 2.0, 1.7)
 	Fx.shake(1.42)
-	Snd.play_at("laser", beam.start, {"gain": 1.45, "rate": 0.8, "prio": 4})
+	_play_sound("laser_heavy", "laser", beam.start, {"gain": 1.45, "rate": 0.8, "prio": 4})
 	_fire_beam()
 
 
@@ -535,14 +539,33 @@ func _recover(cooldown: float) -> void:
 	_enter(Phase.RECOVERY)
 
 
+func _play_sound(cue: String, fallback: String, at: Vector3, options: Dictionary) -> void:
+	if _recorded_audio != null and _recorded_audio.play_at(self, "wheel", cue, fallback, at, options, Snd):
+		return
+	Snd.play_at(fallback, at, options)
+
+
 func _update_charge_sound(progress: float, heavy: bool) -> void:
 	var gain := lerpf(0.32, 1.55, progress) if heavy else lerpf(0.28, 0.74, progress)
 	var rate := lerpf(0.80, 2.10, progress * progress) if heavy else lerpf(1.50, 2.20, progress)
+	if _recorded_audio != null:
+		var recording: AudioStream = _recorded_audio.stream("wheel", "charge_loop", true)
+		if recording != null:
+			if _charge_player == null:
+				_charge_player = AudioStreamPlayer3D.new()
+				_charge_player.stream = recording
+				rig.shot_origin.add_child(_charge_player)
+			_recorded_audio.mix(_charge_player, Snd, "sentry_charge", gain, rate)
+			if not _charge_player.playing:
+				_charge_player.play()
+			return
 	if not Snd.set_loop_mix(_charge_sound, gain, rate):
 		_charge_sound = Snd.loop_on("sentry_charge", rig.shot_origin, {"gain": gain, "rate": rate, "prio": 3})
 
 
 func stop_charge_sound() -> void:
+	if _charge_player != null:
+		_charge_player.stop()
 	if _charge_sound != 0:
 		Snd.stop(_charge_sound)
 		_charge_sound = 0
@@ -609,16 +632,16 @@ func _advance_defeat(dt: float) -> void:
 		var point: Vector3 = event["point"]
 		match event["kind"]:
 			"break":
-				Snd.play_at("sentry_break", point, {"pos": point, "gain": 1.32, "prio": 4})
+				_play_sound("armor_break", "sentry_break", point, {"pos": point, "gain": 1.32, "prio": 4})
 				Fx.spark(point, _knockdown.force, 1.18)
 				var arc := point + Vector3.UP * 0.16 + _knockdown.force * 0.12
 				Fx.beam(point, arc, 0.043, Color("c5aaff"), 0.075)
 				Fx.beam(arc, arc + rig.global_basis.x.normalized() * 0.17, 0.029, Color("cae6ff"), 0.065)
 			"rim":
-				Snd.play_at("clang", point, {"pos": point, "gain": 0.6, "rate": 0.81})
+				_play_sound("rim_scrape", "clang", point, {"pos": point, "gain": 0.6, "rate": 0.81})
 				Fx.spark(point, _knockdown.force, 0.65)
 			"shell":
-				Snd.play_at("hit", point, {"pos": point, "gain": 1.5, "rate": 0.72, "prio": 4})
+				_play_sound("body_impact", "hit", point, {"pos": point, "gain": 1.5, "rate": 0.72, "prio": 4})
 				Fx.spark(point, Vector3.UP, 1.1)
 				Fx.shake(0.36)
 

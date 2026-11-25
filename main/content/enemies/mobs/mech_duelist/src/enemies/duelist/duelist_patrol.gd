@@ -22,7 +22,7 @@ const STEP_DURATIONS := [0.34, 0.22, 0.27, 0.32, 0.37, 0.28, 0.25]
 const FOOT_LIFTS := [0.18, 0.43, 0.20, 0.15, 0.18, 0.105, 0.26]
 const FORWARD_LEANS := [0.0, 0.265, 0.16, -0.065, 0.025, -0.068, 0.185]
 
-var audio: Node
+var footstep: Callable
 var motion := Step.ORBIT
 var age := 0.0
 var active := false
@@ -166,8 +166,8 @@ func advance(model, dt: float, focus: Vector3, cover: Array, bounds: AABB, stop_
 		_feet[1 - _swing] = _support_foot(1.0)
 		_toes[_swing] = 0.0
 		var emphatic := _is_forward_step(motion) or motion == Step.BRAKE
-		if is_instance_valid(audio):
-			audio.play_at("step", _foot_to.origin, {"gain": 0.49 if emphatic else 0.34})
+		if footstep.is_valid():
+			footstep.call("step", _foot_to.origin, {"gain": 0.49 if emphatic else 0.34})
 		_swing = 1 - _swing
 		landed = true
 		_start_step(model, focus, cover, bounds)
