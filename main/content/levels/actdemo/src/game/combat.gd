@@ -83,26 +83,6 @@ static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
 				"pos": clash.get("point", Vector3.ZERO),
 				"normal": clash.get("normal", Vector3.UP),
 				"push": push}
-	# 预测兜底：规划已确认这一刀会命中且玩家按着格挡，但敌刀接触点在
-	# 机械臂可达域外（高劈/过顶刺），刀身够不到时仍算格挡。
-	if P.getb("parry.melee_block") and player.is_guard_up() \
-			and player.has_method("guard_target") and player.guard_target() == enemy:
-		player.hurt_serial = enemy.swung_serial
-		var push2: Vector3 = player.rig.global_position - rig.global_position
-		push2.y = 0.0
-		if push2.length_squared() < 0.01:
-			push2 = -rig.global_transform.basis.z
-		push2 = push2.normalized()
-		player.on_block(push2, P.getf("parry.block_knockback"))
-		if enemy.has_method("on_attack_parried"):
-			enemy.on_attack_parried(-push2)
-		var near: Vector3 = Hit.seg_seg(
-			player.rig.weapon_xf * Vector3(0, player.rig.blade_span().x, 0),
-			player.rig.weapon_xf * Vector3(0, player.rig.blade_span().y, 0),
-			rig.weapon_xf * Vector3(0, rig.blade_span().x, 0),
-			rig.weapon_xf * Vector3(0, rig.blade_span().y, 0))["c0"]
-		return {"hit": false, "parried": true, "melee": true,
-			"pos": near, "normal": -push2, "push": push2}
 	var cap: Dictionary = player.capsule()
 	var res: Dictionary = Hit.sweep_blade(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_discs,
 		rig.weapon_scale, cap["a"], cap["b"], cap["r"])

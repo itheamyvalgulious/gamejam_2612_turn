@@ -19,7 +19,6 @@ var attack_elapsed := 0.0
 var attack_hit_from := 0.0
 var attack_hit_to := 0.0
 var weapon_xf := Transform3D.IDENTITY
-var last_intercept_miss := 0.0
 var weapon_prev_xf := Transform3D.IDENTITY
 var weapon_scale := 1.0
 var blade_discs: Array = []
@@ -139,33 +138,6 @@ func combat_capsule() -> Dictionary:
 
 func plan_blade_intercept(point: Vector3, axis: Vector3, face: Vector3,
 		torso_turn: float, deadline: float, speed := 26.0) -> Dictionary:
-	var res := _solve_intercept(point, axis, face, torso_turn)
-	if res.is_empty():
-		return {}
-	var hilt: Vector3 = res["hilt"]
-	var yaw: float = res["yaw"]
-	var travel: float = weapon_root.position.distance_to(hilt) * float(res["torso_scale"])
-	var duration := clampf(travel / maxf(speed, 1.0), 0.03, maxf(deadline, 0.03))
-	last_intercept_miss = res["miss"]
-	_blade_path.plan(weapon_root.position, weapon_root.basis, hilt, res["basis"], duration,
-		torso.rotation.y, yaw)
-	return {"hilt": hilt, "yaw": yaw, "t": res["t"], "dur": duration, "travel": travel,
-		"miss": res["miss"]}
-
-
-## 落点可达性探针：返回「按这套落点+刀轴规划后，刀身到落点的剩余距离」。
-## > 0 说明点在机械臂可达域外，调用方应把落点往身体里收再重试。
-func blade_reach_miss(point: Vector3, axis: Vector3, face: Vector3, torso_turn: float) -> float:
-	var res := _solve_intercept(point, axis, face, torso_turn)
-	if res.is_empty():
-		return 1e9
-	return float(res["miss"])
-
-
-## 纯几何求解：挑刀轴正/反两种握法里「刀身最贴近落点」的一种。
-## 返回 hilt(躯干局部) / basis(weapon_root 局部基) / yaw / t / miss / torso_scale。
-func _solve_intercept(point: Vector3, axis: Vector3, face: Vector3,
-		torso_turn: float) -> Dictionary:
 	if axis.length_squared() < 0.000001:
 		return {}
 	var from_body := body.to_local(point)
@@ -181,7 +153,6 @@ func _solve_intercept(point: Vector3, axis: Vector3, face: Vector3,
 	var hilt := rest
 	var root_basis := weapon_root.basis.orthonormalized()
 	var blade_point := 0.0
-	var best_miss := 1e9
 	for side in [1.0, -1.0]:
 		var blade_axis: Vector3 = up * side
 		var normal := (to_torso.basis * face).slide(blade_axis)
