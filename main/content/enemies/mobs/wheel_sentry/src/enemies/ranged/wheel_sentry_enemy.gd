@@ -97,7 +97,13 @@ func _on_respawn() -> void:
 		_knockdown.restore(rig, self)
 		_knockdown = null
 	if rig != null:
+		# reparent(..., keep_global=false) in Knockdown.restore used to leave the
+		# rig carrying the wreck's final tilt; force the spawn transform so a
+		# respawn always starts upright regardless of how it died.
+		if rig.get_parent() != self:
+			rig.reparent(self, false)
 		rig.transform = _spawn_model_pose
+		rig.global_transform = spawn_xf * _spawn_model_pose
 		rig.wheel_frame.rotation.y = _spawn_yaw
 		rig.wheel.rotation = Vector3.ZERO
 		rig.set_deployment(0.0)

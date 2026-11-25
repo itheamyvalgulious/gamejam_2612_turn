@@ -103,7 +103,11 @@ func restore(model: Node3D, owner: Node3D) -> void:
 			plate.reparent(parent, false)
 		plate.transform = mount["transform"]
 	if is_instance_valid(body):
-		model.reparent(owner, false)
+		# keep_global=true is required here: the model was re-parented into the
+		# falling RigidBody3D with keep_global=true, so its local transform now
+		# encodes the wreck's final orientation.  Reparenting back with
+		# keep_global=false would leave the restored model tilted.
+		model.reparent(owner, true)
 		body.queue_free()
 	for fragment in fragments:
 		fragment.queue_free()
