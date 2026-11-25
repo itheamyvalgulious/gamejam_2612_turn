@@ -338,7 +338,7 @@ func _break_armor(rate: float) -> void:
 		_wreckage = null
 		return
 	var source := _wreckage.breach.global_position
-	Snd.play_at("armor_snap", source, {"pos": source, "gain": 1.48, "prio": 5})
+	sequence.play_sound("armor_snap", source, {"pos": source, "gain": 1.48, "prio": 5})
 
 
 func _step_knockdown(dt: float, rate: float) -> void:
@@ -346,7 +346,7 @@ func _step_knockdown(dt: float, rate: float) -> void:
 	_knockdown.advance(rig, dt, rate)
 	var sound_time := Knockdown.HIT_LIFT_OFF if not _blade_part.is_empty() else 0.0
 	if before <= sound_time and _knockdown.age > sound_time:
-		Snd.play_at("death", center(), {"gain": 0.62})
+		sequence.play_sound("death", center(), {"gain": 0.62})
 	if _wreckage != null:
 		var previous := _wreckage.age
 		_wreckage.step(dt, rate)
@@ -358,17 +358,17 @@ func _step_knockdown(dt: float, rate: float) -> void:
 	if _knockdown.body_contact_time == Knockdown.BODY_LAND and before < Knockdown.KNEEL and _knockdown.age >= Knockdown.KNEEL:
 		var knee_contact: Vector3 = rig.legs[0]["knee"].global_position
 		knee_contact.y = rig.global_position.y + 0.08
-		Snd.play_at("step", knee_contact, {"gain": 1.00, "rate": 0.84})
+		sequence.play_sound("step", knee_contact, {"gain": 1.00, "rate": 0.84}, "knee_land")
 		Fx.spark(knee_contact, -rig.global_basis.z, 0.35)
 	if _knockdown.take_sword_impact(before):
 		var contact: Vector3 = rig.weapon_root.global_position
-		Snd.play_at("clang", contact, {"gain": 0.86})
+		sequence.play_sound("clang", contact, {"gain": 0.86}, "sword_drop")
 		Fx.spark(contact, Vector3.UP, 0.52)
 	if before < _knockdown.body_contact_time and _knockdown.age >= _knockdown.body_contact_time:
 		var shoulder_contact: Vector3 = rig.arms[0]["shoulder"].global_position
 		shoulder_contact.y = rig.global_position.y + 0.12
 		var power := 1.0 if _knockdown.launched else 0.62
-		Snd.play_at("hit", shoulder_contact, {"gain": 0.82 + power, "rate": 0.70})
+		sequence.play_sound("hit", shoulder_contact, {"gain": 0.82 + power, "rate": 0.70}, "body_impact")
 		Fx.spark(shoulder_contact, -rig.global_basis.x, power)
 		Fx.shake(0.6 + power)
 

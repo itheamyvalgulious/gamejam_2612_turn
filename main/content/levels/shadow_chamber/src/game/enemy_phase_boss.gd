@@ -48,6 +48,9 @@ var spawn_xf := Transform3D.IDENTITY
 
 
 func respawn() -> void:
+	var recordings := get_node_or_null("/root/TurnEnemyAudio")
+	if recordings != null:
+		recordings.stop_one_shots(self)
 	alive = true
 	_death_time = 0.0
 	visible = true
@@ -105,7 +108,10 @@ func hurt(amount: float, _normal := Vector3.UP, _knock := 0.0) -> float:
 	if controller.hp <= 0.0:
 		alive = false
 		_death_time = 1.2
-		Snd.play_at("death", center(), {"gain": 1.2})
+		var recordings := get_node_or_null("/root/TurnEnemyAudio")
+		var at := center()
+		if recordings == null or not recordings.play_at(self, "fold", "death", "death", at, {"gain": 1.2}, Snd):
+			Snd.play_at("death", at, {"gain": 1.2})
 		Fx.death_burst(center())
 		level.on_enemy_died(self)
 	return damage

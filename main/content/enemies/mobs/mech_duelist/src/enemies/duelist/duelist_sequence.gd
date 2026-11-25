@@ -94,6 +94,7 @@ var _effects := AttackFX.new()
 var _afterimages := Afterimages.new()
 var _audio: AudioStreamPlayer3D
 var _sound_bus: Node
+var _recorded_audio: Node
 var _master_volume: Callable
 static var _charge_sound: AudioStreamWAV
 
@@ -101,12 +102,13 @@ static var _charge_sound: AudioStreamWAV
 func setup(actor: Node3D, pace_center: Vector3, cover: Array = [], bounds := AABB(),
 		sound_bus: Node = null, master_volume := Callable()) -> void:
 	_sound_bus = sound_bus if sound_bus != null else get_node_or_null("/root/Snd")
+	_recorded_audio = get_node_or_null("/root/TurnEnemyAudio")
 	_master_volume = master_volume
 	if not _master_volume.is_valid():
 		var params := get_node_or_null("/root/P")
 		if params != null:
 			_master_volume = params.getf.bind("audio.master")
-	patrol.audio = _sound_bus
+	patrol.footstep = play_sound
 	model = actor
 	center = pace_center
 	_cover = cover
@@ -128,9 +130,12 @@ func setup(actor: Node3D, pace_center: Vector3, cover: Array = [], bounds := AAB
 		_afterimages.setup(model)
 	if _audio == null:
 		_audio = AudioStreamPlayer3D.new()
-	if _charge_sound == null:
-		_charge_sound = Charge.make_sound()
-	_audio.stream = _charge_sound
+	var recording: AudioStream = _recorded_audio.stream("duelist", "charge") if _recorded_audio != null else null
+	if recording == null:
+		if _charge_sound == null:
+			_charge_sound = Charge.make_sound()
+		recording = _charge_sound
+	_audio.stream = recording
 	_audio.unit_size = 6.0
 	_audio.max_distance = 26.0
 	_audio.panning_strength = 0.82
@@ -142,6 +147,8 @@ func setup(actor: Node3D, pace_center: Vector3, cover: Array = [], bounds := AAB
 
 
 func seek(next_time: float, focus: Vector3) -> void:
+	if _recorded_audio != null:
+		_recorded_audio.stop_one_shots(self)
 	climbing = false
 	seeking_level = false
 	stair_rush_ready = false
@@ -299,14 +306,14 @@ func advance(dt: float, focus: Vector3, rate := ATTACK_RATE) -> void:
 	var t := time - ATTACK_AT
 	_update_slash_fx(before, t, blade_before)
 	if before < Lunge.FRONT_LAND and t >= Lunge.FRONT_LAND:
-		_play_sound("step", model.legs[0]["ankle"].global_position, {"gain": 0.75})
+		play_sound("step", model.legs[0]["ankle"].global_position, {"gain": 0.75})
 	if before < Lunge.TRAIL_START and t >= Lunge.TRAIL_START:
-		_play_sound("swing_heavy", model.weapon_spin.global_position, {"gain": 0.74})
+		play_sound("swing_heavy", model.weapon_spin.global_position, {"gain": 0.74})
 	var footfall := Lunge.DURATION + ReturnCut.RIGHT_LAND
 	if before < footfall and t >= footfall:
-		_play_sound("step", model.legs[1]["ankle"].global_position, {"gain": 0.65})
+		play_sound("step", model.legs[1]["ankle"].global_position, {"gain": 0.65})
 	if before < LINK_END and t >= LINK_END:
-		_play_sound("swing_light", model.weapon_spin.global_position, {"gain": 0.86})
+		play_sound("swing_light", model.weapon_spin.global_position, {"gain": 0.86})
 
 
 func _update_slash_fx(before: float, t: float, blade_before: Transform3D) -> void:
@@ -345,15 +352,20 @@ func _record_trail(dt: float, blade: Transform3D, tone: Color, reach: float) -> 
 	_trail.record(dt, heel, crest, tone)
 
 
-func _play_sound(kind: String, at: Vector3, options: Dictionary) -> void:
-	if is_instance_valid(_sound_bus):
-		_sound_bus.play_at(kind, at, options)
+func play_sound(kind: String, at: Vector3, options: Dictionary, cue := "") -> void:
+	if not is_instance_valid(_sound_bus):
+		return
+	var slot := kind if cue.is_empty() else cue
+	if _recorded_audio != null and _recorded_audio.play_at(self, "duelist", slot, kind, at, options, _sound_bus):
+		return
+	_sound_bus.play_at(kind, at, options)
 
 
 func sync_audio(paused: bool, rate := ATTACK_RATE) -> void:
 	var age := time - Pace.DURATION - Brace.CONTACT_TIME
 	var volume: float = _master_volume.call() if _master_volume.is_valid() else 1.0
-	if paused or age < 0.0 or age >= Charge.AUDIO_DURATION or volume <= 0.001:
+	var end := minf(Charge.AUDIO_DURATION, _audio.stream.get_length())
+	if paused or age < 0.0 or age >= end or volume <= 0.001:
 		if _audio.playing:
 			_audio.stop()
 		return
@@ -623,7 +635,7 @@ func _advance_normal(dt: float, focus: Vector3) -> void:
 	normal_move.apply(model, normal_pose, normal_time)
 	for footfall: Vector3 in normal_move.FOOTFALLS:
 		if before < footfall.x and normal_time >= footfall.x:
-			_play_sound("step", model.legs[int(footfall.y)]["ankle"].global_position, {"gain": footfall.z})
+			play_sound("step", model.legs[int(footfall.y)]["ankle"].global_position, {"gain": footfall.z})
 	var strikes: Array = normal_move.STRIKES
 	var active := 0
 	for i in range(1, strikes.size()):
@@ -634,7 +646,7 @@ func _advance_normal(dt: float, focus: Vector3) -> void:
 	var trail_start := strike.y
 	var hit_end := strike.w
 	if before < trail_start and normal_time >= trail_start:
-		_play_sound("swing_heavy" if active > 0 else "swing_light", model.weapon_spin.global_position, {"gain": 0.65})
+		play_sound("swing_heavy" if active > 0 else "swing_light", model.weapon_spin.global_position, {"gain": 0.65})
 	if not thrust and normal_time >= trail_start and normal_time < hit_end:
 		var blade: Transform3D = model.weapon_spin.global_transform
 		var tint := Color(0.88, 0.96, 1.0, 0.77) if active > 0 else Color(0.76, 0.88, 1.0, 0.54)

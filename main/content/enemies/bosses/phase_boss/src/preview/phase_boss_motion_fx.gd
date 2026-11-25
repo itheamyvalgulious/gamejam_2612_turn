@@ -57,17 +57,23 @@ func configure(model: Node3D) -> void:
 	_audio = AudioStreamPlayer.new()
 	_audio.volume_db = -11.0
 	add_child(_audio)
-	_cue_tones["charge"] = _tone(430.0, 770.0, 0.18)
-	_cue_tones["phase"] = _tone(870.0, 145.0, 0.22)
-	_cue_tones["impact"] = _tone(150.0, 38.0, 0.37)
-	_cue_tones["surge"] = _tone(73.0, 224.0, 0.66)
-	_cue_tones["release"] = _tone(590.0, 39.0, 0.41)
-	_cue_tones["roar"] = _mechanical_roar(Motion.ROAR_SOUND_DURATION, true)
-	_cue_tones["wake_growl"] = _mechanical_roar(0.93, false)
-	_cue_tones["cannon_lift"] = _tone(142.0, 64.0, 0.19)
-	_cue_tones["cannon_charge"] = _tone(94.0, 670.0, Motion.CANNON_FIRE - Motion.CANNON_CHARGE - 0.04)
-	_cue_tones["cannon_fire"] = _tone(390.0, 83.0, Motion.CANNON_RELEASE - Motion.CANNON_FIRE)
-	_cue_tones["tail_sweep"] = _tone(135.0, 420.0, 0.37)
+	var recordings := get_node_or_null("/root/TurnEnemyAudio")
+	var fallbacks := {
+		"charge": _tone.bind(430.0, 770.0, 0.18),
+		"phase": _tone.bind(870.0, 145.0, 0.22),
+		"impact": _tone.bind(150.0, 38.0, 0.37),
+		"surge": _tone.bind(73.0, 224.0, 0.66),
+		"release": _tone.bind(590.0, 39.0, 0.41),
+		"roar": _mechanical_roar.bind(Motion.ROAR_SOUND_DURATION, true),
+		"wake_growl": _mechanical_roar.bind(0.93, false),
+		"cannon_lift": _tone.bind(142.0, 64.0, 0.19),
+		"cannon_charge": _tone.bind(94.0, 670.0, Motion.CANNON_FIRE - Motion.CANNON_CHARGE - 0.04),
+		"cannon_fire": _tone.bind(390.0, 83.0, Motion.CANNON_RELEASE - Motion.CANNON_FIRE),
+		"tail_sweep": _tone.bind(135.0, 420.0, 0.37),
+	}
+	for cue: String in fallbacks:
+		var recording: AudioStream = recordings.stream("fold", cue) if recordings != null else null
+		_cue_tones[cue] = recording if recording != null else fallbacks[cue].call()
 	# 折相外壳 shader 的渲染管线变体在第一次 material_overlay 时才编译，
 	# 实测会在首次折相当帧卡 ~150ms。趁加载期把 overlay 挂到第一块拼件上
 	# 渲几帧，让引擎提前编好变体。
