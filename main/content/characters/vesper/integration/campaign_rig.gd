@@ -19,6 +19,7 @@ var attack_elapsed := 0.0
 var attack_hit_from := 0.0
 var attack_hit_to := 0.0
 var weapon_xf := Transform3D.IDENTITY
+var last_intercept_miss := 0.0
 var weapon_prev_xf := Transform3D.IDENTITY
 var weapon_scale := 1.0
 var blade_discs: Array = []
@@ -138,6 +139,48 @@ func combat_capsule() -> Dictionary:
 
 func plan_blade_intercept(point: Vector3, axis: Vector3, face: Vector3,
 		torso_turn: float, deadline: float, speed := 26.0) -> Dictionary:
+	var res := _solve_intercept(point, axis, face, torso_turn)
+	if res.is_empty():
+		return {}
+	var hilt: Vector3 = res["hilt"]
+	var yaw: float = res["yaw"]
+	var travel: float = weapon_root.position.distance_to(hilt) * float(res["torso_scale"])
+	var duration := clampf(travel / maxf(speed, 1.0), 0.03, maxf(deadline, 0.03))
+	last_intercept_miss = res["miss"]
+	_blade_path.plan(weapon_root.position, weapon_root.basis, hilt, res["basis"], duration,
+		torso.rotation.y, yaw)
+	return {"hilt": hilt, "yaw": yaw, "t": res["t"], "dur": duration, "travel": travel,
+		"miss": res["miss"]}
+
+
+## 落点可达性探针：返回「按这套落点+刀轴规划后，刀身到落点的剩余距离」。
+## > 0 说明点在机械臂可达域外，调用方应在敌刀路径上换可达拦截点。
+func blade_reach_miss(point: Vector3, axis: Vector3, face: Vector3, torso_turn: float) -> float:
+	var res := _solve_intercept(point, axis, face, torso_turn)
+	if res.is_empty():
+		return 1e9
+	return float(res["miss"])
+
+
+## 规划完成后我方刀身在世界里的线段端点 [p0, p1]。
+## 用于直接度量「架好这把刀之后，敌刀扫过来时两把刀的真实间隙」。
+func intercept_blade_segment(point: Vector3, axis: Vector3, face: Vector3,
+		torso_turn: float) -> Array:
+	var res := _solve_intercept(point, axis, face, torso_turn)
+	if res.is_empty():
+		return []
+	var target_torso := _torso_transform(
+		Vector3(torso.rotation.x, res["yaw"], torso.rotation.z))
+	var wx: Transform3D = target_torso \
+		* Transform3D(res["basis"], res["hilt"]) * weapon_spin.transform
+	var span := blade_span()
+	return [wx * Vector3(0.0, span.x, 0.0), wx * Vector3(0.0, span.y, 0.0)]
+
+
+## 纯几何求解：挑刀轴正/反两种握法里「刀身最贴近落点」的一种。
+## 返回 hilt(躯干局部) / basis(weapon_root 局部基) / yaw / t / miss / torso_scale。
+func _solve_intercept(point: Vector3, axis: Vector3, face: Vector3,
+		torso_turn: float) -> Dictionary:
 	if axis.length_squared() < 0.000001:
 		return {}
 	var from_body := body.to_local(point)
@@ -153,6 +196,7 @@ func plan_blade_intercept(point: Vector3, axis: Vector3, face: Vector3,
 	var hilt := rest
 	var root_basis := weapon_root.basis.orthonormalized()
 	var blade_point := 0.0
+	var best_miss := 1e9
 	for side in [1.0, -1.0]:
 		var blade_axis: Vector3 = up * side
 		var normal := (to_torso.basis * face).slide(blade_axis)
@@ -164,7 +208,11 @@ func plan_blade_intercept(point: Vector3, axis: Vector3, face: Vector3,
 		var blade_basis := Basis(blade_axis.cross(normal).normalized(), blade_axis, normal)
 		var basis := blade_basis * weapon_spin.basis.inverse()
 		var along := clampf((point_local - rest).dot(blade_axis), span.x, span.y)
-		var candidate := _reachable_hilt(point_local - blade_axis * along, blade_axis)
+		# 高位格挡时允许刀柄更贴近身体：-0.30 的前胸钳位是为了避免低/中位
+		# 持刀穿模，过顶拦截时收紧到 -0.10 会多给整条手臂 ~0.2u 的上探距离。
+		var want := point_local - blade_axis * along
+		var clamp_z := -0.30 if want.y < 0.55 else -0.10
+		var candidate := _reachable_hilt(want, blade_axis, clamp_z)
 		# 钳位后的刀柄不一定回到 rest：覆盖点要按真实 hilt 重算，否则把可达
 		# 域边界上的落点误判成「还差一整条刀身」。
 		var along2 := clampf((point_local - candidate).dot(blade_axis), span.x, span.y)
@@ -180,8 +228,8 @@ func plan_blade_intercept(point: Vector3, axis: Vector3, face: Vector3,
 		"miss": best_miss, "torso_scale": target_torso.basis.get_scale().x}
 
 
-func _reachable_hilt(hilt: Vector3, axis: Vector3) -> Vector3:
-	hilt.z = minf(hilt.z, -0.30)
+func _reachable_hilt(hilt: Vector3, axis: Vector3, front_clamp := -0.30) -> Vector3:
+	hilt.z = minf(hilt.z, front_clamp)
 	for pass_index in 3:
 		for index in arms.size():
 			var arm: Dictionary = arms[index]

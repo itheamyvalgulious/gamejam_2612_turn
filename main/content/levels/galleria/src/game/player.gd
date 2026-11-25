@@ -42,6 +42,7 @@ var _plan_point := Vector3.ZERO
 var _plan_body_yaw := 0.0
 var _plan_left := 0.0
 var _plan_idle := 0.0      # 已经多久没看到威胁了（收势的触发条件）
+var _fallback_lock := {}     # 锁定的可达域内拦截点（不可达落点的替代方案）
 var _return_left := 0.0
 
 var _last_swing_before := Transform3D.IDENTITY
@@ -235,7 +236,35 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 		return
 	_plan_idle = 0.0
 	var point: Vector3 = best["point"]
+	var axis: Vector3 = best["axis"]
 	var eta: float = float(best["eta"])
+	# 接触点可达性检查：敌刀的接触点在机械臂可达域外时（如过顶刺/高劈），
+	# 在敌刀剩余预测路径上换可达拦截点——格挡是挥刀砍向敌刀路径把对方
+	# 打歪的扫掠动作，刀轴按可达性重选，不再被 threat 轴锁死。
+	if rig.has_method("blade_reach_miss"):
+		var torso_turn := P.getf("parry.torso_turn")
+		var miss: float = rig.blade_reach_miss(point, axis, best["normal"], torso_turn)
+		if miss > 0.12:
+			# 落点不可达：重扫敌刀路径找可达拦截点。锁定机制带滞后——
+			# 已有锁时只有新候选明显更优（分数 < 0.6 倍）才换，避免逐帧
+			# 跳变让 blade_path 永远走不到；锁定后刀架住等敌刀扫过来。
+			var alt := _reachable_intercept(best, margin, torso_turn)
+			if not alt.is_empty():
+				var lock_ok := not _fallback_lock.is_empty() \
+						and _plan_point.distance_to(_fallback_lock["point"]) <= 0.25
+				if not lock_ok or float(alt.get("score", 0.0)) \
+						< float(_fallback_lock.get("score", 0.0)) * 0.6:
+					point = alt["point"]
+					axis = alt["axis"]
+					eta = float(alt["eta"])
+					_fallback_lock = {"point": point, "axis": axis, "eta": eta,
+						"score": float(alt.get("score", 0.0))}
+				else:
+					point = _fallback_lock["point"]
+					axis = _fallback_lock["axis"]
+					eta = _fallback_lock["eta"]
+		else:
+			_fallback_lock = {}
 	# 躯干在世界里的朝向（机体 + 腰环）：身体还在转的时候，刀要跟着重新规划
 	var body_yaw: float = rig.heading + rig.torso.rotation.y
 	var turned: float = absf(wrapf(body_yaw - _plan_body_yaw, -PI, PI))
@@ -245,7 +274,7 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 		_plan_left -= dt
 		return
 	var dur := clampf(eta * 0.9, 0.05, 0.20)
-	var res: Dictionary = rig.plan_blade_intercept(point, best["axis"], best["normal"],
+	var res: Dictionary = rig.plan_blade_intercept(point, axis, best["normal"],
 		P.getf("parry.torso_turn"), dur, P.getf("parry.plan_speed"))
 	if res.is_empty():
 		# 规划失败也要保持架着并立刻重试；否则刀停在上一帧的落点，
@@ -259,8 +288,173 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 	_plan_left = float(res.get("dur", dur))
 
 
+
+## 在敌刀剩余预测路径上找「真碰撞可达」的拦截点。
+##
+## 原理：格挡不是把刀架在敌刀接触点，而是挥刀砍向敌刀路径把对方打歪。
+## 所以落点可以取敌刀扫掠体与机械臂可达域的交集里的任意一点——只要
+## 我方刀能赶在敌刀经过那里时到位，就形成真实碰撞。算法：时刻 ×
+## 敌刀刀身点 × 我方刀轴联合搜索，按「敌刀到达该点时刻 - 我方到位所需
+## 时间」挑最早可行解；全不可达则返回 miss 最小的保底，至少贴近路径。
+func _reachable_intercept(best: Dictionary, margin: float, torso_turn: float) -> Dictionary:
+	var enemy = best.get("enemy")
+	var erig = enemy
+	if erig != null and not erig.has_method("predict_weapon_xf"):
+		erig = erig.get("rig") if erig.has_method("get") else null
+	if erig == null or not erig.has_method("predict_weapon_xf"):
+		return {}
+	var hit_to: float = float(erig.get("attack_hit_to"))
+	var t_now: float = float(erig.get("attack_elapsed"))
+	var discs: Array = erig.get("blade_discs")
+	var weapon_scale2: float = float(erig.get("weapon_scale"))
+	if hit_to <= t_now or discs.is_empty():
+		return {}
+	# 敌刀真正砍到胶囊的时刻：拦在它「砍到人」之后才到的路径点没意义。
+	var cap: Dictionary = capsule()
+	var e_contact := hit_to
+	var out_dir: Vector3 = best["normal"]
+	var espan := _disc_span(discs)
+	# 先把敌刀剩余全程的刀身线段缓存下来：格挡刀到位后静止保持，
+	# 碰撞发生在敌刀扫到我刀位置的那一刻，所以评分是
+	# min over 所有 e' of dist(我方刀段, 敌刀段(e'))。
+	const STEPS := 10
+	var e_times: Array = []
+	var e_segs: Array = []
+	for i in STEPS + 1:
+		var et: float = lerpf(t_now, hit_to, float(i) / float(STEPS))
+		var xft: Transform3D = erig.predict_weapon_xf(et)
+		e_times.append(et)
+		e_segs.append([xft * Vector3(0.0, espan.x, 0.0),
+			xft * Vector3(0.0, espan.y, 0.0)])
+	# 胶囊接触时刻：第一个有 disc 圆盘碰到胶囊的时刻（近似）。
+	for i in e_times.size():
+		var xft: Transform3D = erig.predict_weapon_xf(e_times[i])
+		var touched := false
+		for d in discs:
+			var dp: Vector3 = xft * Vector3(0.0, float(d["y"]), 0.0)
+			var rr: float = float(d["r"]) * weapon_scale2 + float(cap["r"])
+			if _pt_seg_dist(dp, cap["a"], cap["b"]) <= rr:
+				touched = true
+				break
+		if touched:
+			e_contact = e_times[i]
+			break
+	var my_span: Vector2 = rig.blade_span()
+	var _my_p0: Vector3 = rig.weapon_xf * Vector3(0.0, my_span.x, 0.0)
+	var _my_p1: Vector3 = rig.weapon_xf * Vector3(0.0, my_span.y, 0.0)
+	var fallback := {}
+	var fallback_gap := 1e9
+	var pick := {}
+	var pick_score := 1e9
+	for i in STEPS + 1:
+		var e: float = e_times[i]
+		var xf: Transform3D = erig.predict_weapon_xf(e)
+		var axes: Array = [best["axis"], Vector3.UP, Vector3.FORWARD, Vector3.RIGHT]
+		axes.append((xf.basis * Vector3(0, 1, 0)).normalized())
+		var step_t: float = minf(e + maxf(float(erig.get("last_dt")), 1.0 / 120.0), hit_to)
+		var motion: Vector3 = erig.predict_weapon_xf(step_t) * Vector3(0, 1.2, 0) \
+			- xf * Vector3(0, 1.2, 0)
+		if motion.length_squared() > 0.0001:
+			var ax2: Vector3 = motion.normalized().cross(out_dir)
+			if ax2.length_squared() > 0.0001:
+				axes.append(ax2.normalized())
+		for d in discs:
+			var y: float = float(d["y"])
+			if y < 0.05:
+				continue
+			# 拦截点取在敌刀刀身 disc 本身：格挡是挥刀砍向敌刀路径的
+			# 扫掠动作，落点必须在路径上，不能像接触点那样朝玩家偏移。
+			var pt: Vector3 = xf * Vector3(0.0, y, 0.0)
+			var axes2: Array = axes.duplicate()
+			# 刀尖前指轴：刀沿「胸口→拦截点」方向探出，把整条刀长 1.6u
+			# 都叠进探身距离——够到敌刀预接触路径的关键姿态。
+			var jab: Vector3 = pt - rig.global_position - Vector3(0, 1.6, 0)
+			if jab.length_squared() > 0.01:
+				axes2.append(jab.normalized())
+			# 横切来路轴：垂直于敌刀运动方向，把刀横在它的来路上削过去。
+			if motion.length_squared() > 0.0001:
+				var chop: Vector3 = motion.normalized().cross(jab.normalized())
+				if chop.length_squared() > 0.01:
+					axes2.append(chop.normalized())
+			for ax in axes2:
+				if ax.length_squared() < 0.01:
+					continue
+				# 真碰撞分数：规划后我方刀线段 vs 「敌刀扫到该点时刻 e 的
+				# 刀线段」的段段距。零分=两把刀在 e 时刻真实相交；我方刀
+				# 到位后保持不动，敌刀扫到 e 时必然碰上。
+				var seg: Array = rig.intercept_blade_segment(pt, ax, out_dir, torso_turn)
+				if seg.is_empty():
+					continue
+				var e_seg: Array = e_segs[i]
+				var gap := _seg_seg_dist(seg[0], seg[1], e_seg[0], e_seg[1])
+				if gap < fallback_gap:
+					fallback_gap = gap
+					fallback = {"point": pt, "axis": ax,
+						"eta": maxf(e - t_now, 0.0), "score": gap}
+				# 要赶在敌刀到达 e 之前到位才选它；且 e 不能晚于敌刀
+				# 砍到胶囊的 e_contact——拦在「已经砍到人」之后的点上
+				# 挡不住伤害。
+				if e - t_now >= 0.05 and e < e_contact - 0.01 and gap < pick_score:
+					pick_score = gap
+					pick = {"point": pt, "axis": ax,
+						"eta": maxf(e - t_now, 0.0), "score": gap}
+	if not pick.is_empty():
+		return pick
+	return fallback
+
+
+## 敌刀 discs 的 y 范围 → 刀身线段端点
+static func _disc_span(discs: Array) -> Vector2:
+	var lo := 1e9
+	var hi := -1e9
+	for d in discs:
+		var y: float = float(d["y"])
+		lo = minf(lo, y)
+		hi = maxf(hi, y)
+	return Vector2(lo, hi)
+
+
+## 点到线段距离
+static func _pt_seg_dist(p: Vector3, a: Vector3, b: Vector3) -> float:
+	var ab := b - a
+	var t := clampf((p - a).dot(ab) / maxf(ab.length_squared(), 0.000001), 0.0, 1.0)
+	return (p - (a + ab * t)).length()
+
+
+## 两线段最短距离（Ericson, Real-Time Collision Detection）
+static func _seg_seg_dist(p1: Vector3, q1: Vector3, p2: Vector3, q2: Vector3) -> float:
+	var d1 := q1 - p1
+	var d2 := q2 - p2
+	var r := p1 - p2
+	var a := d1.dot(d1)
+	var e := d2.dot(d2)
+	var f := d2.dot(r)
+	var s := 0.0
+	var t := 0.0
+	if a <= 0.000001 and e <= 0.000001:
+		return r.length()
+	if a <= 0.000001:
+		t = clampf(f / e, 0.0, 1.0)
+	else:
+		var c := d1.dot(r)
+		if e <= 0.000001:
+			s = clampf(-c / a, 0.0, 1.0)
+		else:
+			var b := d1.dot(d2)
+			var denom := a * e - b * b
+			s = clampf((b * f - c * e) / denom, 0.0, 1.0) if denom > 0.000001 else 0.0
+			t = (b * s + f) / e
+			if t < 0.0:
+				t = 0.0
+				s = clampf(-c / a, 0.0, 1.0)
+			elif t > 1.0:
+				t = 1.0
+				s = clampf((b - c) / a, 0.0, 1.0)
+	return ((p1 + d1 * s) - (p2 + d2 * t)).length()
+
 func _end_intercept() -> void:
 	_intercept_on = false
+	_fallback_lock = {}
 	_intercept_kind = ""
 	_plan_left = 0.0
 	_plan_idle = 999.0
