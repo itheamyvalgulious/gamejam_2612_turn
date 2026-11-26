@@ -1087,8 +1087,8 @@ static func _aa_turret(aa: Node3D, cover: Array, platforms: Array, x: float, z: 
 	# 后部散热格栅
 	for k in 4:
 		_b(t, Vector3(0.10, 0.95, 2.2), Vector3(-1.45, 1.55, 0.0), _M["vent"])
-	# 顶部雷达
-	_b(t, Vector3(0.18, 0.75, 0.18), Vector3(-0.55, 2.85, 0.0), _M["steel_dark"])
+	# 顶部雷达：桅杆加高，把碟抬到炮塔顶 1.9 m 以上，避免看起来像可踩的平台
+	_b(t, Vector3(0.18, 2.00, 0.18), Vector3(-0.55, 3.55, 0.0), _M["steel_dark"])
 	var dish := CylinderMesh.new()
 	dish.top_radius = 0.85 * U
 	dish.bottom_radius = 0.85 * U
@@ -1097,7 +1097,7 @@ static func _aa_turret(aa: Node3D, cover: Array, platforms: Array, x: float, z: 
 	var dm := MeshInstance3D.new()
 	dm.mesh = dish
 	dm.material_override = _M["steel"]
-	dm.position = Vector3(-0.55, 3.25, 0.0) * U
+	dm.position = Vector3(-0.55, 4.58, 0.0) * U
 	dm.rotation = Vector3(0.35, 0.0, 0.0)
 	t.add_child(dm)
 	# 通电警示条：琥珀色，和红色光闸区分开
@@ -1127,15 +1127,15 @@ static func _gate(root: Node3D, aa: Node3D, cover: Array, platforms: Array, gate
 	var top := DECK_Y + 7.0
 	# 上/下发射轨：让红色光条像一道门，而不是一根栏杆
 	_b(aa, Vector3(0.34, 0.20, dz + 0.6), Vector3(x, DECK_Y + 0.12, cz), _M["steel_dark"])
-	_b(aa, Vector3(0.34, 0.20, dz + 0.6), Vector3(x, DECK_Y + 3.10, cz), _M["steel_dark"])
+	_b(aa, Vector3(0.34, 0.20, dz + 0.6), Vector3(x, DECK_Y + 4.40, cz), _M["steel_dark"])
 	for k in int((dz + 0.6) / 0.9):
 		var hz := cz - (dz + 0.6) * 0.5 + 0.45 + float(k) * 0.9
 		_b(aa, Vector3(0.38, 0.22, 0.42), Vector3(x, DECK_Y + 0.12, hz),
 			_M["hazard_y"] if k % 2 == 0 else _M["hazard_k"])
-	var top_rail := _b(aa, Vector3(0.36, 0.10, dz), Vector3(x, DECK_Y + 3.16, cz), _M["red"])
+	var top_rail := _b(aa, Vector3(0.36, 0.10, dz), Vector3(x, DECK_Y + 4.50, cz), _M["red"])
 	aa.part(top_rail, _M["red"], _M["off"])
 	platforms.append({"c": Vector3(x, 0.0, cz) * U,
-		"hx": 0.18 * U, "hz": dz * 0.5 * U, "h": (DECK_Y + 3.21) * U})
+		"hx": 0.18 * U, "hz": dz * 0.5 * U, "h": (DECK_Y + 4.55) * U})
 	# 两根门柱
 	for zz in [z0 - 0.5, z1 + 0.5]:
 		# 门柱落在小外伸台上，不从栈桥边上悬空
@@ -1157,15 +1157,15 @@ static func _gate(root: Node3D, aa: Node3D, cover: Array, platforms: Array, gate
 	else:
 		var rail2 := _b(aa, Vector3(0.08, 0.08, dz), Vector3(x, DECK_Y + 3.2, cz), _M["red"])
 		aa.part(rail2, _M["red"], _M["off"])
-	# 红色光条（9 / 13 / 18 条，视门宽）
+	# 红色光条（9 / 13 / 18 条，视门宽）；门面抬到 4.4 m，炮塔顶也翻不过去
 	var n := int(maxf(7.0, floor(dz / 0.95)))
 	for i in n:
 		var zz := z0 + (dz * (float(i) + 0.5) / float(n))
-		var bar := _b(aa, Vector3(0.05, 3.0, 0.06), Vector3(x, DECK_Y + 1.55, zz), _M["red"])
+		var bar := _b(aa, Vector3(0.05, 4.40, 0.06), Vector3(x, DECK_Y + 2.25, zz), _M["red"])
 		aa.part(bar, _M["red"], _M["off"])
 	# 通电时门面本身是实体；断电时把碰撞高度归零
 	var blocker_start := cover.size()
-	_chain_y(cover, Vector2(x, z0), Vector2(x, z1), 0.08, DECK_Y, DECK_Y + 3.0)
+	_chain_y(cover, Vector2(x, z0), Vector2(x, z1), 0.08, DECK_Y, DECK_Y + 4.4)
 	for i in range(blocker_start, cover.size()):
 		aa.blocker(cover[i])
 	# 门口地面警示

@@ -186,6 +186,14 @@ func _unhandled_input(event: InputEvent) -> void:
 					st.set_online(next)
 				hud.show_banner("防空火力", "全部离线（初稿预览）" if not next else "全部上线", 1.2)
 			return
+		if event.keycode == KEY_F7:
+			# 初稿调试：按 F7 依次跳到下一个检查点，省得每次从实验室重走
+			if not _cps.is_empty():
+				_cp = (_cp + 1) % _cps.size()
+				var cp: Dictionary = _cps[_cp]
+				_lift_to(Vector3(float(cp["x"]), DECK_Y, float(cp["z"])))
+				hud.show_banner("调试传送", "检查点 %d / %d" % [_cp, _cps.size() - 1], 1.0)
+			return
 		if event.keycode == KEY_F9:
 			var img := get_viewport().get_texture().get_image()
 			img.save_png("user://space_live.png")
