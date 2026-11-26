@@ -125,7 +125,7 @@ func environment(outside := false) -> void:
 	env.background_color = Color("090f18")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color("879bb4")
-	env.ambient_light_energy = 0.30 if outside else 0.40
+	env.ambient_light_energy = 0.22 if outside else 0.26
 	# SSR / SSAO 在中低端 GPU（如 GTX 1650）上每帧 ~3ms，是掉帧来源；
 	# 做成「后期特效」设置项，嫌卡的玩家可自行关闭。
 	var post_fx: bool = bool(TurnSession.get_option("display.post_fx", true))
@@ -144,8 +144,6 @@ func environment(outside := false) -> void:
 	root.add_child(world)
 	var probe := ReflectionProbe.new()
 	probe.name = "EnvironmentReflection"
-	# 每帧重渲场景 ~4ms —— 场景本身静止，烘焙一次即可。
-	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	probe.cull_mask = STATIC_REFLECTION_LAYER
 	probe.size = Vector3(74,40 if outside else 25,74 if outside else 66)
 	probe.position = Vector3(0,16 if outside else 12,0)

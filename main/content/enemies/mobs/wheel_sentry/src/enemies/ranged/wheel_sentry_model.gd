@@ -56,33 +56,6 @@ func _ready() -> void:
 	_build_suspension()
 	_build_turret()
 	set_deployment(0.0)
-	# 砍 draw call：以「会被代码驱动 / 会被单独拆走」的 pivot 为锚点，
-	# 把锚点子树里所有静态叶子 MeshInstance 合并到锚点上。
-	var anchors: Array = [wheel_frame, wheel, _turret_column, turret, _charge,
-		_optic_bezel]
-	anchors.append_array(_shutters)
-	anchors.append_array(_drive_plates)
-	anchors.append_array(_side_covers)
-	anchors.append_array(_rear_covers)
-	anchors.append_array(_side_trim)
-	for s in _supports:
-		anchors.append_array([s["root"], s["arm"], s["rail"], s["shoe"], s["cover"]])
-	MeshKit.merge_leaf_meshes(self, anchors)
-
-
-## crowd 用的锚点集合（合并后这些节点下面的静态件都按锚点相对静止）。
-## _charge 会显隐 —— 不收；releasable 装甲板/关节 pivot 全收。
-func crowd_anchors() -> Array:
-	var anchors: Array = [wheel_frame, wheel, _turret_column, turret,
-		_optic_bezel]
-	anchors.append_array(_shutters)
-	anchors.append_array(_drive_plates)
-	anchors.append_array(_side_covers)
-	anchors.append_array(_rear_covers)
-	anchors.append_array(_side_trim)
-	for s in _supports:
-		anchors.append_array([s["root"], s["arm"], s["rail"], s["shoe"], s["cover"]])
-	return anchors
 
 
 func set_deployment(amount: float) -> void:

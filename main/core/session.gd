@@ -32,11 +32,6 @@ func _ready() -> void:
 	selected_level_index = maxi(0, progress.resume_index())
 	if _options.load(OPTIONS_PATH) == OK and _options.has_section_key("game", "display.fullscreen"):
 		_set_fullscreen(bool(_options.get_value("game", "display.fullscreen")))
-	# 默认关：中低端 GPU 上垂直同步会把帧率钳在显示器刷新率并放大掉帧感。
-	DisplayServer.window_set_vsync_mode(
-		DisplayServer.VSYNC_ENABLED
-		if _options.has_section_key("game", "display.vsync") and bool(_options.get_value("game", "display.vsync"))
-		else DisplayServer.VSYNC_DISABLED)
 	get_window().focus_exited.connect(_pause_on_focus_loss)
 
 
@@ -243,9 +238,6 @@ func _set_fullscreen(enabled: bool) -> void:
 func _set_option(key: String, value: Variant) -> void:
 	if key == "display.fullscreen":
 		_set_fullscreen(bool(value))
-	elif key == "display.vsync":
-		DisplayServer.window_set_vsync_mode(
-			DisplayServer.VSYNC_ENABLED if bool(value) else DisplayServer.VSYNC_DISABLED)
 	elif _services != null:
 		_services.get("p").set_value(key, value)
 	_options.set_value("game", key, value)
@@ -253,10 +245,6 @@ func _set_option(key: String, value: Variant) -> void:
 	var panel := _pause_menu if _pause_menu != null else _home_settings
 	if error != OK and panel != null:
 		panel.show_error("设置暂未保存")
-
-
-func get_option(key: String, dflt: Variant = null) -> Variant:
-	return _options.get_value("game", key, dflt)
 
 
 func _apply_level_options() -> void:
@@ -337,13 +325,6 @@ func _switch(index: int) -> void:
 		current.process_mode = Node.PROCESS_MODE_DISABLED
 	tree.root.add_child(current)
 	tree.current_scene = current
-	if index >= 0:
-		# 同种怪的静态零件跨实例合批（20 只同种怪 = 1 只的 draw call）
-		var crowd: Node3D = (load("res://core/crowd.gd") as Script).new()
-		crowd.name = "CrowdInstancer"
-		crowd.enabled = not ("--no-crowd" in OS.get_cmdline_user_args())
-		crowd.add_to_group("crowd_instancer")
-		current.add_child(crowd)
 	if index < 0:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	tree.root.title = "TURN" if index < 0 else "TURN · " + String(Catalog.get_entry(index)[0])

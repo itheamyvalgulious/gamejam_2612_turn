@@ -69,7 +69,6 @@ func use_ground_routes(move: Callable, support: Callable, waypoint: Callable) ->
 	_ground_move = move
 	_support_floor = support
 	_waypoint = waypoint
-	_register_crowd.call_deferred()
 
 
 func hurt(amount: float, normal := Vector3.UP, knock := 0.0) -> void:
@@ -301,16 +300,3 @@ func _blade_transform(base: Vector3, tip: Vector3) -> Transform3D:
 func hud_alert(target: PlayerUnit) -> bool:
 	return is_attacking and attack_elapsed >= attack_hit_from - 0.26 and attack_elapsed <= attack_hit_to \
 		and ground_position().distance_squared_to(target.rig.global_position) < 4.25 * 4.25
-
-
-## 同种怪跨实例合批：J 里关节 pivot 当锚点，静态叶子交给 CrowdInstancer。
-func _register_crowd() -> void:
-	var crowd = get_tree().get_first_node_in_group("crowd_instancer")
-	if crowd == null:
-		return
-	var anchors := []
-	for j in rig.rig.J.values():
-		if j is Node3D:
-			anchors.append(j)
-	var slots: Array = (load("res://core/crowd.gd") as Script).collect_slots(rig, anchors)
-	crowd.register_enemy(rig, slots)
