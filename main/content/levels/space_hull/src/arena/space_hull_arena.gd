@@ -897,10 +897,18 @@ static func _arena_a(root: Node3D, cover: Array, platforms: Array) -> void:
 	_crate(root, cover, platforms, 14.9, 4.2, 1.4, 0.9, 1.4)
 	# 低矮管组：可站
 	_pipe_housing(root, cover, platforms, 4.2, 3.2, 3.0, 1.8)
-	# 散热立板：高墙
+	# 散热立板：高墙 + 底座/立柱/上下集管，避免看起来像一块悬空白板
 	_b(root, Vector3(0.45, 3.2, 6.2), Vector3(22.0, DECK_Y + 1.6, -3.0), _M["radiator"])
 	for gy in range(0, 6, 1):
 		_b(root, Vector3(0.50, 0.07, 6.0), Vector3(22.0, DECK_Y + 0.4 + float(gy) * 0.5, -3.0), _M["radiator_dark"])
+	_b(root, Vector3(1.05, 0.35, 6.6), Vector3(22.0, DECK_Y + 0.175, -3.0), _M["steel_dark"])
+	for zz in [-6.15, 0.15]:
+		_b(root, Vector3(0.80, 3.2, 0.25), Vector3(22.0, DECK_Y + 1.6, zz), _M["steel_dark"])
+	_tube(root, Vector3(22.0, DECK_Y + 3.28, -6.15), Vector3(22.0, DECK_Y + 3.28, 0.15), 0.12, _M["steel_dark"])
+	_tube(root, Vector3(22.0, DECK_Y + 0.22, -6.15), Vector3(22.0, DECK_Y + 0.22, 0.15), 0.10, _M["steel_dark"])
+	for k in 6:
+		_b(root, Vector3(0.58, 0.16, 0.55), Vector3(22.0, DECK_Y + 0.22, -5.7 + float(k) * 1.08),
+			_M["hazard_y"] if k % 2 == 0 else _M["hazard_k"])
 	_ring_y(cover, 22.0, -3.0, 0.35, 3.1, DECK_Y, DECK_Y + 2.9)
 	# 甲板系留环 / 舱盖
 	for zz in [-7.0, 7.0]:
