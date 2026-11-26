@@ -38,6 +38,9 @@ var _bounds := AABB()
 var _opening_pursuit := false
 var _used_ground_motion := false
 var _player_floor := Vector3.ZERO
+var terrain_blade_step: Callable
+var terrain_blade_reset: Callable
+var _terrain_blocked_serial := -1
 
 
 func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn := Vector3.INF, health := 3.0) -> void:
@@ -60,6 +63,7 @@ func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn :
 	var pace_center := PACE_CENTER
 	if spawn.is_finite():
 		pace_center = spawn - Vector3(sin(Pace.START_ANGLE), 0, cos(Pace.START_ANGLE)) * Pace.RADIUS
+		rig.global_position = spawn
 	_pace_center = pace_center
 	_cover = cover
 	_bounds = bounds
@@ -68,7 +72,7 @@ func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn :
 		rig.ground_sampler = level.duelist_floor
 		rig.attack_ground_move = level.duelist_ground_move
 		rig.stair_lane = level.duelist_stair_lane
-		rig.attack_blade_clear = level.duelist_blade_clear
+		rig.ground_support_normal = level.duelist_floor_normal
 		sequence.can_strike_from = func(at: Vector3) -> bool: return level.duelist_can_strike(at, _player_floor)
 		sequence.patrol.route_point = level.duelist_route_point
 		sequence.patrol.ground_move = level.duelist_ground_move
@@ -82,6 +86,9 @@ func setup_duelist(p_player: PlayerUnit, cover: Array, bounds := AABB(), spawn :
 ## 碎板挂回原父节点、碎片刚体销毁、灯效按基线重赋，关节姿态交给
 ## seek(0)+advance_pacing 逐帧重写（finish_pose 每帧把剑写回腕部）。
 func _on_respawn() -> void:
+	if terrain_blade_reset.is_valid():
+		terrain_blade_reset.call()
+	_terrain_blocked_serial = -1
 	phase = Phase.PACING
 	_opening_pursuit = false
 	_used_ground_motion = false
@@ -170,6 +177,8 @@ func step(dt: float, ctx: Dictionary) -> void:
 		return
 	if player.rig.jump_state != "AIR":
 		_player_floor = player.rig.global_position
+	var previous_blade: Transform3D = rig.weapon_spin.global_transform
+	var previous_root: Vector3 = rig.global_position
 	sequence.show()
 	match phase:
 		Phase.PACING, Phase.SETTLING:
@@ -190,6 +199,26 @@ func step(dt: float, ctx: Dictionary) -> void:
 				and sequence.normal_pose.is_empty() and not sequence.sprint_flashing \
 				and sequence.sprint_windup < 0.0 and sequence.rebound_pose.is_empty())
 	sequence.advance_guard(dt, _focus())
+	if terrain_blade_step.is_valid():
+		_finish_terrain_pose(previous_root, previous_blade, dt)
+
+
+func _finish_terrain_pose(previous_root: Vector3, previous_blade: Transform3D, dt: float) -> void:
+	if not _used_ground_motion:
+		rig.global_position = rig.attack_step(previous_root, rig.global_position)
+		_used_ground_motion = true
+	var opening := phase == Phase.OPENING and sequence.time >= Sequence.ATTACK_AT and not _opening_pursuit
+	var striking := opening or (phase == Phase.MELEE and not sequence.normal_pose.is_empty())
+	var result: Dictionary = terrain_blade_step.call(rig, dt, swung_serial if striking else -1)
+	if not result["impact"].is_empty():
+		_terrain_blocked_serial = swung_serial
+		var impact: Dictionary = result["impact"]
+		sequence.play_sound("clang", impact["point"], {"gain": lerpf(0.44, 0.95, impact["strength"])})
+		Fx.spark(impact["point"], impact["normal"], lerpf(0.4, 0.95, impact["strength"]))
+	if result["recovering"] or (striking and _terrain_blocked_serial == swung_serial):
+		sequence.break_terrain_trail()
+	rig.use_terrain_sweep(previous_blade, result["was_recovering"] or
+		(_terrain_blocked_serial == swung_serial and result["impact"].is_empty()))
 
 
 func _step_opening_route(dt: float) -> bool:

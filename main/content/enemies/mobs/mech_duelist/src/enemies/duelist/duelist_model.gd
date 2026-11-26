@@ -44,9 +44,11 @@ var sword_grip_cant := 0.0
 var armor_breached := false
 var kerb := Vector2(INF, 0.0)
 var ground_sampler: Callable
+var ground_support_normal: Callable
 var attack_ground_move: Callable
 var stair_lane: Callable
-var attack_blade_clear: Callable
+var blade_effect_endpoint: Callable
+var sampling_attack := false
 var legs: Array[Dictionary] = []
 var arms: Array[Dictionary] = []
 var blade_discs: Array = []
@@ -674,6 +676,12 @@ func floor_height(point: Vector3, height_limit := INF) -> float:
 func keep_sole_above_floor(foot: Transform3D) -> Transform3D:
 	var heel := foot * Pace.HEEL
 	var toe := foot * Pace.TOE
+	if ground_support_normal.is_valid() and foot.origin.y - floor_height(foot.origin) < 0.42:
+		var normal: Vector3 = ground_support_normal.call(foot.origin, global_position.y + 0.74)
+		var tilt := Quaternion.IDENTITY.slerp(Quaternion(Vector3.UP, normal), 0.78)
+		foot.basis = Basis(tilt) * foot.basis
+		heel = foot * Pace.HEEL
+		toe = foot * Pace.TOE
 	foot.origin.y += maxf(0.0, maxf(floor_height(heel) - heel.y, floor_height(toe) - toe.y))
 	return foot
 
@@ -683,7 +691,7 @@ func has_attack_lane(point: Vector3) -> bool:
 
 
 func attack_step(from: Vector3, to: Vector3) -> Vector3:
-	if not attack_ground_move.is_valid() or not (has_attack_lane(from) or has_attack_lane(to)):
+	if not attack_ground_move.is_valid() or sampling_attack:
 		return to
 	return attack_ground_move.call(from, to)
 
@@ -703,53 +711,63 @@ func _fit_stair_sword(lane: Vector2, reach: float, grip_cant: float) -> void:
 	var wrist := arm["wrist"] as Node3D
 	var socket := Hand.sword_socket(grip_cant)
 	var sword := wrist.transform * socket
-	var to_local_axes := global_basis.orthonormalized().inverse()
-	var up := to_local_axes * Vector3.UP
-	var across := to_local_axes * Vector3.RIGHT
+	var across := global_basis.orthonormalized().inverse() * Vector3.RIGHT
 	var model_scale := global_basis.get_scale().x
+	var tip := sword * (Vector3.UP * reach)
+	var world_tip := to_global(tip)
+	var room := clampf(world_tip.x, lane.x, lane.y)
+	if is_equal_approx(room, world_tip.x):
+		return
+	var arm_to_tip := tip - shoulder.position
+	var length := arm_to_tip.length()
+	var planar := arm_to_tip.slide(across).normalized()
+	if planar.is_zero_approx():
+		planar = global_basis.orthonormalized().inverse() * Vector3.UP
+	var sideways := clampf((room - shoulder.global_position.x) / model_scale, -length, length)
+	var aim := planar * sqrt(maxf(0.0, length * length - sideways * sideways)) + across * sideways
+	# Anticipate rails with a modest shoulder turn. The live sweep still checks contact.
+	var rotation := Quaternion(arm_to_tip.normalized(), aim.normalized())
+	rotation = Quaternion.IDENTITY.slerp(rotation, minf(1.0, 0.55 / maxf(rotation.get_angle(), 0.001)))
 	var deviation := sword_wrist_deviation()
 	var flexion := sword_wrist_flexion()
 	var flex_roll := sword_arm_angles(deviation, flexion)
-
-	# Rotate the shoulder-to-tip arc into the lane, keeping the elbow bend
-	# and the grip relative to the forearm as authored.
-	for _attempt in 3:
-		var tip := sword * Vector3(0.0, reach, 0.0)
-		var world_tip := to_global(tip)
-		var room := clampf(world_tip.x, lane.x, lane.y)
-		if is_equal_approx(room, world_tip.x):
-			break
-		var arm_to_tip := tip - shoulder.position
-		var planar := arm_to_tip.slide(across)
-		if planar.length_squared() < 0.0001:
-			planar = up * 0.01
-		var length := arm_to_tip.length()
-		var sideways := clampf((room - shoulder.global_position.x) / model_scale, -length, length)
-		var in_lane := planar.normalized() * sqrt(maxf(0.0, length * length - sideways * sideways))
-		var rotation := Basis(Quaternion(arm_to_tip.normalized(), (in_lane + across * sideways).normalized()))
-		pose_sword_arm(rotation * sword.basis, flex_roll.x, flex_roll.y, deviation, flexion, grip_cant)
-		sword = wrist.transform * socket
-
-	if not attack_blade_clear.is_valid() or _stair_sword_clear(sword, reach):
-		return
-	# A deck edge or the next tread can also block the blade vertically.
-	# Choose the smallest joint rotation that gives the whole blade room.
-	var aim := sword.basis
-	var pitch_axis := aim.y.cross(up).normalized()
-	if pitch_axis.is_zero_approx():
-		pitch_axis = across
-	for angle in [6.0, 12.0, 20.0, 32.0, 48.0, 70.0, 95.0]:
-		for axis: Vector3 in [pitch_axis, -pitch_axis, up, -up]:
-			var candidate := Basis(axis, deg_to_rad(angle)) * aim
-			pose_sword_arm(candidate, flex_roll.x, flex_roll.y, deviation, flexion, grip_cant)
-			if _stair_sword_clear(wrist.transform * socket, reach):
-				return
-	pose_sword_arm(aim, flex_roll.x, flex_roll.y, deviation, flexion, grip_cant)
+	pose_sword_arm(Basis(rotation) * sword.basis, flex_roll.x, flex_roll.y, deviation, flexion, grip_cant)
 
 
-func _stair_sword_clear(sword: Transform3D, reach: float) -> bool:
-	return attack_blade_clear.call(to_global(sword * Vector3(0.0, BLADE_START, 0.0)),
-		to_global(sword * Vector3(0.0, reach, 0.0)))
+func apply_terrain_blade(pose: Transform3D, recoil: Vector3) -> void:
+	var arm := arms[1]
+	var wrist := arm["wrist"] as Node3D
+	var local_recoil := global_basis.orthonormalized().inverse() * recoil
+	torso.rotate(Vector3.UP, -local_recoil.x * 0.18)
+	torso.rotate(Vector3.RIGHT, local_recoil.z * 0.11)
+	var grip := Hand.sword_socket(sword_grip_cant)
+	var target := (global_transform.affine_inverse() * pose * weapon_spin.transform.affine_inverse()
+		* grip.affine_inverse()).orthonormalized()
+	var shoulder := shoulder_anchor(arm, target.origin)
+	var axis := (target.origin - shoulder).normalized()
+	var forearm_basis := target.basis * sword_wrist_offset(sword_wrist_deviation(), sword_wrist_flexion()).inverse()
+	var pole := (target.origin + forearm_basis.y * FOREARM - shoulder).slide(axis)
+	if pole.length_squared() < 0.0001:
+		pole = (arm["elbow"].position - shoulder).slide(axis)
+	DisplayPose.solve_chain(arm["shoulder"], arm["elbow"], wrist, shoulder, target.origin, pole, UPPER_ARM, FOREARM)
+	wrist.basis = target.basis
+	_seat_sword_arm(arm, sword_grip_cant)
+	_skeleton.sync()
+
+
+func _seat_sword_arm(arm: Dictionary, grip_cant: float, armor_clearance := 0.0) -> void:
+	var upper := arm["shoulder"] as Node3D
+	var forearm := arm["elbow"] as Node3D
+	var wrist := arm["wrist"] as Node3D
+	var hinge := upper.basis.y.cross(forearm.basis.y).normalized()
+	if not hinge.is_zero_approx():
+		upper.basis = Basis(hinge, upper.basis.y, hinge.cross(upper.basis.y))
+		forearm.basis = Basis(hinge, forearm.basis.y, hinge.cross(forearm.basis.y))
+	var outward := (body.basis * torso.basis).x * armor_clearance
+	arm["cap"].position = upper.basis.inverse() * outward
+	var thumb := wrist.basis.x.slide(forearm.basis.y).normalized()
+	arm["twist"].rotation.y = forearm.basis.x.signed_angle_to(thumb, forearm.basis.y)
+	weapon_root.transform = wrist.transform * Hand.sword_socket(grip_cant)
 
 
 func finish_pose(hand_open := 0.24, blade_grip := 1.0, toe_angles := Vector2.ZERO,
@@ -773,21 +791,8 @@ func finish_pose(hand_open := 0.24, blade_grip := 1.0, toe_angles := Vector2.ZER
 	for i in arms.size():
 		var arm := arms[i]
 		var gripping: bool = arm["side"] > 0.0
-		var wrist := arm["wrist"] as Node3D
 		if gripping:
-			var upper_arm := arm["shoulder"] as Node3D
-			var forearm := arm["elbow"] as Node3D
-			# Both ends of the elbow hinge share the same axis. The cuff twists independently.
-			var hinge := upper_arm.basis.y.cross(forearm.basis.y).normalized()
-			if not hinge.is_zero_approx():
-				upper_arm.basis = Basis(hinge, upper_arm.basis.y, hinge.cross(upper_arm.basis.y))
-				forearm.basis = Basis(hinge, forearm.basis.y, hinge.cross(forearm.basis.y))
-			# Convert the outward armor slide using the finalized elbow hinge orientation.
-			var outward := (body.basis * torso.basis).x * shoulder_armor_clearance
-			arm["cap"].position = upper_arm.basis.inverse() * outward
-			var thumb := wrist.basis.x.slide(forearm.basis.y).normalized()
-			arm["twist"].rotation.y = forearm.basis.x.signed_angle_to(thumb, forearm.basis.y)
-			weapon_root.transform = wrist.transform * Hand.sword_socket(grip_cant)
+			_seat_sword_arm(arm, grip_cant, shoulder_armor_clearance)
 		else:
 			arm["twist"].rotation_degrees.y = support_roll
 		Hand.curl(arm["fingers"], blade_grip if gripping else hand_open, gripping, grip_cant if gripping else 0.0)

@@ -349,7 +349,17 @@ func _slash_ribbon(before: float, time_now: float, start: float, blade_before: T
 func _record_trail(dt: float, blade: Transform3D, tone: Color, reach: float) -> void:
 	var heel := blade * Vector3(-0.078, model.BLADE_START + 0.34, 0)
 	var crest := blade * Vector3(0.0, reach, 0.0)
+	if model.blade_effect_endpoint.is_valid():
+		if not model.blade_effect_endpoint.call(blade.origin, heel).is_equal_approx(heel):
+			_trail.tick(dt, false)
+			return
+		crest = model.blade_effect_endpoint.call(heel, crest)
 	_trail.record(dt, heel, crest, tone)
+
+
+func break_terrain_trail() -> void:
+	_trail.clear()
+	_effects.clear_tip_sparks()
 
 
 func play_sound(kind: String, at: Vector3, options: Dictionary, cue := "") -> void:
@@ -395,9 +405,10 @@ func _pose(focus: Vector3, before := -1.0, velocity := Vector3.ZERO, patrol_dt :
 		var path_position := previous
 		if before < Lunge.BURST_END and not dash.get("route_cut", false):
 			path_position = Lunge.track_target(dash, focus, velocity, previous, before, minf(attack_time, Lunge.BURST_END))
+			path_position = model.attack_step(previous, path_position)
 		if attack_time >= Lunge.DURATION:
 			if return_pose.is_empty():
-				Lunge.apply(model, dash, Lunge.DURATION)
+				Lunge.apply(model, dash, Lunge.DURATION, path_position)
 				return_pose = ReturnCut.begin(model, dash["watch"])
 			if time >= PATROL_AT:
 				if not patrol.active:
@@ -583,7 +594,7 @@ func _pose_sprint_flash(clock: float, point: Vector3) -> void:
 	var progress := Lunge.burst_at(clock)
 	var yaw := lerp_angle(_sprint_flash["yaw"], _sprint_flash["aim"], progress)
 	var basis := Basis(Vector3.UP, yaw).scaled(_sprint_entry["flash_scale"])
-	if not model.has_attack_lane(point):
+	if not model.attack_ground_move.is_valid():
 		point.y = (_sprint_flash["origin"] as Vector3).y + 0.10 * sin(PI * progress)
 	model.global_transform = Transform3D(basis, point)
 	# The burst supplies the translation while the lead foot and blade prepare the cut.

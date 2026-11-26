@@ -426,6 +426,8 @@ func _add_action(parent: Container, title: String, callback: Callable) -> Button
 
 
 func _option(key: String, fallback: Variant) -> Variant:
+	if key.begins_with("display."):
+		return TurnSession.get_option(key, fallback)
 	if params != null:
 		return params.getb(key) if fallback is bool else params.getf(key)
 	return options.get(key, fallback)

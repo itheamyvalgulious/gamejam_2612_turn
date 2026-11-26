@@ -227,8 +227,10 @@ func _process(delta: float) -> void:
 		level.prepare_player()
 		player.step(dt, level.arena, level.enemies)
 		level.constrain_player()
+		player.adjust_blade_to_terrain(dt)
 	level.step(dt, ctx)
-	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []), replay, dt)
+	var terrain_clear: Callable = level.terrain_blade_clear if player.terrain_blade_enabled else Callable()
+	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []), replay, dt, terrain_clear)
 	var final_hit := {}
 	for ev in p_events:
 		if ev["kind"] == "kill" and ev["enemy"] == level.finishing_enemy:
@@ -238,7 +240,7 @@ func _process(delta: float) -> void:
 			_on_combat_event(ev)
 	for e in level.enemies:
 		if is_instance_valid(e) and e.alive and level.melee_clear(e.center(), player.rig.global_position + Vector3(0, 2.3, 0)):
-			var r := Combat.enemy_swing(e, player)
+			var r := Combat.enemy_swing(e, player, terrain_clear if e.kind == "duelist" else Callable())
 			if bool(r.get("hit", false)):
 				Snd.play_at("hit", r.get("pos", Vector3.ZERO), {"gain": 1.1})
 				if Fx != null:

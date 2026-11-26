@@ -177,7 +177,7 @@ func step(dt: float, ctx: Dictionary) -> void:
 	projectiles = ctx.get("projectiles")
 	arena = ctx.get("arena", {})
 	if not alive:
-		_advance_defeat(dt)
+		advance_fatal_reaction(dt, Fx.time_scale)
 		return
 	if player == null or dt <= 0.0:
 		return
@@ -619,15 +619,16 @@ func die() -> void:
 	_knockdown = Knockdown.new()
 	var supports := smoothstep(0.0, 0.78, float(rig.deployment))
 	_knockdown.begin(rig, arena, point, force, _fatal_contact.get("part", ""), _wheel_speed, supports)
-	Fx.spark(point, _knockdown.force, 1.65)
 	if level != null:
 		level.on_enemy_died(self)
 
 
-func _advance_defeat(dt: float) -> void:
-	if _knockdown == null:
+func advance_fatal_reaction(dt: float, rate: float) -> void:
+	if _knockdown == null or dt <= 0.0:
 		return
-	_knockdown.advance(rig, self, dt)
+	if is_zero_approx(_knockdown.age):
+		Fx.spark(_fatal_contact.get("point", center()), _knockdown.force, 1.72)
+	_knockdown.advance(rig, self, dt, rate)
 	for event in _knockdown.take_contacts():
 		var point: Vector3 = event["point"]
 		match event["kind"]:
@@ -638,12 +639,17 @@ func _advance_defeat(dt: float) -> void:
 				Fx.beam(point, arc, 0.043, Color("c5aaff"), 0.075)
 				Fx.beam(arc, arc + rig.global_basis.x.normalized() * 0.17, 0.029, Color("cae6ff"), 0.065)
 			"rim":
-				_play_sound("rim_scrape", "clang", point, {"pos": point, "gain": 0.6, "rate": 0.81})
-				Fx.spark(point, _knockdown.force, 0.65)
+				var normal: Vector3 = event["normal"]
+				_play_sound("rim_scrape", "clang", point, {"pos": point, "gain": 1.05, "rate": 0.78})
+				Fx.spark(point + normal * 0.045, normal * 0.7 - _knockdown.force * 0.75, 1.40)
+				Fx.shake(0.16)
+			"rim_spark":
+				var normal: Vector3 = event["normal"]
+				Fx.spark(point + normal * 0.045, normal * 0.7 - _knockdown.force * 0.75, 0.60)
 			"shell":
-				_play_sound("body_impact", "hit", point, {"pos": point, "gain": 1.5, "rate": 0.72, "prio": 4})
-				Fx.spark(point, Vector3.UP, 1.1)
-				Fx.shake(0.36)
+				_play_sound("body_impact", "hit", point, {"pos": point, "gain": 1.7, "rate": 0.72, "prio": 4})
+				Fx.spark(point + Vector3.UP * 0.055, Vector3.UP, 1.38)
+				Fx.shake(0.50)
 
 
 func _exit_tree() -> void:
