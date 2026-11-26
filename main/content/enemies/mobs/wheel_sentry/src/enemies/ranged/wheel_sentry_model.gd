@@ -133,11 +133,11 @@ func armor_to_release(part: String, point: Vector3) -> Array[Node3D]:
 
 func set_defeat_power(time: float) -> void:
 	var head_power := 1.0 - smoothstep(0.018, 0.16, time)
-	var wheel_power := 1.0 - smoothstep(0.08, 0.65, time)
+	var wheel_power := 1.0 - smoothstep(0.30, 0.62, time)
 	_purple.emission_energy_multiplier = 3.2 * head_power
 	_cyan.emission_energy_multiplier = 2.1 * head_power
 	for lamp: StandardMaterial3D in _wheel_lamps:
-		lamp.emission_energy_multiplier = _wheel_lamps[lamp] * wheel_power * (0.83 + 0.17 * cos(time * 72.0))
+		lamp.emission_energy_multiplier = _wheel_lamps[lamp] * wheel_power * (0.74 + 0.26 * cos(time * 64.0))
 
 
 func fold_failed_support(side: float, amount: float) -> void:
