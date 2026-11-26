@@ -341,10 +341,6 @@ func _set_fullscreen(enabled: bool) -> void:
 		_home_settings.sync_window_mode(enabled)
 
 
-func get_option(key: String, dflt: Variant = null) -> Variant:
-	return _options.get_value("game", key, dflt)
-
-
 ## 关卡运行期的调试参数（如 rules.god_mode），不写入存档。
 func set_game_param(key: String, value: Variant) -> void:
 	if _services != null:
