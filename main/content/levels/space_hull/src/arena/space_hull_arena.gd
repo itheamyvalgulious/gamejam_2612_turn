@@ -894,7 +894,7 @@ static func _arena_a(root: Node3D, cover: Array, platforms: Array) -> void:
 	_cargo_pod(root, cover, platforms, 8.0, -6.0, 3.2, 2.4, 3.2, "A1")
 	# 两组可跳箱
 	_crate(root, cover, platforms, 13.0, 5.2, 1.8, 1.2, 1.8)
-	_crate(root, cover, platforms, 14.9, 4.2, 1.4, 0.9, 1.4)
+	_crate(root, cover, platforms, 16.4, 3.0, 1.4, 0.9, 1.4)
 	# 低矮管组：可站
 	_pipe_housing(root, cover, platforms, 4.2, 3.2, 3.0, 1.8)
 	# 散热立板：高墙 + 底座/立柱/上下集管，避免看起来像一块悬空白板
