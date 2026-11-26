@@ -133,6 +133,11 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 		"player_spawn": spawn,
 		"aa": aa,
 		"gates": gates,
+		"nodes": [
+			{"x": 24.0, "z": -6.0},
+			{"x": 104.0, "z": 6.0},
+			{"x": 184.0, "z": -13.0},
+		],
 		"checkpoints": [
 			{"x": -3.0, "z": 0.0},
 			{"x": 35.0, "z": 0.0},
@@ -1059,7 +1064,7 @@ static func _aa_turret(aa: Node3D, cover: Array, x: float, z: float, aim: Vector
 	for zz in [-0.62, 0.62]:
 		_tube(t, Vector3(1.2, 1.75, zz), Vector3(4.4, 1.92, zz), 0.13, _M["steel_dark"])
 		_b(t, Vector3(0.55, 0.30, 0.34), Vector3(4.55, 1.94, zz), _M["hull_dark"])
-		var ring := _torus(t, 0.20, 0.045, Vector3(4.58, 1.94, zz), _M["amber"], Vector3(0.0, 0.0, PI * 0.5), 16)
+		var ring := _torus(t, 0.20, 0.045, Vector3(4.88, 1.94, zz), _M["amber"], Vector3(0.0, 0.0, PI * 0.5), 16)
 		aa.part(ring, _M["amber"], _M["off"])
 	# 后部散热格栅
 	for k in 4:
@@ -1095,6 +1100,15 @@ static func _gate(root: Node3D, aa: Node3D, cover: Array, platforms: Array, gate
 	var dz := z1 - z0
 	var wide := dz > 20.0
 	var top := DECK_Y + 7.0
+	# 上/下发射轨：让红色光条像一道门，而不是一根栏杆
+	_b(aa, Vector3(0.34, 0.20, dz + 0.6), Vector3(x, DECK_Y + 0.12, cz), _M["steel_dark"])
+	_b(aa, Vector3(0.34, 0.20, dz + 0.6), Vector3(x, DECK_Y + 3.10, cz), _M["steel_dark"])
+	for k in int((dz + 0.6) / 0.9):
+		var hz := cz - (dz + 0.6) * 0.5 + 0.45 + float(k) * 0.9
+		_b(aa, Vector3(0.38, 0.22, 0.42), Vector3(x, DECK_Y + 0.12, hz),
+			_M["hazard_y"] if k % 2 == 0 else _M["hazard_k"])
+	var top_rail := _b(aa, Vector3(0.36, 0.10, dz), Vector3(x, DECK_Y + 3.16, cz), _M["red"])
+	aa.part(top_rail, _M["red"], _M["off"])
 	# 两根门柱
 	for zz in [z0 - 0.5, z1 + 0.5]:
 		# 门柱落在小外伸台上，不从栈桥边上悬空
@@ -1120,7 +1134,7 @@ static func _gate(root: Node3D, aa: Node3D, cover: Array, platforms: Array, gate
 	var n := int(maxf(7.0, floor(dz / 0.95)))
 	for i in n:
 		var zz := z0 + (dz * (float(i) + 0.5) / float(n))
-		var bar := _b(aa, Vector3(0.05, 3.0, 0.06), Vector3(x, DECK_Y + 1.5, zz), _M["red"])
+		var bar := _b(aa, Vector3(0.05, 3.0, 0.06), Vector3(x, DECK_Y + 1.55, zz), _M["red"])
 		aa.part(bar, _M["red"], _M["off"])
 	# 门口地面警示
 	_b(root, Vector3(1.4, 0.025, dz), Vector3(x, DECK_Y + 0.015, cz), _M["hazard_k"])
@@ -1171,6 +1185,10 @@ static func _power_node(aa: Node3D, cover: Array, x: float, z: float, face: floa
 	_tube(n, Vector3(0.0, 3.1, 0.0), Vector3(0.0, 6.2, 0.0), 0.10, _M["steel_dark"])
 	var top_beacon := _b(n, Vector3(0.50, 0.50, 0.50), Vector3(0.0, 6.35, 0.0), _M["amber"])
 	aa.part(top_beacon, _M["amber"], _M["off"])
+	var beam := _b(n, Vector3(0.07, 3.2, 0.07), Vector3(0.0, 8.2, 0.0), _M["amber"])
+	aa.part(beam, _M["amber"], _M["off"])
+	var ring := _torus(n, 0.95, 0.055, Vector3(0.0, 9.75, 0.0), _M["amber"], Vector3.ZERO, 24)
+	aa.part(ring, _M["amber"], _M["off"])
 	var lamp := _omni_node(n, Vector3(0.0, 2.4, face * 1.5), Color(1.0, 0.42, 0.10), 1.2, 11.0, 0.35)
 	aa.light(lamp, 1.2)
 	var lamp2 := _omni_node(n, Vector3(0.0, 6.3, 0.0), Color(1.0, 0.46, 0.12), 1.4, 22.0, 0.30)

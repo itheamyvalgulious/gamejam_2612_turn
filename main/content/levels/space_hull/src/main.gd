@@ -5,13 +5,17 @@ extends "res://src/main.gd"
 ## 这里把“低于甲板 0.8 m”当作跌落，送回最近检查点。
 ##
 ## 三道防空门禁：炮和光闸通电时走进门禁范围会被推回，并提示先拆供能节点。
-## 初稿没有敌人，F8 直接切“全部断电”，用来预览清完怪 / 拆完节点后的状态。
-## F9 = 截图到 user://space_live.png。
+## 初稿没有敌人：
+##   走到琥珀色桅杆旁按住 F 约 2.5 s = 模拟“拆供能节点”；
+##   F8 = 立刻切全部断电，用来快速预览。
+##   F9 = 截图到 user://space_live.png。
 
 const U := 1.0 / 0.547
 const DECK_Y := 4.0
 const FALL_Y := 3.2
 const GATE_Y_MAX := 12.0
+const NODE_RADIUS := 4.5
+const SABOTAGE_TIME := 2.5
 
 var _cps: Array = []
 var _cp := 0
@@ -19,6 +23,8 @@ var _grace := 1.0
 var _off_t := 0.0
 var _done := false
 var _dbg := 0.0
+var _near_node := -1
+var _sabotage_t := 0.0
 
 
 func _ready() -> void:
@@ -58,7 +64,7 @@ func _process(delta: float) -> void:
 			if (w.x >= float(g["x0"]) - 0.40 and w.x <= float(g["x1"]) + 0.40
 					and w.z >= float(g["z0"]) and w.z <= float(g["z1"])
 					and w.y < GATE_Y_MAX):
-				_respawn("防空火力封锁", "先拆掉区内的供能节点（初稿 F8 预览断电）")
+				_respawn("防空火力封锁", "到区内琥珀色桅杆旁按住 F 拆除供能节点（或 F8 预览）")
 				return
 
 		# 跌落：路线在 y=4，船壳顶在 y=0
@@ -69,6 +75,7 @@ func _process(delta: float) -> void:
 				return
 		else:
 			_off_t = 0.0
+			_update_sabotage(delta, w)
 			_checkpoint(w)
 			if not _done and w.x > 188.2 and absf(w.z) < 15.0:
 				_done = true
@@ -81,6 +88,45 @@ func _process(delta: float) -> void:
 		var aa = level.arena.get("aa")
 		var state: String = "on" if aa != null and aa.online else "off"
 		print("[hull] p=(%.1f, %.2f, %.1f) cp=%d aa=%s" % [w.x, w.y, w.z, _cp, state])
+
+
+func _update_sabotage(delta: float, w: Vector3) -> void:
+	var aa = level.arena.get("aa")
+	if aa == null or not aa.online:
+		if _near_node != -1:
+			hud.set_hint("")
+		_near_node = -1
+		_sabotage_t = 0.0
+		return
+	var nodes: Array = level.arena.get("nodes", [])
+	var best := -1
+	var best_d := 999.0
+	for i in nodes.size():
+		var n: Dictionary = nodes[i]
+		var d := Vector2(w.x - float(n["x"]), w.z - float(n["z"])).length()
+		if d < best_d:
+			best_d = d
+			best = i
+	if best < 0 or best_d > NODE_RADIUS:
+		if _near_node != -1:
+			hud.set_hint("")
+		_near_node = -1
+		_sabotage_t = 0.0
+		return
+	_near_node = best
+	if Input.is_key_pressed(KEY_F):
+		_sabotage_t += delta
+		var pct := int(minf(_sabotage_t / SABOTAGE_TIME, 1.0) * 100.0)
+		hud.set_hint("拆除供能节点 … %d%%（按住 F）" % pct)
+		if _sabotage_t >= SABOTAGE_TIME:
+			aa.set_online(false)
+			hud.show_banner("供能节点已拆除", "防空炮与光闸离线；可以继续推进", 1.6)
+			hud.set_hint("")
+			_near_node = -1
+			_sabotage_t = 0.0
+	else:
+		_sabotage_t = 0.0
+		hud.set_hint("按住 F 拆除供能节点（初稿模拟 2.5 s）")
 
 
 func _checkpoint(w: Vector3) -> void:
