@@ -101,17 +101,17 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 	_aa_turret(aa1, cover, platforms, 28.0, -6.0, Vector3(38.0, DECK_Y, -6.0))
 	_aa_turret(aa1, cover, platforms, 28.0, 6.0, Vector3(38.0, DECK_Y, 6.0))
 	_gate(root, aa1, cover, platforms, gates, G1, -4.4, 4.4)
-	_power_node(aa1, cover, 24.0, -6.0, 1.0, Vector3(28.0, DECK_Y, -6.0), Vector3(28.0, DECK_Y, 6.0))
+	_power_node(aa1, cover, platforms, 24.0, -6.0, 1.0, Vector3(28.0, DECK_Y, -6.0), Vector3(28.0, DECK_Y, 6.0))
 
 	_aa_turret(aa2, cover, platforms, 107.5, -6.5, Vector3(117.5, DECK_Y, -6.5))
 	_aa_turret(aa2, cover, platforms, 107.5, 6.5, Vector3(117.5, DECK_Y, 6.5))
 	_gate(root, aa2, cover, platforms, gates, G2, -5.0, 5.0)
-	_power_node(aa2, cover, 104.0, 6.0, -1.0, Vector3(107.5, DECK_Y, 6.5), Vector3(107.5, DECK_Y, -6.5))
+	_power_node(aa2, cover, platforms, 104.0, 6.0, -1.0, Vector3(107.5, DECK_Y, 6.5), Vector3(107.5, DECK_Y, -6.5))
 
 	_aa_turret(aa3, cover, platforms, 184.0, -16.0, Vector3(192.0, DECK_Y, -22.0))
 	_aa_turret(aa3, cover, platforms, 184.0, 16.0, Vector3(192.0, DECK_Y, 22.0))
 	_gate(root, aa3, cover, platforms, gates, G3, -17.2, 17.2)
-	_power_node(aa3, cover, 184.0, -13.0, 1.0, Vector3(184.0, DECK_Y, -16.0), Vector3(184.0, DECK_Y, 16.0))
+	_power_node(aa3, cover, platforms, 184.0, -13.0, 1.0, Vector3(184.0, DECK_Y, -16.0), Vector3(184.0, DECK_Y, 16.0))
 
 	_hangar_block(root, cover)
 	_lights(root, cover)
@@ -1185,7 +1185,7 @@ static func _gate(root: Node3D, aa: Node3D, cover: Array, platforms: Array, gate
 	gates.append({"x0": x - 0.35, "x1": x + 0.35, "z0": z0, "z1": z1, "state": aa})
 
 
-static func _power_node(aa: Node3D, cover: Array, x: float, z: float, face: float,
+static func _power_node(aa: Node3D, cover: Array, platforms: Array, x: float, z: float, face: float,
 		t1 := Vector3.ZERO, t2 := Vector3.ZERO) -> void:
 	# face = +1 朝 +Z，-1 朝 -Z
 	var n := Node3D.new()
@@ -1235,8 +1235,10 @@ static func _power_node(aa: Node3D, cover: Array, x: float, z: float, face: floa
 	aa.light(lamp, 1.2)
 	var lamp2 := _omni_node(n, Vector3(0.0, 6.3, 0.0), Color(1.0, 0.46, 0.12), 1.4, 22.0, 0.30)
 	aa.light(lamp2, 1.4)
-	# 碰撞
-	_cov(cover, Vector3(x, DECK_Y, z), 2.60, 3.2)
+	# 碰撞：机身挡人；顶盖（3.5 x 2.7）可站，侧碰撞停在台面下 0.30
+	_cov(cover, Vector3(x, DECK_Y, z), 2.60, 2.72)
+	platforms.append({"c": Vector3(x, 0.0, z) * U,
+		"hx": 1.75 * U, "hz": 1.35 * U, "h": (DECK_Y + 3.02) * U})
 	# 从节点到两座炮塔的电缆
 	if t1 != Vector3.ZERO:
 		_cable_to(aa, Vector3(x, DECK_Y + 0.42, z), t1)
