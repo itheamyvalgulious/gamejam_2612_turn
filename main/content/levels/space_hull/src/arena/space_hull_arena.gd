@@ -668,15 +668,15 @@ static func _bulwarks(root: Node3D, cover: Array, platforms: Array) -> void:
 	# 战斗 A
 	_bulwark(root, cover, platforms, 0.0, 26.0, -W_A + 0.25, -1.0, 1.25)
 	_bulwark(root, cover, platforms, 0.0, 26.0, W_A - 0.25, 1.0, 1.25)
-	_funnel_wall(root, cover, Vector2(26.0, -W_A + 0.25), Vector2(30.0, -W_T1 - 0.15), 1.85)
-	_funnel_wall(root, cover, Vector2(26.0, W_A - 0.25), Vector2(30.0, W_T1 + 0.15), 1.85)
+	_funnel_wall(root, cover, platforms, Vector2(26.0, -W_A + 0.25), Vector2(30.0, -W_T1 - 0.15), 1.85)
+	_funnel_wall(root, cover, platforms, Vector2(26.0, W_A - 0.25), Vector2(30.0, W_T1 + 0.15), 1.85)
 	# 桁架 1：按断口分段
 	_bulwark_runs(root, cover, platforms, 30.0, 80.0, W_T1, GAPS1)
 	# 战斗 B
 	_bulwark(root, cover, platforms, 80.0, 106.0, -W_B + 0.25, -1.0, 1.25)
 	_bulwark(root, cover, platforms, 80.0, 106.0, W_B - 0.25, 1.0, 1.25)
-	_funnel_wall(root, cover, Vector2(106.0, -W_B + 0.25), Vector2(110.0, -W_T2 - 0.15), 1.85)
-	_funnel_wall(root, cover, Vector2(106.0, W_B - 0.25), Vector2(110.0, W_T2 + 0.15), 1.85)
+	_funnel_wall(root, cover, platforms, Vector2(106.0, -W_B + 0.25), Vector2(110.0, -W_T2 - 0.15), 1.85)
+	_funnel_wall(root, cover, platforms, Vector2(106.0, W_B - 0.25), Vector2(110.0, W_T2 + 0.15), 1.85)
 	# 桁架 2
 	_bulwark_runs(root, cover, platforms, 110.0, 160.0, W_T2, GAPS2)
 	# 战斗 C + 大门前
@@ -731,7 +731,8 @@ static func _bulwark(root: Node3D, cover: Array, platforms: Array,
 		"hx": dx * 0.5 * U, "hz": 0.32 * U, "h": (top + 0.06) * U})
 
 
-static func _funnel_wall(root: Node3D, cover: Array, a: Vector2, b: Vector2, h: float) -> void:
+static func _funnel_wall(root: Node3D, cover: Array, platforms: Array,
+		a: Vector2, b: Vector2, h: float) -> void:
 	var d := b - a
 	var total := d.length()
 	if total < 0.1:
@@ -751,8 +752,14 @@ static func _funnel_wall(root: Node3D, cover: Array, a: Vector2, b: Vector2, h: 
 	# 入口黄黑条 + 警示灯
 	_b(root, Vector3(1.0, 0.26, 0.06), Vector3(a.x, DECK_Y + 0.34, a.y), _M["hazard_y"], Vector3(0.0, ang, 0.0))
 	_b(root, Vector3(0.22, 0.22, 0.22), Vector3(a.x, DECK_Y + h + 0.18, a.y), _M["amber"])
-	# 只挡不站：顶面 1.85 m，超过跳跃高度
+	# 侧面挡人；顶面登记成一串小台面，沿斜墙可站
 	_chain_y(cover, a, b, 0.14, DECK_Y, DECK_Y + h - 0.30)
+	var top := DECK_Y + h + 0.06
+	var segs := maxi(2, int(ceil(total / 0.45)))
+	for i in range(segs + 1):
+		var p := a.lerp(b, float(i) / float(segs))
+		platforms.append({"c": Vector3(p.x, 0.0, p.y) * U,
+			"hx": 0.27 * U, "hz": 0.27 * U, "h": top * U})
 
 
 # ================================================================== 实验室
@@ -864,7 +871,7 @@ static func _lab(root: Node3D, cover: Array) -> void:
 # ================================================================== 战斗 A
 static func _arena_a(root: Node3D, cover: Array, platforms: Array) -> void:
 	# 货舱/设备箱：高，不可站
-	_cargo_pod(root, cover, 8.0, -6.0, 3.2, 2.4, 3.2, "A1")
+	_cargo_pod(root, cover, platforms, 8.0, -6.0, 3.2, 2.4, 3.2, "A1")
 	# 两组可跳箱
 	_crate(root, cover, platforms, 13.0, 5.2, 1.8, 1.2, 1.8)
 	_crate(root, cover, platforms, 14.9, 4.2, 1.4, 0.9, 1.4)
@@ -891,6 +898,8 @@ static func _arena_b(root: Node3D, cover: Array, platforms: Array) -> void:
 	for gy in range(0, 5, 1):
 		_b(root, Vector3(4.4, 0.10, 0.60), Vector3(94.0, DECK_Y + 0.4 + float(gy) * 0.55, -1.42), _M["steel_dark"])
 	_ring_y(cover, 94.0, -3.6, 2.1, 2.1, DECK_Y, DECK_Y + 2.5)
+	platforms.append({"c": Vector3(94.0, 0.0, -3.6) * U,
+		"hx": 2.1 * U, "hz": 2.1 * U, "h": (DECK_Y + 2.8) * U})
 	# 两侧矮箱，可站
 	_crate(root, cover, platforms, 86.0, 5.6, 2.0, 1.4, 2.0)
 	_crate(root, cover, platforms, 102.0, 5.6, 2.0, 1.4, 2.0)
@@ -930,7 +939,7 @@ static func _arena_c(root: Node3D, cover: Array, platforms: Array) -> void:
 
 
 # ================================================================== 通用实体
-static func _cargo_pod(root: Node3D, cover: Array, cx: float, cz: float,
+static func _cargo_pod(root: Node3D, cover: Array, platforms: Array, cx: float, cz: float,
 		hx: float, h: float, hz: float, tag: String) -> void:
 	var y0 := DECK_Y
 	_b(root, Vector3(hx * 2.0, h, hz * 2.0), Vector3(cx, y0 + h * 0.5, cz), _M["armor"])
@@ -956,6 +965,8 @@ static func _cargo_pod(root: Node3D, cover: Array, cx: float, cz: float,
 		_b(root, Vector3(0.42, 0.22, 0.04), Vector3(xx, y0 + 0.12, face + 0.01),
 			_M["hazard_y"] if k % 2 == 0 else _M["hazard_k"])
 	_ring_y(cover, cx, cz, hx, hz, y0, y0 + h - 0.30)
+	platforms.append({"c": Vector3(cx, 0.0, cz) * U,
+		"hx": hx * U, "hz": hz * U, "h": (y0 + h) * U})
 	root.set_meta("pod_" + tag, true)
 
 
@@ -1109,6 +1120,8 @@ static func _gate(root: Node3D, aa: Node3D, cover: Array, platforms: Array, gate
 			_M["hazard_y"] if k % 2 == 0 else _M["hazard_k"])
 	var top_rail := _b(aa, Vector3(0.36, 0.10, dz), Vector3(x, DECK_Y + 3.16, cz), _M["red"])
 	aa.part(top_rail, _M["red"], _M["off"])
+	platforms.append({"c": Vector3(x, 0.0, cz) * U,
+		"hx": 0.18 * U, "hz": dz * 0.5 * U, "h": (DECK_Y + 3.21) * U})
 	# 两根门柱
 	for zz in [z0 - 0.5, z1 + 0.5]:
 		# 门柱落在小外伸台上，不从栈桥边上悬空
