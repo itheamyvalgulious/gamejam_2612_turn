@@ -20,6 +20,10 @@ func _ready() -> void:
 		var bench := preload("res://tools/bench.gd").new()
 		bench.name = "BenchDriver"
 		get_tree().root.add_child.call_deferred(bench)
+	if "--play-bench" in OS.get_cmdline_user_args():
+		var play_bench := preload("res://tools/play_bench.gd").new()
+		play_bench.name = "PlayBenchDriver"
+		get_tree().root.add_child.call_deferred(play_bench)
 	if "--repro" in OS.get_cmdline_user_args():
 		var repro = load("res://tools/repro.gd").new()
 		repro.name = "ReproDriver"

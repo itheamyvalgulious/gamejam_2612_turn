@@ -284,3 +284,138 @@ static func pivot(parent: Node3D, pos: Vector3, node_name := "") -> Node3D:
 static func bolt(parent: Node3D, pos: Vector3, radius: float, height: float, mat: Material) -> void:
 	var mesh := prism(6, radius, radius * 0.82, height)
 	add(parent, mesh, mat, pos)
+
+## 合并同一父节点下、同材质的叶子 MeshInstance3D。
+## 只合并「直接子节点」，并跳过 top_level / 多 surface / 带骨架的网格，
+## 所以所有被动画驱动的 pivot 都保持原样；顶点烘焙到父节点局部空间，
+## 渲染结果、阴影和材质完全不变，只是 draw call 大幅减少。
+static func merge_child_meshes(root: Node) -> void:
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		if node is Node3D and (node as Node3D).top_level:
+			continue
+		var groups := {}
+		for raw in node.get_children():
+			if not (raw is MeshInstance3D):
+				continue
+			var mi: MeshInstance3D = raw
+			if mi.mesh == null or mi.mesh.get_surface_count() != 1 or mi.top_level:
+				continue
+			if mi.skin != null or not mi.skeleton.is_empty():
+				continue
+			var mat: Material = mi.material_override
+			if mat == null:
+				mat = mi.mesh.surface_get_material(0)
+			if mat == null:
+				continue
+			var key := [mat, mi.cast_shadow, mi.gi_mode, mi.layers, mi.visible]
+			if not groups.has(key):
+				groups[key] = []
+			(groups[key] as Array).append(mi)
+		for key in groups:
+			var list: Array = groups[key]
+			if list.size() < 2:
+				continue
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			var ok := true
+			for item: MeshInstance3D in list:
+				st.append_from(item.mesh, 0, item.transform)
+			var merged := st.commit() as ArrayMesh
+			if merged == null:
+				ok = false
+			if not ok:
+				continue
+			var first: MeshInstance3D = list[0]
+			var out := MeshInstance3D.new()
+			out.name = "Merged"
+			out.mesh = merged
+			out.material_override = first.material_override
+			if out.material_override == null:
+				merged.surface_set_material(0, first.mesh.surface_get_material(0))
+			out.cast_shadow = first.cast_shadow
+			out.gi_mode = first.gi_mode
+			out.layers = first.layers
+			out.visible = first.visible
+			node.add_child(out)
+			for item: MeshInstance3D in list:
+				node.remove_child(item)
+				item.queue_free()
+		for child in node.get_children():
+			if child is Node3D and not (child is MeshInstance3D):
+				stack.append(child)
+
+
+## 把一个静态子树里的所有网格按材质合并到 root（跳过 skip 中的子树，
+## 例如会被击飞的装甲板）。顶点烘焙到 root 局部空间；root 本身的动画保留。
+static func merge_subtree_meshes(root: Node3D, skip: Array) -> void:
+	var skip_ids := {}
+	for item in skip:
+		if is_instance_valid(item):
+			skip_ids[item.get_instance_id()] = true
+	var meshes: Array = []
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n != root and n is Node3D:
+			var n3 := n as Node3D
+			if n3.top_level or skip_ids.has(n.get_instance_id()):
+				continue
+		for c in n.get_children():
+			if c is MeshInstance3D:
+				meshes.append(c)
+			elif c is Node3D:
+				stack.append(c)
+	var groups := {}
+	for raw in meshes:
+		var mi: MeshInstance3D = raw
+		if mi.mesh == null or mi.mesh.get_surface_count() != 1 or mi.top_level:
+			continue
+		if mi.skin != null or not mi.skeleton.is_empty():
+			continue
+		var mat: Material = mi.material_override
+		if mat == null:
+			mat = mi.mesh.surface_get_material(0)
+		if mat == null:
+			continue
+		var key := [mat, mi.cast_shadow, mi.gi_mode, mi.layers, mi.visible]
+		if not groups.has(key):
+			groups[key] = []
+		(groups[key] as Array).append(mi)
+	for key in groups:
+		var list: Array = groups[key]
+		if list.size() < 2:
+			continue
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for item: MeshInstance3D in list:
+			st.append_from(item.mesh, 0, _chain_to(root, item))
+		var merged := st.commit() as ArrayMesh
+		if merged == null:
+			continue
+		var first: MeshInstance3D = list[0]
+		var out := MeshInstance3D.new()
+		out.name = "Merged"
+		out.mesh = merged
+		out.material_override = first.material_override
+		if out.material_override == null:
+			merged.surface_set_material(0, first.mesh.surface_get_material(0))
+		out.cast_shadow = first.cast_shadow
+		out.gi_mode = first.gi_mode
+		out.layers = first.layers
+		out.visible = first.visible
+		root.add_child(out)
+		for item: MeshInstance3D in list:
+			item.get_parent().remove_child(item)
+			item.queue_free()
+
+
+static func _chain_to(root: Node, node: Node3D) -> Transform3D:
+	var xf := node.transform
+	var p := node.get_parent()
+	while p != null and p != root:
+		if p is Node3D:
+			xf = (p as Node3D).transform * xf
+		p = p.get_parent()
+	return xf

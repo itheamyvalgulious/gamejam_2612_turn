@@ -21,6 +21,17 @@ var was_airborne := false
 var rng := RandomNumberGenerator.new()
 var player_previous := Vector3.ZERO
 var finishing_enemy: Node3D
+## 碰撞预计算：把 walkables 的线性查找换成一次性标记，position_clear 每帧
+## 会被寻路/移动调用上千次，这是 sentinel 寻路热点的根源。
+var _solid_boxes: Array = []
+var _solid_walk: PackedByteArray = PackedByteArray()
+var _walkable_boxes: Array = []
+var _collision_ready := false
+## 2m XZ 空间网格：position_clear 只检查附近格子里的碰撞体，结果与全量扫描一致。
+const SOLID_CELL := 2.0
+var _solid_grid: Dictionary = {}
+var _solid_seen: PackedInt32Array = PackedInt32Array()
+var _solid_stamp := 0
 
 func start_level(_idx: int) -> void:
 	finishing_enemy = null
@@ -31,6 +42,7 @@ func start_level(_idx: int) -> void:
 		arena_node = arena["node"]
 		add_child(arena_node)
 		preload("res://src/encounter/neon_gi.gd").install(arena_node,not arena["vertical"])
+	_rebuild_collision_cache()
 	if projectiles != null:
 		projectiles.clear_all()
 	player.rig.ground_height = arena["player_spawn"].origin.y
@@ -185,15 +197,61 @@ func resolve_motion(from: Vector3, target: Vector3, can_step := true) -> Vector3
 				pos.y = box.end.y
 	return pos
 
+func _rebuild_collision_cache() -> void:
+	_solid_boxes.clear()
+	_solid_walk.clear()
+	_walkable_boxes.clear()
+	var walkable_set := {}
+	for box: AABB in arena.get("walkables", []):
+		walkable_set[box] = true
+		_walkable_boxes.append(box)
+	for box: AABB in arena.get("solids", []):
+		_solid_boxes.append(box)
+		_solid_walk.append(1 if walkable_set.has(box) else 0)
+	_solid_grid.clear()
+	for i in _solid_boxes.size():
+		var box: AABB = _solid_boxes[i]
+		for gx in range(int(floor(box.position.x / SOLID_CELL)), int(floor(box.end.x / SOLID_CELL)) + 1):
+			for gz in range(int(floor(box.position.z / SOLID_CELL)), int(floor(box.end.z / SOLID_CELL)) + 1):
+				var key := Vector2i(gx, gz)
+				if not _solid_grid.has(key):
+					_solid_grid[key] = []
+				(_solid_grid[key] as Array).append(i)
+	_solid_seen.resize(_solid_boxes.size())
+	_solid_stamp = 0
+	_collision_ready = true
+
+
 func position_clear(pos: Vector3, radius := ACTOR_RADIUS, can_step := true) -> bool:
-	for box: AABB in arena.get("solids",[]):
-		var step_height := 0.45 if can_step and arena["walkables"].has(box) else 0.05
-		if pos.y>=box.end.y-step_height or pos.y+4.6<=box.position.y:
-			continue
-		# Tread noses have zero horizontal padding: support is resolved at the actor center.
-		var padding := 0.0 if can_step and arena["walkables"].has(box) else radius
-		if Rect2(box.position.x-padding,box.position.z-padding,box.size.x+padding*2,box.size.z+padding*2).has_point(Vector2(pos.x,pos.z)):
-			return false
+	if not _collision_ready:
+		_rebuild_collision_cache()
+	_solid_stamp += 1
+	if _solid_stamp >= 0x3FFFFFFF:
+		_solid_seen.fill(0)
+		_solid_stamp = 1
+	var x0 := int(floor((pos.x - radius) / SOLID_CELL))
+	var x1 := int(floor((pos.x + radius) / SOLID_CELL))
+	var z0 := int(floor((pos.z - radius) / SOLID_CELL))
+	var z1 := int(floor((pos.z + radius) / SOLID_CELL))
+	for gx in range(x0, x1 + 1):
+		for gz in range(z0, z1 + 1):
+			var cell = _solid_grid.get(Vector2i(gx, gz))
+			if cell == null:
+				continue
+			for index: int in cell:
+				if _solid_seen[index] == _solid_stamp:
+					continue
+				_solid_seen[index] = _solid_stamp
+				var box: AABB = _solid_boxes[index]
+				var walk := _solid_walk[index] != 0
+				var step_height := 0.45 if can_step and walk else 0.05
+				if pos.y >= box.end.y - step_height or pos.y + 4.6 <= box.position.y:
+					continue
+				# Tread noses have zero horizontal padding: support is resolved at the actor center.
+				var padding := 0.0 if can_step and walk else radius
+				if Rect2(box.position.x-padding, box.position.z-padding,
+						box.size.x+padding*2, box.size.z+padding*2).has_point(Vector2(pos.x, pos.z)):
+					return false
 	return true
 
 func phase_visible(enemy) -> bool:
@@ -234,7 +292,7 @@ func choose_phase_point(enemy) -> int:
 
 
 func melee_clear(a: Vector3, b: Vector3) -> bool:
-	for box: AABB in arena["solids"]:
+	for box: AABB in _solid_boxes:
 		if box.intersects_segment(a, b) != null:
 			return false
 	return true
@@ -325,7 +383,7 @@ func duelist_blade_clear(heel: Vector3, tip: Vector3) -> bool:
 
 func duelist_floor(at: Vector3, ceiling: float) -> float:
 	var height := 0.0
-	for box: AABB in arena["walkables"]:
+	for box: AABB in _walkable_boxes:
 		if box.end.y <= ceiling and Rect2(box.position.x, box.position.z, box.size.x, box.size.z).has_point(Vector2(at.x, at.z)):
 			height = maxf(height, box.end.y)
 	return height
@@ -471,7 +529,7 @@ func _duelist_lower_waypoint(from: Vector3, goal: Vector3) -> Vector3:
 
 func floor_at(pos: Vector3, max_height: float) -> float:
 	var height := 0.0
-	for box: AABB in arena.get("solids",[]):
+	for box: AABB in _solid_boxes:
 		if box.end.y <= max_height and Rect2(box.position.x,box.position.z,box.size.x,box.size.z).has_point(Vector2(pos.x,pos.z)):
 			height = maxf(height,box.end.y)
 	return height

@@ -56,6 +56,10 @@ func _ready() -> void:
 	_build_suspension()
 	_build_turret()
 	set_deployment(0.0)
+	# 同一枢轴下的静态零件合并成单网格：动画枢轴全部保留，视觉不变。
+	MeshKit.merge_child_meshes(self)
+	# 轮子整体绕 RollingWheel 旋转，轮内除可击飞装甲板外都是刚体，可整树合并。
+	MeshKit.merge_subtree_meshes(wheel, _drive_plates)
 
 
 func set_deployment(amount: float) -> void:

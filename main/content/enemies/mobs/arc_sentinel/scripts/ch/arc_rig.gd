@@ -81,6 +81,8 @@ func build(p: Dictionary) -> void:
 	_build_lights()
 	apply_pose({})
 	_apply_tracks()
+	# 同一枢轴下的静态零件合并成单网格：动画枢轴全部保留，视觉不变。
+	MK.merge_child_meshes(self)
 
 
 func _dims() -> void:

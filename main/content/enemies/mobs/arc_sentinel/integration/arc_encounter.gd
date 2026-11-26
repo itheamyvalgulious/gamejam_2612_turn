@@ -17,6 +17,13 @@ var _ground_move: Callable
 var _support_floor: Callable
 var _waypoint: Callable
 var _fall_speed := 0.0
+## 寻路点缓存：路径规划对每只 sentinel 每帧要跑多次碰撞采样，按 0.12s /
+## 位移 0.6m 复用即可，肉眼与命中判定都察觉不到差别。
+var _wp_next := Vector3.ZERO
+var _wp_from := Vector3.ZERO
+var _wp_goal := Vector3.ZERO
+var _wp_age := 0.0
+var _wp_valid := false
 
 
 func _on_respawn() -> void:
@@ -24,6 +31,8 @@ func _on_respawn() -> void:
 	_cooldown = 0.0
 	_attack = 0
 	_consumed = true
+	_wp_valid = false
+	_wp_age = 0.0
 	if rig != null:
 		rig.play_anim("idle")
 		rig.rotation = Vector3(0.0, rig.rotation.y, 0.0)
@@ -135,7 +144,19 @@ func step(dt: float, ctx: Dictionary) -> void:
 			or level.melee_clear(center(), target + Vector3.UP * 1.4))
 		var chase := target
 		if _waypoint.is_valid() and (not clear or distance > 3.25):
-			chase = _waypoint.call(center_at, target)
+			# 路径规划按 0.12s / 位移 0.6m 复用，行为与逐帧重算一致。
+			_wp_age -= dt
+			if not _wp_valid or _wp_age <= 0.0 \
+					or center_at.distance_squared_to(_wp_from) > 0.36 \
+					or target.distance_squared_to(_wp_goal) > 0.36:
+				_wp_next = _waypoint.call(center_at, target)
+				_wp_from = center_at
+				_wp_goal = target
+				_wp_age = 0.12
+				_wp_valid = true
+			chase = _wp_next
+		else:
+			_wp_valid = false
 		var heading := (chase - center_at).slide(Vector3.UP)
 		var desired: float = atan2(heading.x, heading.z) if heading.length_squared() > 0.0001 else rig.rotation.y
 		rig.rotation.y = rotate_toward(rig.rotation.y, desired, dt * 6.0)

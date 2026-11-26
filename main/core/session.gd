@@ -24,6 +24,14 @@ var _resume_mouse := false
 var _home_settings: PauseMenu
 var _home_focus: Control
 var _loading: LevelLoading
+var _debug_hud: CanvasLayer
+var _debug_panel: PanelContainer
+var _debug_label: Label
+var _debug_on := false
+var _debug_samples := PackedFloat32Array()
+var _debug_cursor := 0
+var _debug_filled := 0
+const DEBUG_SAMPLES := 240
 
 
 func _ready() -> void:
@@ -32,7 +40,99 @@ func _ready() -> void:
 	selected_level_index = maxi(0, progress.resume_index())
 	if _options.load(OPTIONS_PATH) == OK and _options.has_section_key("game", "display.fullscreen"):
 		_set_fullscreen(bool(_options.get_value("game", "display.fullscreen")))
+	DisplayServer.window_set_vsync_mode(
+		DisplayServer.VSYNC_ENABLED if bool(get_option("display.vsync", false)) else DisplayServer.VSYNC_DISABLED)
+	_build_debug_hud()
 	get_window().focus_exited.connect(_pause_on_focus_loss)
+
+
+func _build_debug_hud() -> void:
+	_debug_hud = CanvasLayer.new()
+	_debug_hud.name = "DebugHud"
+	_debug_hud.layer = 90
+	_debug_hud.process_mode = Node.PROCESS_MODE_ALWAYS
+	_debug_hud.visible = false
+	add_child(_debug_hud)
+	_debug_panel = PanelContainer.new()
+	_debug_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_debug_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.015, 0.025, 0.04, 0.84)
+	style.border_color = Color(0.34, 0.94, 1.0, 0.75)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(4)
+	style.set_content_margin_all(10)
+	_debug_panel.add_theme_stylebox_override("panel", style)
+	_debug_hud.add_child(_debug_panel)
+	_debug_panel.set_anchors_and_offsets_preset(
+		Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 14)
+	_debug_label = Label.new()
+	_debug_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var font: Font = load("res://runtime/fonts/act/ui_font.tres")
+	if font != null:
+		_debug_label.add_theme_font_override("font", font)
+	_debug_label.add_theme_font_size_override("font_size", 15)
+	_debug_label.add_theme_color_override("font_color", Color(0.84, 0.96, 1.0))
+	_debug_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.85))
+	_debug_label.add_theme_constant_override("shadow_offset_x", 1)
+	_debug_label.add_theme_constant_override("shadow_offset_y", 1)
+	_debug_panel.add_child(_debug_label)
+	_debug_samples.resize(DEBUG_SAMPLES)
+
+
+func toggle_debug_hud() -> void:
+	_debug_on = not _debug_on
+	_debug_hud.visible = _debug_on
+	if _debug_on:
+		_debug_cursor = 0
+		_debug_filled = 0
+		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+		_update_debug_hud(get_process_delta_time())
+
+
+func _update_debug_hud(delta: float) -> void:
+	if not _debug_on:
+		return
+	var ms := delta * 1000.0
+	_debug_samples[_debug_cursor] = ms
+	_debug_cursor = (_debug_cursor + 1) % DEBUG_SAMPLES
+	_debug_filled = mini(_debug_filled + 1, DEBUG_SAMPLES)
+	var count := mini(_debug_filled, 60)
+	var average := 0.0
+	for i in count:
+		average += _debug_samples[(_debug_cursor - 1 - i + DEBUG_SAMPLES * 2) % DEBUG_SAMPLES]
+	average /= float(maxi(count, 1))
+	var sorted: Array[float] = []
+	for i in _debug_filled:
+		sorted.append(_debug_samples[i])
+	sorted.sort()
+	var p95 := sorted[mini(int(float(sorted.size()) * 0.95), sorted.size() - 1)] if not sorted.is_empty() else ms
+	# 该接口返回毫秒（不是文档里写的秒），直接显示。
+	var gpu := RenderingServer.viewport_get_measured_render_time_gpu(
+		get_viewport().get_viewport_rid())
+	var cpu := Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+	var physics := Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+	var draws := int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+	var prims := int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME))
+	var objects := int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME))
+	var nodes := int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))
+	var enemies := ""
+	var current := get_tree().current_scene
+	if is_instance_valid(current):
+		var level: Node = current.get("level")
+		if level != null and level.get("enemies") != null:
+			var alive := 0
+			var total := 0
+			for e in level.get("enemies"):
+				if is_instance_valid(e):
+					total += 1
+					if bool(e.get("alive")):
+						alive += 1
+			if total > 0:
+				enemies = " · 敌 %d/%d" % [alive, total]
+	_debug_label.text = "帧时 %.2f ms  (%.0f FPS)\n60帧均 %.2f · p95 %.2f · 最大 %.2f\nGPU %.2f ms · CPU %.2f ms · 物理 %.2f ms\ndraws %d · prims %s · objs %d\nnodes %d%s" % [
+		ms, 1000.0 / maxf(ms, 0.001), average, p95, sorted[sorted.size() - 1] if not sorted.is_empty() else ms,
+		gpu, cpu, physics, draws, _compact(prims), objects, nodes, enemies]
 
 
 func open_home_settings() -> void:
@@ -130,6 +230,12 @@ func _input(event: InputEvent) -> void:
 	elif key == KEY_ESCAPE and _home_settings != null:
 		get_viewport().set_input_as_handled()
 		_home_settings.back()
+	elif key == KEY_F5 and _active >= 0:
+		var current := get_tree().current_scene
+		if current != null and current.has_method("_menus_open") and bool(current.call("_menus_open")):
+			return
+		get_viewport().set_input_as_handled()
+		toggle_debug_hud()
 	elif key == KEY_F1 and _active >= 0:
 		get_viewport().set_input_as_handled()
 		if _pause_menu != null:
@@ -148,7 +254,8 @@ func _input(event: InputEvent) -> void:
 
 
 func _pause_on_focus_loss() -> void:
-	if DisplayServer.get_name() != "headless":
+	# 自动基准需要无人值守连续跑，焦点丢失不打断模拟。
+	if DisplayServer.get_name() != "headless" and "--play-bench" not in OS.get_cmdline_user_args():
 		_open_pause(true)
 
 
@@ -235,9 +342,23 @@ func _set_fullscreen(enabled: bool) -> void:
 		_home_settings.sync_window_mode(enabled)
 
 
+func get_option(key: String, dflt: Variant = null) -> Variant:
+	return _options.get_value("game", key, dflt)
+
+
+## 关卡运行期的调试参数（如 rules.god_mode），不写入存档。
+func set_game_param(key: String, value: Variant) -> void:
+	if _services != null:
+		_services.get("p").set_value(key, value)
+
+
+
 func _set_option(key: String, value: Variant) -> void:
 	if key == "display.fullscreen":
 		_set_fullscreen(bool(value))
+	elif key == "display.vsync":
+		DisplayServer.window_set_vsync_mode(
+			DisplayServer.VSYNC_ENABLED if bool(value) else DisplayServer.VSYNC_DISABLED)
 	elif _services != null:
 		_services.get("p").set_value(key, value)
 	_options.set_value("game", key, value)
@@ -254,7 +375,8 @@ func _apply_level_options() -> void:
 			parameters.set_value(key, _options.get_value("game", key))
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_update_debug_hud(delta)
 	if _changing or _active < 0 or get_tree().paused:
 		return
 	var current := get_tree().current_scene
@@ -262,6 +384,14 @@ func _process(_delta: float) -> void:
 		var level: Node = current.get("level")
 		if level != null and level.get("state") == "finished":
 			advance_level()
+
+
+func _compact(value: int) -> String:
+	if value >= 1000000:
+		return "%.1fM" % (value / 1000000.0)
+	if value >= 1000:
+		return "%.1fK" % (value / 1000.0)
+	return str(value)
 
 
 func _switch(index: int) -> void:
