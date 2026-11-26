@@ -614,12 +614,15 @@ static func _catwalk_seg(root: Node3D, platforms: Array, x0: float, x1: float,
 		_tube(root, Vector3(float(xx) + 2.0, 3.55, z1 - 0.35), Vector3(float(xx), 0.36, 0.0), 0.13, _M["truss"])
 	for xx in range(int(x0) + 2, int(x1), 8):
 		_b(root, Vector3(0.34, 3.6, 0.34), Vector3(float(xx), 2.0, cz), _M["truss"])
-	# 门架：每 10 m 一道，给栈桥尺度
+	# 门架：每 10 m 一道，立柱放在栈桥外侧，别嵌进可站的矮护墙
 	for xx in range(int(x0) + 5, int(x1), 10):
 		var h := 6.2
+		var post_z := absf(z0) + 0.40
 		for side in [-1.0, 1.0]:
-			_b(root, Vector3(0.44, h, 0.44), Vector3(float(xx), DECK_Y + h * 0.5, side * (absf(z0) - 0.15)), _M["steel_dark"])
-		_b(root, Vector3(0.34, 0.34, dz + 0.3), Vector3(float(xx), DECK_Y + h, cz), _M["steel_dark"])
+			_b(root, Vector3(0.44, h, 0.44), Vector3(float(xx), DECK_Y + h * 0.5, side * post_z), _M["steel_dark"])
+			# 外伸支架：从护墙外侧接到立柱底
+			_b(root, Vector3(0.26, 0.26, 0.72), Vector3(float(xx), DECK_Y + 0.30, side * (absf(z0) + 0.02)), _M["steel_dark"])
+		_b(root, Vector3(0.34, 0.34, dz + 0.8), Vector3(float(xx), DECK_Y + h, cz), _M["steel_dark"])
 		_b(root, Vector3(0.10, 0.10, dz - 0.5), Vector3(float(xx), DECK_Y + h - 0.25, cz), _M["strip"])
 
 
