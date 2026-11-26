@@ -76,9 +76,16 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 	var cover: Array = []
 	var platforms: Array = []
 	var gates: Array = []
-	var aa := AAState.new()
-	aa.name = "AA"
-	root.add_child(aa)
+	# 三段各自一套防空/供能状态：拆 A 段节点只关 A 段光闸
+	var aa1 := AAState.new()
+	aa1.name = "AA1"
+	root.add_child(aa1)
+	var aa2 := AAState.new()
+	aa2.name = "AA2"
+	root.add_child(aa2)
+	var aa3 := AAState.new()
+	aa3.name = "AA3"
+	root.add_child(aa3)
 
 	_environment(root)
 	_hull(root)
@@ -90,21 +97,21 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 	_arena_b(root, cover, platforms)
 	_arena_c(root, cover, platforms)
 
-	# 三道防空门禁 + 三个供能节点（都在同一棵 AA 节点下，F8 一次切全部）
-	_aa_turret(aa, cover, platforms, 28.0, -6.0, Vector3(18.0, DECK_Y, 0.0))
-	_aa_turret(aa, cover, platforms, 28.0, 6.0, Vector3(18.0, DECK_Y, 0.0))
-	_gate(root, aa, cover, platforms, gates, G1, -4.4, 4.4)
-	_power_node(aa, cover, 24.0, -6.0, 1.0, Vector3(28.0, DECK_Y, -6.0), Vector3(28.0, DECK_Y, 6.0))
+	# 三道防空门禁 + 三个供能节点，各自独立
+	_aa_turret(aa1, cover, platforms, 28.0, -6.0, Vector3(18.0, DECK_Y, 0.0))
+	_aa_turret(aa1, cover, platforms, 28.0, 6.0, Vector3(18.0, DECK_Y, 0.0))
+	_gate(root, aa1, cover, platforms, gates, G1, -4.4, 4.4)
+	_power_node(aa1, cover, 24.0, -6.0, 1.0, Vector3(28.0, DECK_Y, -6.0), Vector3(28.0, DECK_Y, 6.0))
 
-	_aa_turret(aa, cover, platforms, 107.5, -6.5, Vector3(96.0, DECK_Y, 0.0))
-	_aa_turret(aa, cover, platforms, 107.5, 6.5, Vector3(96.0, DECK_Y, 0.0))
-	_gate(root, aa, cover, platforms, gates, G2, -5.0, 5.0)
-	_power_node(aa, cover, 104.0, 6.0, -1.0, Vector3(107.5, DECK_Y, 6.5), Vector3(107.5, DECK_Y, -6.5))
+	_aa_turret(aa2, cover, platforms, 107.5, -6.5, Vector3(96.0, DECK_Y, 0.0))
+	_aa_turret(aa2, cover, platforms, 107.5, 6.5, Vector3(96.0, DECK_Y, 0.0))
+	_gate(root, aa2, cover, platforms, gates, G2, -5.0, 5.0)
+	_power_node(aa2, cover, 104.0, 6.0, -1.0, Vector3(107.5, DECK_Y, 6.5), Vector3(107.5, DECK_Y, -6.5))
 
-	_aa_turret(aa, cover, platforms, 184.0, -16.0, Vector3(170.0, DECK_Y, 0.0))
-	_aa_turret(aa, cover, platforms, 184.0, 16.0, Vector3(170.0, DECK_Y, 0.0))
-	_gate(root, aa, cover, platforms, gates, G3, -17.5, 17.5)
-	_power_node(aa, cover, 184.0, -13.0, 1.0, Vector3(184.0, DECK_Y, -16.0), Vector3(184.0, DECK_Y, 16.0))
+	_aa_turret(aa3, cover, platforms, 184.0, -16.0, Vector3(170.0, DECK_Y, 0.0))
+	_aa_turret(aa3, cover, platforms, 184.0, 16.0, Vector3(170.0, DECK_Y, 0.0))
+	_gate(root, aa3, cover, platforms, gates, G3, -17.5, 17.5)
+	_power_node(aa3, cover, 184.0, -13.0, 1.0, Vector3(184.0, DECK_Y, -16.0), Vector3(184.0, DECK_Y, 16.0))
 
 	_hangar_block(root, cover)
 	_lights(root, cover)
@@ -131,12 +138,12 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 		"wall_slots": [],
 		"lamps": [],
 		"player_spawn": spawn,
-		"aa": aa,
+		"aa_states": [aa1, aa2, aa3],
 		"gates": gates,
 		"nodes": [
-			{"x": 24.0, "z": -6.0},
-			{"x": 104.0, "z": 6.0},
-			{"x": 184.0, "z": -13.0},
+			{"x": 24.0, "z": -6.0, "state": aa1},
+			{"x": 104.0, "z": 6.0, "state": aa2},
+			{"x": 184.0, "z": -13.0, "state": aa3},
 		],
 		"checkpoints": [
 			{"x": -3.0, "z": 0.0},
@@ -1156,12 +1163,17 @@ static func _gate(root: Node3D, aa: Node3D, cover: Array, platforms: Array, gate
 		var zz := z0 + (dz * (float(i) + 0.5) / float(n))
 		var bar := _b(aa, Vector3(0.05, 3.0, 0.06), Vector3(x, DECK_Y + 1.55, zz), _M["red"])
 		aa.part(bar, _M["red"], _M["off"])
+	# 通电时门面本身是实体；断电时把碰撞高度归零
+	var blocker_start := cover.size()
+	_chain_y(cover, Vector2(x, z0), Vector2(x, z1), 0.08, DECK_Y, DECK_Y + 3.0)
+	for i in range(blocker_start, cover.size()):
+		aa.blocker(cover[i])
 	# 门口地面警示
 	_b(root, Vector3(1.4, 0.025, dz), Vector3(x, DECK_Y + 0.015, cz), _M["hazard_k"])
 	# 红色扫描灯
 	var lamp := _omni_node(aa, Vector3(x - 0.2, DECK_Y + 3.2, cz), Color(1.0, 0.10, 0.06), 1.3, 16.0, 0.55)
 	aa.light(lamp, 1.3)
-	gates.append({"x0": x - 0.8, "x1": x + 1.2, "z0": z0, "z1": z1, "state": aa})
+	gates.append({"x0": x - 0.35, "x1": x + 0.35, "z0": z0, "z1": z1, "state": aa})
 
 
 static func _power_node(aa: Node3D, cover: Array, x: float, z: float, face: float,

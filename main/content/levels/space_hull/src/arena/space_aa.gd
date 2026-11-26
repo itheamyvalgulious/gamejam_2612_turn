@@ -12,6 +12,7 @@ var online := true
 
 var _parts: Array = []
 var _lights: Array = []
+var _blockers: Array = []
 
 
 func part(mi: MeshInstance3D, on: Material, off: Material) -> void:
@@ -19,6 +20,12 @@ func part(mi: MeshInstance3D, on: Material, off: Material) -> void:
 		return
 	_parts.append({"mi": mi, "on": on, "off": off})
 	mi.material_override = on if online else off
+
+
+## 门面实体碰撞：entry 是 arena["cover"] 里的字典；断电时把 h 归零，
+## 玩家就能真正从门里走过去，而不是靠传送。
+func blocker(entry: Dictionary) -> void:
+	_blockers.append({"e": entry, "h": float(entry.get("h", 0.0))})
 
 
 func light(l: Light3D, energy: float) -> void:
@@ -38,3 +45,6 @@ func set_online(on: bool) -> void:
 		var l: Light3D = e["l"]
 		if is_instance_valid(l):
 			l.light_energy = e["e"] if on else 0.0
+	for b in _blockers:
+		var entry: Dictionary = b["e"]
+		entry["h"] = float(b["h"]) if on else 0.0

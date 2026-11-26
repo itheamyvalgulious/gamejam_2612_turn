@@ -25,6 +25,7 @@ var _done := false
 var _dbg := 0.0
 var _near_node := -1
 var _sabotage_t := 0.0
+var _gate_cd := 0.0
 
 
 func _ready() -> void:
@@ -52,20 +53,23 @@ func _process(delta: float) -> void:
 		return
 	if _grace > 0.0:
 		_grace -= delta
+	if _gate_cd > 0.0:
+		_gate_cd -= delta
 
 	var w: Vector3 = player.rig.position / U
 
 	if _grace <= 0.0:
-		# 通电的防空门禁：踏进去就推回
-		for g in level.arena.get("gates", []):
-			var st = g.get("state")
-			if st == null or not st.online:
-				continue
-			if (w.x >= float(g["x0"]) - 0.40 and w.x <= float(g["x1"]) + 0.40
-					and w.z >= float(g["z0"]) and w.z <= float(g["z1"])
-					and w.y < GATE_Y_MAX):
-				_respawn("防空火力封锁", "到区内琥珀色桅杆旁按住 F 拆除供能节点（或 F8 预览）")
-				return
+		# 门面通电时本身有实体碰撞；这里只处理“从上方越过门面”的薄判定
+		if _gate_cd <= 0.0:
+			for g in level.arena.get("gates", []):
+				var st = g.get("state")
+				if st == null or not st.online:
+					continue
+				if (w.x >= float(g["x0"]) and w.x <= float(g["x1"])
+						and w.z >= float(g["z0"]) and w.z <= float(g["z1"])
+						and w.y < GATE_Y_MAX):
+					_gate_push(g)
+					return
 
 		# 跌落：路线在 y=4，船壳顶在 y=0
 		if w.y < FALL_Y:
@@ -85,19 +89,15 @@ func _process(delta: float) -> void:
 	_dbg += delta
 	if _dbg >= 1.0:
 		_dbg = 0.0
-		var aa = level.arena.get("aa")
-		var state: String = "on" if aa != null and aa.online else "off"
-		print("[hull] p=(%.1f, %.2f, %.1f) cp=%d aa=%s" % [w.x, w.y, w.z, _cp, state])
+		var states: Array = level.arena.get("aa_states", [])
+		var on := 0
+		for st in states:
+			if st.online:
+				on += 1
+		print("[hull] p=(%.1f, %.2f, %.1f) cp=%d aa=%d/%d" % [w.x, w.y, w.z, _cp, on, states.size()])
 
 
 func _update_sabotage(delta: float, w: Vector3) -> void:
-	var aa = level.arena.get("aa")
-	if aa == null or not aa.online:
-		if _near_node != -1:
-			hud.set_hint("")
-		_near_node = -1
-		_sabotage_t = 0.0
-		return
 	var nodes: Array = level.arena.get("nodes", [])
 	var best := -1
 	var best_d := 999.0
@@ -113,20 +113,35 @@ func _update_sabotage(delta: float, w: Vector3) -> void:
 		_near_node = -1
 		_sabotage_t = 0.0
 		return
+	var st = nodes[best].get("state")
+	if st == null or not st.online:
+		if _near_node != -1:
+			hud.set_hint("")
+		_near_node = -1
+		_sabotage_t = 0.0
+		return
 	_near_node = best
 	if Input.is_key_pressed(KEY_F):
 		_sabotage_t += delta
 		var pct := int(minf(_sabotage_t / SABOTAGE_TIME, 1.0) * 100.0)
-		hud.set_hint("拆除供能节点 … %d%%（按住 F）" % pct)
+		hud.set_hint("拆除本段供能节点 … %d%%（按住 F）" % pct)
 		if _sabotage_t >= SABOTAGE_TIME:
-			aa.set_online(false)
-			hud.show_banner("供能节点已拆除", "防空炮与光闸离线；可以继续推进", 1.6)
+			st.set_online(false)
+			hud.show_banner("本段供能节点已拆除", "本段防空炮与光闸离线；可以继续推进", 1.6)
 			hud.set_hint("")
 			_near_node = -1
 			_sabotage_t = 0.0
 	else:
 		_sabotage_t = 0.0
-		hud.set_hint("按住 F 拆除供能节点（初稿模拟 2.5 s）")
+		hud.set_hint("按住 F 拆除本段供能节点（初稿模拟 2.5 s）")
+
+
+func _gate_push(g: Dictionary) -> void:
+	var mid := (float(g["x0"]) + float(g["x1"])) * 0.5
+	var dir := -1.0 if player.rig.position.x / U <= mid else 1.0
+	player.block_push = Vector3(dir * 10.0 * U, 0.0, 0.0)
+	hud.show_banner("防空火力封锁", "先拆本段供能节点（或 F8 预览）", 1.2)
+	_gate_cd = 1.0
 
 
 func _checkpoint(w: Vector3) -> void:
@@ -160,10 +175,16 @@ func _lift_to(p: Vector3) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_F8:
-			var aa = level.arena.get("aa") if level != null else null
-			if aa != null:
-				aa.set_online(not aa.online)
-				hud.show_banner("防空火力", "全部离线（初稿预览）" if not aa.online else "全部上线", 1.2)
+			var states: Array = level.arena.get("aa_states", []) if level != null else []
+			if not states.is_empty():
+				var any_on := false
+				for st in states:
+					if st.online:
+						any_on = true
+				var next := not any_on
+				for st in states:
+					st.set_online(next)
+				hud.show_banner("防空火力", "全部离线（初稿预览）" if not next else "全部上线", 1.2)
 			return
 		if event.keycode == KEY_F9:
 			var img := get_viewport().get_texture().get_image()
