@@ -1101,10 +1101,15 @@ static func _aa_turret(aa: Node3D, cover: Array, platforms: Array, x: float, z: 
 	aa.part(rear, _M["amber"], _M["off"])
 	var lamp := _omni_node(t, Vector3(-0.4, 2.9, 0.0), Color(1.0, 0.34, 0.08), 1.0, 11.0, 0.35)
 	aa.light(lamp, 1.0)
-	# 碰撞：炮座挡人，顶面（装甲盖 0.22 m）可站；侧碰撞停在台面下 0.30
-	_cov(cover, Vector3(x, DECK_Y, z), 1.9, 2.53)
+	# 顶面维护格栅：把炮塔盖四周加宽 0.25 m，落点更好找
+	_b(t, Vector3(0.30, 0.06, 3.40), Vector3(-1.45, 2.56, 0.0), _M["steel_dark"])
+	_b(t, Vector3(0.30, 0.06, 3.40), Vector3(1.65, 2.56, 0.0), _M["steel_dark"])
+	_b(t, Vector3(3.40, 0.06, 0.30), Vector3(0.10, 2.56, -1.70), _M["steel_dark"])
+	_b(t, Vector3(3.40, 0.06, 0.30), Vector3(0.10, 2.56, 1.70), _M["steel_dark"])
+	# 碰撞：炮座挡人，顶面格栅可站；侧碰撞停在台面下 0.30
+	_cov(cover, Vector3(x, DECK_Y, z), 1.9, 2.23)
 	platforms.append({"c": Vector3(x, 0.0, z) * U,
-		"hx": 1.35 * U, "hz": 1.45 * U, "h": (DECK_Y + 2.53) * U})
+		"hx": 1.70 * U, "hz": 1.80 * U, "h": (DECK_Y + 2.59) * U})
 
 
 static func _gate(root: Node3D, aa: Node3D, cover: Array, platforms: Array, gates: Array,
