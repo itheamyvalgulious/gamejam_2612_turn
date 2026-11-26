@@ -993,6 +993,15 @@ static func _cargo_pod(root: Node3D, cover: Array, platforms: Array, cx: float, 
 		_b(root, Vector3(0.42, 0.22, 0.04), Vector3(xx, y0 + 0.12, face + 0.01),
 			_M["hazard_y"] if k % 2 == 0 else _M["hazard_k"])
 	_ring_y(cover, cx, cz, hx, hz, y0, y0 + h - 0.30)
+	# 顶面凹板 + 交叉缝 + 标签 + 角螺栓
+	var top_y := y0 + h + 0.07
+	_b(root, Vector3(hx * 1.55, 0.006, hz * 1.55), Vector3(cx, top_y + 0.001, cz), _M["deck_dark"])
+	_b(root, Vector3(hx * 1.9, 0.006, 0.06), Vector3(cx, top_y + 0.004, cz), _M["seam"])
+	_b(root, Vector3(0.06, 0.006, hz * 1.9), Vector3(cx, top_y + 0.004, cz), _M["seam"])
+	_b(root, Vector3(hx * 0.8, 0.006, hz * 0.32), Vector3(cx - hx * 0.35, top_y + 0.005, cz + hz * 0.5), _M["label"])
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			_b(root, Vector3(0.14, 0.06, 0.14), Vector3(cx + sx * (hx - 0.18), top_y + 0.03, cz + sz * (hz - 0.18)), _M["steel_dark"])
 	platforms.append({"c": Vector3(cx, 0.0, cz) * U,
 		"hx": hx * U, "hz": hz * U, "h": (y0 + h + 0.07) * U})
 	root.set_meta("pod_" + tag, true)
@@ -1018,6 +1027,15 @@ static func _crate(root: Node3D, cover: Array, platforms: Array,
 		_b(root, Vector3(0.4, 0.16, 0.035), Vector3(xx, y0 + 0.08, face + 0.005),
 			_M["hazard_y"] if k % 2 == 0 else _M["hazard_k"])
 	_ring_y(cover, cx, cz, hx, hz, y0, y0 + h - 0.30)
+	# 顶面凹板 + 交叉缝 + 标签 + 角螺栓
+	var top_y := y0 + h + 0.05
+	_b(root, Vector3(hx * 1.45, 0.006, hz * 1.45), Vector3(cx, top_y + 0.001, cz), _M["deck_dark"])
+	_b(root, Vector3(hx * 1.85, 0.006, 0.05), Vector3(cx, top_y + 0.004, cz), _M["seam"])
+	_b(root, Vector3(0.05, 0.006, hz * 1.85), Vector3(cx, top_y + 0.004, cz), _M["seam"])
+	_b(root, Vector3(hx * 0.75, 0.006, hz * 0.30), Vector3(cx - hx * 0.35, top_y + 0.005, cz + hz * 0.45), _M["label"])
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			_b(root, Vector3(0.12, 0.06, 0.12), Vector3(cx + sx * (hx - 0.14), top_y + 0.03, cz + sz * (hz - 0.14)), _M["steel_dark"])
 	platforms.append({"c": Vector3(cx, 0.0, cz) * U,
 		"hx": hx * U, "hz": hz * U, "h": (y0 + h + 0.05) * U})
 
