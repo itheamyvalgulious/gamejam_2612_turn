@@ -32,6 +32,7 @@ func _ready() -> void:
 	selected_level_index = maxi(0, progress.resume_index())
 	if _options.load(OPTIONS_PATH) == OK and _options.has_section_key("game", "display.fullscreen"):
 		_set_fullscreen(bool(_options.get_value("game", "display.fullscreen")))
+	_set_vsync(bool(get_option("display.vsync", false)))
 	get_window().focus_exited.connect(_pause_on_focus_loss)
 
 
@@ -238,13 +239,23 @@ func _set_fullscreen(enabled: bool) -> void:
 func _set_option(key: String, value: Variant) -> void:
 	if key == "display.fullscreen":
 		_set_fullscreen(bool(value))
-	elif _services != null:
+	elif key == "display.vsync":
+		_set_vsync(bool(value))
+	elif _services != null and not key.begins_with("display."):
 		_services.get("p").set_value(key, value)
 	_options.set_value("game", key, value)
 	var error := _options.save(OPTIONS_PATH)
 	var panel := _pause_menu if _pause_menu != null else _home_settings
 	if error != OK and panel != null:
 		panel.show_error("设置暂未保存")
+
+
+func get_option(key: String, fallback: Variant = null) -> Variant:
+	return _options.get_value("game", key, fallback)
+
+
+func _set_vsync(enabled: bool) -> void:
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if enabled else DisplayServer.VSYNC_DISABLED)
 
 
 func _apply_level_options() -> void:
