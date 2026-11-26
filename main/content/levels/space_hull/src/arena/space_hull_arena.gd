@@ -101,17 +101,17 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 	_aa_turret(aa1, cover, platforms, 28.0, -6.0, Vector3(38.0, DECK_Y, -6.0))
 	_aa_turret(aa1, cover, platforms, 28.0, 6.0, Vector3(38.0, DECK_Y, 6.0))
 	_gate(root, aa1, cover, platforms, gates, G1, -4.4, 4.4)
-	_power_node(aa1, cover, platforms, 24.0, -6.0, 1.0, Vector3(28.0, DECK_Y, -6.0), Vector3(28.0, DECK_Y, 6.0))
+	_power_node(aa1, cover, platforms, 24.0, -6.0, 1.0, Vector3(28.0, DECK_Y, -6.0), Vector3.ZERO)
 
 	_aa_turret(aa2, cover, platforms, 107.5, -6.5, Vector3(117.5, DECK_Y, -6.5))
 	_aa_turret(aa2, cover, platforms, 107.5, 6.5, Vector3(117.5, DECK_Y, 6.5))
 	_gate(root, aa2, cover, platforms, gates, G2, -5.0, 5.0)
-	_power_node(aa2, cover, platforms, 104.0, 6.0, -1.0, Vector3(107.5, DECK_Y, 6.5), Vector3(107.5, DECK_Y, -6.5))
+	_power_node(aa2, cover, platforms, 104.0, 6.0, -1.0, Vector3(107.5, DECK_Y, 6.5), Vector3.ZERO)
 
 	_aa_turret(aa3, cover, platforms, 184.0, -16.0, Vector3(192.0, DECK_Y, -22.0))
 	_aa_turret(aa3, cover, platforms, 184.0, 16.0, Vector3(192.0, DECK_Y, 22.0))
 	_gate(root, aa3, cover, platforms, gates, G3, -17.2, 17.2)
-	_power_node(aa3, cover, platforms, 184.0, -13.0, 1.0, Vector3(184.0, DECK_Y, -16.0), Vector3(184.0, DECK_Y, 16.0))
+	_power_node(aa3, cover, platforms, 184.0, -13.0, 1.0, Vector3(184.0, DECK_Y, -16.0), Vector3.ZERO)
 
 	_hangar_block(root, cover)
 	_lights(root, cover)
