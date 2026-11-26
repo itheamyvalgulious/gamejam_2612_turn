@@ -98,18 +98,18 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 	_arena_c(root, cover, platforms)
 
 	# 三道防空门禁 + 三个供能节点，各自独立
-	_aa_turret(aa1, cover, platforms, 28.0, -6.0, Vector3(18.0, DECK_Y, 0.0))
-	_aa_turret(aa1, cover, platforms, 28.0, 6.0, Vector3(18.0, DECK_Y, 0.0))
+	_aa_turret(aa1, cover, platforms, 28.0, -6.0, Vector3(38.0, DECK_Y, -6.0))
+	_aa_turret(aa1, cover, platforms, 28.0, 6.0, Vector3(38.0, DECK_Y, 6.0))
 	_gate(root, aa1, cover, platforms, gates, G1, -4.4, 4.4)
 	_power_node(aa1, cover, 24.0, -6.0, 1.0, Vector3(28.0, DECK_Y, -6.0), Vector3(28.0, DECK_Y, 6.0))
 
-	_aa_turret(aa2, cover, platforms, 107.5, -6.5, Vector3(96.0, DECK_Y, 0.0))
-	_aa_turret(aa2, cover, platforms, 107.5, 6.5, Vector3(96.0, DECK_Y, 0.0))
+	_aa_turret(aa2, cover, platforms, 107.5, -6.5, Vector3(117.5, DECK_Y, -6.5))
+	_aa_turret(aa2, cover, platforms, 107.5, 6.5, Vector3(117.5, DECK_Y, 6.5))
 	_gate(root, aa2, cover, platforms, gates, G2, -5.0, 5.0)
 	_power_node(aa2, cover, 104.0, 6.0, -1.0, Vector3(107.5, DECK_Y, 6.5), Vector3(107.5, DECK_Y, -6.5))
 
-	_aa_turret(aa3, cover, platforms, 184.0, -16.0, Vector3(170.0, DECK_Y, 0.0))
-	_aa_turret(aa3, cover, platforms, 184.0, 16.0, Vector3(170.0, DECK_Y, 0.0))
+	_aa_turret(aa3, cover, platforms, 184.0, -16.0, Vector3(192.0, DECK_Y, -22.0))
+	_aa_turret(aa3, cover, platforms, 184.0, 16.0, Vector3(192.0, DECK_Y, 22.0))
 	_gate(root, aa3, cover, platforms, gates, G3, -17.2, 17.2)
 	_power_node(aa3, cover, 184.0, -13.0, 1.0, Vector3(184.0, DECK_Y, -16.0), Vector3(184.0, DECK_Y, 16.0))
 
@@ -677,18 +677,18 @@ static func _bulwarks(root: Node3D, cover: Array, platforms: Array) -> void:
 	# 起始平台两侧
 	_bulwark(root, cover, platforms, X_START0, X_START1, -W_START + 0.25, -1.0, 1.25)
 	_bulwark(root, cover, platforms, X_START0, X_START1, W_START - 0.25, 1.0, 1.25)
-	# 战斗 A
-	_bulwark(root, cover, platforms, 0.0, 26.0, -W_A + 0.25, -1.0, 1.25)
-	_bulwark(root, cover, platforms, 0.0, 26.0, W_A - 0.25, 1.0, 1.25)
-	_funnel_wall(root, cover, platforms, Vector2(26.0, -W_A + 0.25), Vector2(30.0, -W_T1 - 0.15), 1.85)
-	_funnel_wall(root, cover, platforms, Vector2(26.0, W_A - 0.25), Vector2(30.0, W_T1 + 0.15), 1.85)
+	# 战斗 A：护墙延长到 29.5，漏斗墙只收最后 0.5 m；x=28 的炮塔整体在墙前
+	_bulwark(root, cover, platforms, 0.0, 29.5, -W_A + 0.25, -1.0, 1.25)
+	_bulwark(root, cover, platforms, 0.0, 29.5, W_A - 0.25, 1.0, 1.25)
+	_funnel_wall(root, cover, platforms, Vector2(29.5, -W_A + 0.25), Vector2(30.0, -W_T1 - 0.15), 0.95)
+	_funnel_wall(root, cover, platforms, Vector2(29.5, W_A - 0.25), Vector2(30.0, W_T1 + 0.15), 0.95)
 	# 桁架 1：按断口分段
 	_bulwark_runs(root, cover, platforms, 30.0, 80.0, W_T1, GAPS1)
-	# 战斗 B
-	_bulwark(root, cover, platforms, 80.0, 106.0, -W_B + 0.25, -1.0, 1.25)
-	_bulwark(root, cover, platforms, 80.0, 106.0, W_B - 0.25, 1.0, 1.25)
-	_funnel_wall(root, cover, platforms, Vector2(106.0, -W_B + 0.25), Vector2(110.0, -W_T2 - 0.15), 1.85)
-	_funnel_wall(root, cover, platforms, Vector2(106.0, W_B - 0.25), Vector2(110.0, W_T2 + 0.15), 1.85)
+	# 战斗 B：护墙延长到 108.5，漏斗墙后移，避开 x=107.5 的炮塔
+	_bulwark(root, cover, platforms, 80.0, 108.5, -W_B + 0.25, -1.0, 1.25)
+	_bulwark(root, cover, platforms, 80.0, 108.5, W_B - 0.25, 1.0, 1.25)
+	_funnel_wall(root, cover, platforms, Vector2(108.5, -W_B + 0.25), Vector2(110.0, -W_T2 - 0.15), 0.95)
+	_funnel_wall(root, cover, platforms, Vector2(108.5, W_B - 0.25), Vector2(110.0, W_T2 + 0.15), 0.95)
 	# 桁架 2
 	_bulwark_runs(root, cover, platforms, 110.0, 160.0, W_T2, GAPS2)
 	# 战斗 C + 大门前
