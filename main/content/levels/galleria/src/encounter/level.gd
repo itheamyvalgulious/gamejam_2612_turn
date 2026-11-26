@@ -3,6 +3,7 @@ const SceneArena = preload("res://src/encounter/arena.gd")
 const Sentinel = preload("res://src/game/arc_encounter.gd")
 const Sentry = preload("res://src/game/wheel_encounter.gd")
 const Duelist = preload("res://src/game/duelist_encounter.gd")
+const BladeTerrain = preload("res://core/blade_terrain.gd")
 const ACTOR_RADIUS := 1.75
 const DUELIST_STEP_HEIGHT := 0.44
 const SENTRY_STEP_HEIGHT := 0.37
@@ -21,6 +22,8 @@ var was_airborne := false
 var rng := RandomNumberGenerator.new()
 var player_previous := Vector3.ZERO
 var finishing_enemy: Node3D
+var _duelist_body_shape := CylinderShape3D.new()
+var _duelist_body_query := PhysicsShapeQueryParameters3D.new()
 
 func start_level(_idx: int) -> void:
 	finishing_enemy = null
@@ -31,9 +34,13 @@ func start_level(_idx: int) -> void:
 		arena_node = arena["node"]
 		add_child(arena_node)
 		preload("res://src/encounter/neon_gi.gd").install(arena_node,not arena["vertical"])
+		_duelist_body_query.shape = _duelist_body_shape
+		_duelist_body_query.collision_mask = BladeTerrain.TERRAIN_MASK
 	if projectiles != null:
 		projectiles.clear_all()
 	player.rig.ground_height = arena["player_spawn"].origin.y
+	player.terrain_blade_enabled = arena.get("height_test", false)
+	player.rig.terrain_blade_enabled = player.terrain_blade_enabled
 	player.reset(arena["player_spawn"])
 	plunge_armed = false
 	drop_start_height = player.rig.global_position.y
@@ -75,6 +82,10 @@ func _spawn_encounters() -> void:
 		match entry["kind"]:
 			"duelist":
 				enemy.setup_duelist(player, _duelist_cover(), arena["bounds"], entry["pos"], entry["health"])
+				var blade := BladeTerrain.new()
+				enemy.terrain_blade_step = _constrain_duelist_blade.bind(blade)
+				enemy.terrain_blade_reset = blade.reset
+				enemy.rig.blade_effect_endpoint = _terrain_blade_endpoint
 			"archer":
 				enemy.global_position = entry["pos"]
 				enemy.setup_sentry(PI, 0.95 + float(archers.size()) * 0.35)
@@ -315,20 +326,47 @@ func duelist_stair_lane(at: Vector3) -> Vector2:
 	return Vector2(left_edge, SceneArena.STAIR_X + half_width - STAIR_BLADE_MARGIN)
 
 
-func duelist_blade_clear(heel: Vector3, tip: Vector3) -> bool:
-	var span := AABB(heel, Vector3.ZERO).expand(tip).grow(0.14)
-	for box: AABB in arena["solids"]:
-		if box.intersects(span) and box.grow(0.14).intersects_segment(heel, tip) != null:
-			return false
-	return true
-
-
 func duelist_floor(at: Vector3, ceiling: float) -> float:
-	var height := 0.0
-	for box: AABB in arena["walkables"]:
-		if box.end.y <= ceiling and Rect2(box.position.x, box.position.z, box.size.x, box.size.z).has_point(Vector2(at.x, at.z)):
-			height = maxf(height, box.end.y)
-	return height
+	var support := _ground_contact(at, ceiling)
+	return support["position"].y if not support.is_empty() else 0.0
+
+
+func duelist_floor_normal(at: Vector3, ceiling: float) -> Vector3:
+	return _ground_contact(at, ceiling).get("normal", Vector3.UP)
+
+
+func _ground_contact(at: Vector3, ceiling: float) -> Dictionary:
+	var top := Vector3(at.x, ceiling + 0.004, at.z)
+	var ray := PhysicsRayQueryParameters3D.create(top, Vector3(at.x, -0.42, at.z), BladeTerrain.TERRAIN_MASK)
+	var hit := get_world_3d().direct_space_state.intersect_ray(ray)
+	return hit if not hit.is_empty() and (hit["normal"] as Vector3).y > 0.66 else {}
+
+
+func _constrain_duelist_blade(rig, dt: float, strike: int, blade: BladeTerrain) -> Dictionary:
+	var authored: Transform3D = rig.weapon_spin.global_transform
+	var shoulder: Vector3 = rig.arms[1]["shoulder"].global_position
+	var was_recovering := blade.recovering
+	var pose := blade.advance(get_world_3d().direct_space_state, authored,
+		Vector2(rig.BLADE_START, rig.BLADE_END), shoulder, dt, strike)
+	if blade.recovering or not pose.is_equal_approx(authored):
+		rig.apply_terrain_blade(pose, blade.shoulder_recoil())
+	return {"was_recovering": was_recovering, "recovering": blade.recovering, "impact": blade.impact}
+
+
+func _terrain_blade_endpoint(from: Vector3, to: Vector3) -> Vector3:
+	if from.is_equal_approx(to):
+		return to
+	var ray := PhysicsRayQueryParameters3D.create(from, to, BladeTerrain.TERRAIN_MASK)
+	ray.hit_from_inside = true
+	var hit := get_world_3d().direct_space_state.intersect_ray(ray)
+	if hit.is_empty():
+		return to
+	var point: Vector3 = hit["position"]
+	return from.move_toward(point, maxf(0.0, from.distance_to(point) - 0.025))
+
+
+func terrain_blade_clear(from: Vector3, to: Vector3) -> bool:
+	return _terrain_blade_endpoint(from, to).is_equal_approx(to)
 
 
 func sentinel_ground_move(from: Vector3, goal: Vector3) -> Vector3:
@@ -377,7 +415,35 @@ func sentry_ground_move(from: Vector3, goal: Vector3) -> Vector3:
 
 
 func duelist_ground_move(from: Vector3, goal: Vector3) -> Vector3:
-	return _supported_motion(from, goal, ACTOR_RADIUS, DUELIST_STEP_HEIGHT)
+	var offset := (goal - from).slide(Vector3.UP)
+	var steps := maxi(1, ceili(offset.length() / 0.28))
+	var position := from
+	for i in range(1, steps + 1):
+		var target := from + offset * (float(i) / steps)
+		var next := _duelist_ground_candidate(position, target)
+		if not next.is_finite():
+			break
+		position = next
+	return position
+
+
+func _duelist_ground_candidate(from: Vector3, target: Vector3) -> Vector3:
+	var support := _ground_contact(target, from.y + DUELIST_STEP_HEIGHT)
+	if support.is_empty():
+		return Vector3.INF
+	target.y = support["position"].y
+	if from.y - target.y > DUELIST_STEP_HEIGHT or not position_clear(target, ACTOR_RADIUS, true):
+		return Vector3.INF
+	# The lower part is resolved by the tread/foot probes. The upper volume
+	# checks rails, walls and ceilings without catching the next stair nose.
+	return target if _duelist_body_clear(target, 1.18, 1.10, 4.53) else Vector3.INF
+
+
+func _duelist_body_clear(at: Vector3, radius: float, bottom: float, top: float) -> bool:
+	_duelist_body_shape.radius = radius
+	_duelist_body_shape.height = top - bottom
+	_duelist_body_query.transform.origin = at + Vector3.UP * (top + bottom) * 0.5
+	return get_world_3d().direct_space_state.intersect_shape(_duelist_body_query, 1).is_empty()
 
 
 func _supported_motion(from: Vector3, goal: Vector3, radius: float, step_height: float, sample_distance := 0.24) -> Vector3:
@@ -387,7 +453,7 @@ func _supported_motion(from: Vector3, goal: Vector3, radius: float, step_height:
 	var position := from
 	for i in range(1, count + 1):
 		var next := from + offset * (float(i) / count)
-		next.y = duelist_floor(next, position.y + step_height)
+		next.y = _walkable_floor(next, position.y + step_height)
 		if position.y - next.y > step_height or not position_clear(next, radius, true):
 			break
 		position = next
@@ -396,7 +462,8 @@ func _supported_motion(from: Vector3, goal: Vector3, radius: float, step_height:
 
 func duelist_can_strike(from: Vector3, goal: Vector3) -> bool:
 	if absf(from.y - goal.y) > DUELIST_STRIKE_HEIGHT:
-		return false
+		if from.distance_to(goal) > 6.0 or duelist_ground_move(from, goal).distance_to(goal) > 0.28:
+			return false
 	return melee_clear(from + Vector3.UP * 2.3, goal + Vector3.UP * 2.3)
 
 
@@ -476,6 +543,14 @@ func floor_at(pos: Vector3, max_height: float) -> float:
 			height = maxf(height,box.end.y)
 	return height
 
+
+func _walkable_floor(pos: Vector3, ceiling: float) -> float:
+	var height := 0.0
+	for box: AABB in arena["walkables"]:
+		if box.end.y <= ceiling and Rect2(box.position.x, box.position.z, box.size.x, box.size.z).has_point(Vector2(pos.x, pos.z)):
+			height = maxf(height, box.end.y)
+	return height
+
 func prepare_player() -> void:
 	var rig = player.rig
 	var pos: Vector3 = rig.global_position
@@ -546,42 +621,51 @@ func duelist_defeat_path(start: Vector3, direction: Vector3) -> Dictionary:
 	if best.is_empty():
 		var inward := Vector3(-start.x, 0.0, -start.z).normalized()
 		best = {"facing": inward if not inward.is_zero_approx() else direction,
-			"normal": Vector3.UP, "compact": true, "support_lift": 0.0}
+			"normal": duelist_floor_normal(start, start.y + 0.16), "compact": true, "support_lift": 0.0}
 	best["samples"] = samples.slice(0, best_count)
 	return best
 
 
 func _defeat_rest(center: Vector3, forward: Vector3) -> Dictionary:
+	var surface := duelist_floor_normal(center, center.y + 0.16)
 	for degrees: float in [0.0, 45.0, -45.0, 90.0, -90.0, 135.0, -135.0, 180.0]:
 		var facing := forward.rotated(Vector3.UP, deg_to_rad(degrees))
 		var across := facing.cross(Vector3.UP)
 		var head := center + facing * 2.77
 		var feet := center - facing * 2.00
-		head.y = _defeat_support(head, center.y + 1.02)
-		feet.y = _defeat_support(feet, center.y + 1.02)
-		if absf(head.y - center.y) > 0.96 or absf(feet.y - center.y) > 0.96:
+		var head_plane := _support_plane_height(head, center, surface)
+		var feet_plane := _support_plane_height(feet, center, surface)
+		head.y = _defeat_support(head, head_plane + 1.02)
+		feet.y = _defeat_support(feet, feet_plane + 1.02)
+		if absf(head.y - head_plane) > 0.96 or absf(feet.y - feet_plane) > 0.96:
 			continue
 		if not _defeat_clear(head, 0.82, 0.98) or not _defeat_clear(feet, 0.82, 0.78):
 			continue
 		var legs_clear := true
 		for side: float in [-1.0, 1.0]:
 			var foot := feet + across * 0.96 * side
-			foot.y = _defeat_support(foot, center.y + 1.02)
-			legs_clear = legs_clear and absf(foot.y - feet.y) <= 0.50 and _defeat_clear(foot, 0.66, 0.80)
+			var on_plane := _support_plane_height(foot, feet, surface)
+			foot.y = _defeat_support(foot, on_plane + 0.68)
+			legs_clear = legs_clear and absf(foot.y - on_plane) <= 0.50 and _defeat_clear(foot, 0.66, 0.80)
 		if not legs_clear:
 			continue
 		if not _defeat_clear(center, 1.02, 1.2):
 			continue
 		var rise := (head.y - feet.y) / 4.77
-		var up := (Vector3.UP - facing * rise).normalized()
+		var cross_grade := -surface.dot(across) / surface.y
+		var up := (Vector3.UP - facing * rise - across * cross_grade).normalized()
 		# Fit the support plane above the discrete stair noses as well as the endpoints.
 		var lift := 0.0
 		for offset: float in [-1.65, -0.8, 0.55, 1.15, 1.80, 2.45]:
 			var along := center + facing * offset
-			var height := _defeat_support(along, center.y + 1.02)
+			var height := _defeat_support(along, _support_plane_height(along, center, surface) + 1.02)
 			lift = maxf(lift, height - center.y - rise * offset)
 		return {"facing": facing, "normal": up, "compact": false, "support_lift": minf(lift, 0.31)}
 	return {}
+
+
+func _support_plane_height(at: Vector3, anchor: Vector3, normal: Vector3) -> float:
+	return anchor.y - normal.dot((at - anchor).slide(Vector3.UP)) / normal.y
 
 
 func _defeat_support(at: Vector3, ceiling: float) -> float:
@@ -604,4 +688,10 @@ func _defeat_clear(at: Vector3, radius: float, height: float) -> bool:
 		var footprint := Rect2(box.position.x, box.position.z, box.size.x, box.size.z).grow(radius)
 		if footprint.has_point(Vector2(at.x, at.z)):
 			return false
-	return true
+	var normal := duelist_floor_normal(at, at.y + 0.15)
+	var slope := normal.slide(Vector3.UP).length() / normal.y
+	# Match the tread allowance above so the shape check does not block a
+	# fall on a neighboring stair before the posed body reaches it.
+	var tread_clearance := 0.18 + radius * 0.37
+	var bottom := minf(height - 0.10, maxf(tread_clearance, radius * slope + 0.035))
+	return _duelist_body_clear(at, radius, bottom, height)

@@ -138,7 +138,9 @@ static func apply(model, state: Dictionary, time: float, path_position := Vector
 	var advance := burst_at(time)
 	var hip_turn := smoothstep(HIP_TURN_START, 0.336, time)
 	var yaw := aim - 0.11 + 0.33 * hip_turn
-	model.position = path_position if path_position.is_finite() else (state["origin"] as Vector3).lerp(state["end"], advance)
+	var origin: Vector3 = state["origin"]
+	model.position = path_position if path_position.is_finite() else model.attack_step(origin,
+		origin.lerp(state["end"], advance))
 	model.rotation.y = lerp_angle(state["yaw"], yaw, smoothstep(0.020, 0.142, time))
 	var transfer := smoothstep(FRONT_LAND - 0.012, 0.340, time)
 	var drive := smoothstep(0.022, 0.163, time)

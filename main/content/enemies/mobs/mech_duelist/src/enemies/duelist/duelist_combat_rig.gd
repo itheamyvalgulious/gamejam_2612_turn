@@ -30,6 +30,7 @@ var _normal_windup_extension := Sequence.NORMAL_WINDUP_EXTENSION
 var _opening_discs: Array = []
 var _metal_discs: Array = []
 var _body_geometry: Array[Dictionary] = []
+var _terrain_window := Vector2(0.0, 1.0)
 
 
 func _ready() -> void:
@@ -121,9 +122,11 @@ func _prepare_strike(start: float, from: float, to: float, sample_pose: Callable
 	attack_hit_to = _strike_seconds(_hit_end)
 	_prediction.clear()
 	weapon_scale = global_basis.get_scale().x
+	sampling_attack = true
 	for i in range(PREDICTION_STEPS + 1):
 		sample_pose.call(lerpf(from, to, float(i) / PREDICTION_STEPS))
 		_prediction.append(weapon_spin.global_transform)
+	sampling_attack = false
 
 
 
@@ -139,6 +142,8 @@ func update_strike(t0: float, t1: float, dt: float, live_previous := Transform3D
 	is_attacking = t1 >= _strike_start and t0 < _hit_end and not _prediction.is_empty()
 	_hit_window = is_attacking and t1 >= _hit_start and t0 < t1
 	if _hit_window:
+		_terrain_window = Vector2(clampf(inverse_lerp(t0, t1, _hit_start), 0.0, 1.0),
+			clampf(inverse_lerp(t0, t1, _hit_end), 0.0, 1.0))
 		weapon_prev_xf = predict_weapon_xf(_strike_seconds(t0))
 		weapon_xf = predict_weapon_xf(attack_elapsed)
 		if has_attack_lane(global_position):
@@ -148,6 +153,16 @@ func update_strike(t0: float, t1: float, dt: float, live_previous := Transform3D
 				weapon_prev_xf = live_previous
 			if t1 <= _hit_end:
 				weapon_xf = weapon_spin.global_transform
+
+
+func use_terrain_sweep(previous: Transform3D, interrupted: bool) -> void:
+	if interrupted:
+		is_attacking = false
+		_hit_window = false
+	elif _hit_window:
+		var actual := weapon_spin.global_transform
+		weapon_prev_xf = previous.interpolate_with(actual, _terrain_window.x)
+		weapon_xf = previous.interpolate_with(actual, _terrain_window.y)
 
 
 func in_hit_window() -> bool:

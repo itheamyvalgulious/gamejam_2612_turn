@@ -35,7 +35,9 @@ static func apply(model, elapsed: float, center := Vector3.ZERO, eye_height := 3
 	var time := clampf(elapsed, 0.0, DURATION)
 	var travel := _distance(time)
 	var angle := _angle(TRAVEL - travel if reverse else travel)
-	model.position = center + Vector3(sin(angle), 0, cos(angle)) * RADIUS
+	var desired := center + Vector3(sin(angle), 0, cos(angle)) * RADIUS
+	model.position = model.attack_step(model.position, desired)
+	var track_shift: Vector3 = (model.position - desired).slide(Vector3.UP)
 	model.rotation.y = angle - BODY_ANGLE
 	var world_to_body: Transform3D = model.transform.affine_inverse()
 	var rig_scale: float = model.scale.x
@@ -60,7 +62,11 @@ static func apply(model, elapsed: float, center := Vector3.ZERO, eye_height := 3
 		var side: float = leg["side"]
 		var sample := _foot_at(time, side, reverse)
 		sample.w *= smoothstep(0.0, 2.0, -sample.z)
-		var target := world_to_body * _ankle(sample, side, center, rig_scale)
+		var ankle := _ankle(sample, side, center + track_shift, rig_scale)
+		if model.ground_sampler.is_valid():
+			ankle.origin.y += model.floor_height(ankle.origin) - center.y
+			ankle = model.keep_sole_above_floor(ankle)
+		var target := world_to_body * ankle
 		feet.append(target)
 		toes[index] = sample.w
 		var offset := body.basis * Vector3(side * 0.319, -0.028, 0)

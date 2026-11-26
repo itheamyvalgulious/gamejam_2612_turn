@@ -23,6 +23,7 @@ var last_intercept_miss := 0.0
 var weapon_prev_xf := Transform3D.IDENTITY
 var weapon_scale := 1.0
 var blade_discs: Array = []
+var terrain_blade_enabled := false
 
 var _timings: Dictionary = {}
 var _attack_total := 0.0
@@ -31,18 +32,58 @@ var _authored_lunge := 0.0
 var _authored_strike := Vector2.ZERO
 var _blade_path := BladePath.new()
 var _first_person := false
+var _shoulder_rest: Array[Vector3] = []
 
 
 func _ready() -> void:
 	super._ready()
+	for arm in arms:
+		_shoulder_rest.append(arm["shoulder"].position)
 	blade_discs = _measure_blade()
 	_record_blade()
 	weapon_prev_xf = weapon_xf
 
 
 func advance(dt: float) -> void:
+	if terrain_blade_enabled:
+		for i in arms.size():
+			arms[i]["shoulder"].position = _shoulder_rest[i]
 	super.advance(dt)
 	_record_blade()
+
+
+func apply_terrain_blade(pose: Transform3D, recoil: Vector3) -> void:
+	if not recoil.is_zero_approx():
+		var away := body.global_basis.orthonormalized().inverse() * recoil
+		torso.rotate(Vector3.UP, -away.x * 0.17)
+		torso.rotate(Vector3.RIGHT, away.z * 0.13)
+	weapon_root.global_transform = pose * weapon_spin.transform.affine_inverse()
+	for i in arms.size():
+		var arm: Dictionary = arms[i]
+		var grip := GRIP if i == 1 else -GRIP
+		var reach := weapon_root.transform * (Vector3.UP * grip) - _shoulder_rest[i]
+		var distance := reach.length()
+		var extended := maxf(distance - float(arm["upper"]) - float(arm["fore"]) + 0.006, 0.0)
+		var tucked := minf(distance - 0.115, 0.0)
+		arm["shoulder"].position = _shoulder_rest[i] + reach.normalized() * clampf(extended + tucked, -0.085, 0.105)
+	_update_arms(_smooth_pose)
+	weapon_xf = weapon_spin.global_transform
+
+
+func stop_terrain_swing() -> void:
+	_finish_attack()
+
+
+func _update_trail(dt: float) -> void:
+	if not terrain_blade_enabled:
+		super._update_trail(dt)
+
+
+func update_terrain_trail(dt: float, blocked: bool) -> void:
+	if blocked:
+		blade_trail.tick(dt, false)
+	else:
+		super._update_trail(dt)
 
 
 func _record_blade() -> void:
