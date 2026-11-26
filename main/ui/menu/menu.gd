@@ -24,6 +24,19 @@ func _ready() -> void:
 		var repro = load("res://tools/repro.gd").new()
 		repro.name = "ReproDriver"
 		get_tree().root.add_child.call_deferred(repro)
+	if "--dump-draws" in OS.get_cmdline_user_args():
+		var dd = load("/tmp/opencode/dump_draws.gd").new()
+		get_tree().root.add_child.call_deferred(dd)
+	if "--node-prof" in OS.get_cmdline_user_args():
+		var np = load("/tmp/opencode/node_prof.gd").new()
+		get_tree().root.add_child.call_deferred(np)
+	if "--count-solids" in OS.get_cmdline_user_args():
+		var cs = load("/tmp/opencode/count_solids.gd").new()
+		get_tree().root.add_child.call_deferred(cs)
+	if "--plain-soak" in OS.get_cmdline_user_args():
+		var ps = load("/tmp/opencode/plain_soak.gd").new()
+		ps.name = "PlainSoak"
+		get_tree().root.add_child.call_deferred(ps)
 	if "--soak20" in OS.get_cmdline_user_args() or "--soak-level" in " ".join(OS.get_cmdline_user_args()):
 		var sk = load("res://tools/soak20.gd").new()
 		sk.name = "Soak20"

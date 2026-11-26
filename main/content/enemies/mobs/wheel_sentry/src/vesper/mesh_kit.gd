@@ -351,8 +351,26 @@ static func _eff_material(mi: MeshInstance3D, s: int) -> Material:
 static func _mesh_mat_sig(mi: MeshInstance3D) -> String:
 	var sig := ""
 	for s in mi.mesh.get_surface_count():
-		sig += str(_eff_material(mi, s)) + ";"
+		sig += _mat_content_sig(_eff_material(mi, s)) + ";"
 	return sig
+
+
+## 材质按内容签名而不是实例 id：builder 里 .duplicate() 出来的同参材质
+## 进同一组（否则每组都只有 1 个成员，等于没合）。
+static func _mat_content_sig(m: Material) -> String:
+	if m == null:
+		return "null"
+	if m is StandardMaterial3D:
+		var sm := m as StandardMaterial3D
+		return "std|%s|%s|%s|%.2f|%.2f|%d|%d|%.2f|%d|%s" % [
+			sm.albedo_color, sm.emission, sm.emission_enabled,
+			sm.metallic, sm.roughness, int(sm.transparency),
+			int(sm.shading_mode), sm.emission_energy_multiplier,
+			int(sm.cull_mode), str(sm.vertex_color_use_as_albedo)]
+	if m is ShaderMaterial:
+		var sh := m as ShaderMaterial
+		return "shd|%s" % (sh.shader.resource_path if sh.shader else "null")
+	return str(m)
 
 
 static func _mesh_fp(mesh: Mesh) -> String:
@@ -430,13 +448,17 @@ static func _emit_bucket(anchor: Node3D, members: Array) -> int:
 				1 if norms is PackedVector3Array and norms.size() == verts.size() else 0,
 				1 if uvs is PackedVector2Array and uvs.size() == verts.size() else 0,
 				1 if cols is PackedColorArray and cols.size() == verts.size() else 0]
-			var key := "%s|%s|%s" % [str(m), _leaf_key(mi), fmt]
+			var key := "%s|%s|%s" % [_mat_content_sig(m), _leaf_key(mi), fmt]
 			var g: Dictionary = groups.get(key, {"mat": m, "members": [], "flags": mi})
 			g["members"].append({"mi": mi, "xf": e["xf"], "verts": verts,
 				"norms": norms, "uvs": uvs, "cols": cols, "idxs": idxs})
 			groups[key] = g
 	var saved := 0
 	var to_remove := {}
+	# 一个锚点只产出一个 MeshInstance3D：所有材质组作为它的多个
+	# surface 共用一个 draw-宿主，draw 数 = 1（每 surface 一个 pass 不变，
+	# 但少了一层实例与包围盒管理，也更利于 crowd 后续整锚点收编）。
+	var bucket_mmi: MeshInstance3D = null
 	for key in groups:
 		var g: Dictionary = groups[key]
 		var gmem: Array = g["members"]
@@ -489,18 +511,19 @@ static func _emit_bucket(anchor: Node3D, members: Array) -> int:
 		if c_out.size() == v_out.size():
 			arrays[Mesh.ARRAY_COLOR] = c_out
 		arrays[Mesh.ARRAY_INDEX] = i_out
-		var mesh := ArrayMesh.new()
-		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		if bucket_mmi == null:
+			bucket_mmi = MeshInstance3D.new()
+			bucket_mmi.name = "Merged"
+			bucket_mmi.mesh = ArrayMesh.new()
+			bucket_mmi.cast_shadow = flags.cast_shadow
+			bucket_mmi.layers = flags.layers
+			bucket_mmi.visible = flags.visible
+			bucket_mmi.gi_mode = flags.gi_mode
+			anchor.add_child(bucket_mmi)
+		var surf_idx: int = bucket_mmi.mesh.get_surface_count()
+		bucket_mmi.mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 		if g["mat"] != null:
-			mesh.surface_set_material(0, g["mat"])
-		var merged := MeshInstance3D.new()
-		merged.name = "Merged"
-		merged.mesh = mesh
-		merged.cast_shadow = flags.cast_shadow
-		merged.layers = flags.layers
-		merged.visible = flags.visible
-		merged.gi_mode = flags.gi_mode
-		anchor.add_child(merged)
+			bucket_mmi.mesh.surface_set_material(surf_idx, g["mat"])
 		saved += uniq.size() - 1
 	for mi in instanced:
 		if is_instance_valid(mi) and mi.get_parent() != null:
@@ -511,3 +534,76 @@ static func _emit_bucket(anchor: Node3D, members: Array) -> int:
 			mi.get_parent().remove_child(mi)
 			mi.queue_free()
 	return saved
+
+
+## 顶点焊接：把空间距离 < eps 的顶点合并。对 ring/sphere/shell 这类
+## 「按段数生成、相邻环顶点几乎重合」的网格能砍 30%~60% 顶点。
+## 只动几何不动材质/UV 语义。eps 取 AABB 对角线的 1.5e-4，兼顾客差。
+static func weld_mesh(mesh: Mesh, eps := 0.0) -> Mesh:
+	if mesh == null or mesh.get_surface_count() == 0:
+		return mesh
+	var out := ArrayMesh.new()
+	for s in mesh.get_surface_count():
+		var arrays := mesh.surface_get_arrays(s)
+		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		if not (verts is PackedVector3Array) or verts.is_empty():
+			out.add_surface_from_arrays(mesh.surface_get_primitive_type(s), arrays)
+			if mesh.surface_get_material(s) != null:
+				out.surface_set_material(s, mesh.surface_get_material(s))
+			continue
+		var e2: float = eps if eps > 0.0 else _weld_eps(verts)
+		var remap := PackedInt32Array()
+		remap.resize(verts.size())
+		var seen := {}
+		var kept := PackedVector3Array()
+		var kept_norms := PackedVector3Array()
+		var kept_uvs := PackedVector2Array()
+		var kept_cols := PackedColorArray()
+		var norms = arrays[Mesh.ARRAY_NORMAL]
+		var uvs = arrays[Mesh.ARRAY_TEX_UV]
+		var cols = arrays[Mesh.ARRAY_COLOR]
+		for i in verts.size():
+			var v := verts[i]
+			var key := "%d,%d,%d" % [int(v.x / e2), int(v.y / e2), int(v.z / e2)]
+			if seen.has(key):
+				remap[i] = seen[key]
+				continue
+			var ni := kept.size()
+			seen[key] = ni
+			remap[i] = ni
+			kept.append(v)
+			if norms is PackedVector3Array and norms.size() == verts.size():
+				kept_norms.append(norms[i])
+			if uvs is PackedVector2Array and uvs.size() == verts.size():
+				kept_uvs.append(uvs[i])
+			if cols is PackedColorArray and cols.size() == verts.size():
+				kept_cols.append(cols[i])
+		var idxs = arrays[Mesh.ARRAY_INDEX]
+		var new_idx := PackedInt32Array()
+		if idxs is PackedInt32Array and idxs.size() > 0:
+			for ix in idxs:
+				new_idx.append(remap[ix])
+		else:
+			for i in verts.size():
+				new_idx.append(remap[i])
+		var a2 := []
+		a2.resize(Mesh.ARRAY_MAX)
+		a2[Mesh.ARRAY_VERTEX] = kept
+		if kept_norms.size() == kept.size():
+			a2[Mesh.ARRAY_NORMAL] = kept_norms
+		if kept_uvs.size() == kept.size():
+			a2[Mesh.ARRAY_TEX_UV] = kept_uvs
+		if kept_cols.size() == kept.size():
+			a2[Mesh.ARRAY_COLOR] = kept_cols
+		a2[Mesh.ARRAY_INDEX] = new_idx
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a2)
+		if mesh.surface_get_material(s) != null:
+			out.surface_set_material(s, mesh.surface_get_material(s))
+	return out
+
+
+static func _weld_eps(verts: PackedVector3Array) -> float:
+	var aabb := AABB(verts[0], Vector3.ZERO)
+	for v in verts:
+		aabb = aabb.expand(v)
+	return maxf(0.0002, aabb.size.length() * 1.2e-4)

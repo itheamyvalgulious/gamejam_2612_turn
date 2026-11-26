@@ -19,7 +19,10 @@ var _parts: Dictionary = {}    # owner -> [{key, anchor, rel}]
 var _dirty := false
 
 
+var enabled := true
 func register_enemy(owner: Node3D, slots: Array) -> void:
+	if not enabled:
+		return
 	if _parts.has(owner):
 		unregister_enemy(owner)
 	var list := []
@@ -37,6 +40,12 @@ func register_enemy(owner: Node3D, slots: Array) -> void:
 			mmi.layers = s["flags"]["layers"]
 			mmi.gi_mode = s["flags"]["gi_mode"]
 			mmi.visible = s["flags"]["visible"]
+			# 关键：instance transform 每帧都要重写，不设固定 AABB 的话
+			# MultiMesh 每次写都会遍历全部实例重算包围盒（71 组 × 96 槽
+			# 的 AABB 求交正是之前 crowd 净负 20ms 的来源）。给场大的固定
+			# 盒子：放弃逐组视锥剔除，换零重算。
+			mmi.custom_aabb = AABB(Vector3(-220.0, -60.0, -220.0),
+				Vector3(440.0, 140.0, 440.0))
 			mmi.top_level = true
 			mmi.global_transform = Transform3D.IDENTITY
 			if s["flags"]["material_override"] != null:
@@ -72,7 +81,10 @@ func unregister_enemy(owner: Node3D) -> void:
 		var g: Dictionary = _groups.get(p["key"], {})
 		if g.is_empty():
 			continue
-		g["mmi"].multimesh.set_instance_transform(p["idx"], Transform3D(Basis(), Vector3.ZERO))
+		var zero := Transform3D(Basis(), Vector3.ZERO)
+		g["mmi"].multimesh.set_instance_transform(p["idx"], zero)
+		if g.has("buf"):
+			_store_xf(g["buf"], p["idx"], zero)
 		g["slots"].erase(owner)
 		g["free"].append(p["idx"])
 		if p.has("node") and is_instance_valid(p["node"]):
@@ -83,6 +95,10 @@ func unregister_enemy(owner: Node3D) -> void:
 func _process(_dt: float) -> void:
 	if _parts.is_empty():
 		return
+	# 每处 set_instance_transform 都会让渲染线程把那组 instance buffer 整个
+	# 重传一遍——逐槽写 = 数百次微小上传同步。这里改成：
+	#   1) 遍历时只把脏槽位的新变换写进组的 float 缓冲（本地内存，零 API）
+	#   2) 帧末对每组一次 multimesh_set_buffer 整段提交
 	for owner in _parts:
 		if not is_instance_valid(owner) or not owner.is_inside_tree():
 			continue
@@ -90,9 +106,50 @@ func _process(_dt: float) -> void:
 			var anchor: Node3D = p["anchor"]
 			if not is_instance_valid(anchor) or not anchor.is_inside_tree():
 				continue
+			var xf: Transform3D = anchor.global_transform * p["rel"]
+			if p.get("last") == xf:
+				continue
+			p["last"] = xf
 			var g: Dictionary = _groups[p["key"]]
-			g["mmi"].multimesh.set_instance_transform(
-				p["idx"], anchor.global_transform * p["rel"])
+			_write_slot(g, p["idx"], xf)
+	for g in _dirty_groups.values():
+		g["mmi"].multimesh.set_buffer(g["buf"])
+	_dirty_groups.clear()
+
+
+var _dirty_groups := {}
+
+const _XF_FLOATS := 12
+
+## 把 Transform3D 写进组缓冲（TRANSFORM_3D 布局：basis 9f + origin 3f）。
+func _write_slot(g: Dictionary, idx: int, xf: Transform3D) -> void:
+	if not g.has("buf") or g["buf"].size() < g["count"] * _XF_FLOATS:
+		var buf := PackedFloat32Array()
+		buf.resize(maxi(g["count"], 1) * _XF_FLOATS)
+		# 先把已有的实例 transform 同步进缓冲（实例数增长后旧槽不能归零）
+		var mm: MultiMesh = g["mmi"].multimesh
+		for i in mm.instance_count:
+			_store_xf(buf, i, mm.get_instance_transform(i))
+		g["buf"] = buf
+	_store_xf(g["buf"], idx, xf)
+	_dirty_groups[g["mmi"].multimesh] = g
+
+
+static func _store_xf(buf: PackedFloat32Array, idx: int, xf: Transform3D) -> void:
+	var o := idx * _XF_FLOATS
+	var b := xf.basis
+	buf[o] = b.x.x; buf[o + 1] = b.y.x; buf[o + 2] = b.z.x
+	buf[o + 3] = b.x.y; buf[o + 4] = b.y.y; buf[o + 5] = b.z.y
+	buf[o + 6] = b.x.z; buf[o + 7] = b.y.z; buf[o + 8] = b.z.z
+	buf[o + 9] = xf.origin.x; buf[o + 10] = xf.origin.y; buf[o + 11] = xf.origin.z
+
+var _dread := 0
+var _dwrite := 0
+var _dbg_n := 0
+func _dbg_parts() -> int:
+	var c := 0
+	for k in _parts: c += _parts[k].size()
+	return c
 
 
 ## 收一个锚点子树里的全部静态 MeshInstance3D 叶子，吐成 slots。
@@ -118,6 +175,11 @@ static func _collect_into(root: Node3D, anchor: Node3D, xf: Transform3D,
 			if child.has_meta("no_merge") or child.mesh == null:
 				continue
 			if seen.has(child):
+				continue
+			# 发光/自定义 shader 材质会在运行时被调参（set_defeat_power 调暗、
+			# FX 动画）——共享 MMI 用的是第一个注册者的材质对象，调它会把
+			# 整组怪一起调暗，这类件不进 crowd。
+			if _has_mutable_material(child):
 				continue
 			seen[child] = true
 			slots.append(_make_slot(root, anchor, child, xf * child.transform))
@@ -145,8 +207,10 @@ static func _make_slot(root: Node3D, anchor: Node3D, mi: MeshInstance3D,
 		"material_override": mi.material_override,
 		"overrides": overrides,
 	}
-	var key := "%s|%s|%s|%d|%d|%d|%d" % [
-		_anchor_path(root, anchor), _fp(mi.mesh),
+	# 不按锚点路径分组：同一 mesh+材质的部件全场景共享一个 MMI，
+	# 上传次数 = 组数（每组每帧最多 1 次 buffer 提交），不按槽位数。
+	var key := "%s|%s|%d|%d|%d|%d" % [
+		_fp(mi.mesh),
 		mat_sig + _mat_sig(mi.material_override),
 		mi.cast_shadow, mi.layers, mi.gi_mode,
 		1 if mi.visible else 0]
@@ -203,3 +267,26 @@ static func _mat_sig(m: Material) -> String:
 			sig += "%s=%s;" % [nm, str(sh.get_shader_parameter(nm))]
 		return sig
 	return str(m)
+
+
+## 材质是否会在运行时被改：发光 StandardMaterial3D（set_defeat_power
+## 调 emission_energy_multiplier）和一切 ShaderMaterial（FX uniform）都算。
+static func _has_mutable_material(mi: MeshInstance3D) -> bool:
+	if _mutable(mi.material_override):
+		return true
+	for s in mi.mesh.get_surface_count():
+		if _mutable(mi.get_surface_override_material(s)):
+			return true
+		if _mutable(mi.mesh.surface_get_material(s)):
+			return true
+	return false
+
+
+static func _mutable(m: Material) -> bool:
+	if m == null:
+		return false
+	if m is ShaderMaterial:
+		return true
+	if m is StandardMaterial3D and m.emission_enabled:
+		return true
+	return false

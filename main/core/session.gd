@@ -341,6 +341,7 @@ func _switch(index: int) -> void:
 		# 同种怪的静态零件跨实例合批（20 只同种怪 = 1 只的 draw call）
 		var crowd: Node3D = (load("res://core/crowd.gd") as Script).new()
 		crowd.name = "CrowdInstancer"
+		crowd.enabled = not ("--no-crowd" in OS.get_cmdline_user_args())
 		crowd.add_to_group("crowd_instancer")
 		current.add_child(crowd)
 	if index < 0:

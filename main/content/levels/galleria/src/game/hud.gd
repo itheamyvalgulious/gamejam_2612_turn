@@ -72,7 +72,19 @@ func _process(delta: float) -> void:
 		_parry_t = maxf(0.0, _parry_t - delta)
 	if _death != "":
 		_death_anim = minf(1.0, _death_anim + delta * 3.5)
+	# 帧时监视（调试卡顿时用）：每 30 帧刷一次。
+	_fps_acc += delta
+	_fps_n += 1
+	if _fps_n >= 30:
+		_fps_ms = _fps_acc / _fps_n * 1000.0
+		_fps_acc = 0.0
+		_fps_n = 0
 	_canvas.queue_redraw()
+
+
+var _fps_acc := 0.0
+var _fps_n := 0
+var _fps_ms := 0.0
 
 
 # ------------------------------------------------------------------ API
@@ -167,6 +179,11 @@ func _draw_hud() -> void:
 	var vp := _canvas.size
 	if not _visible_hud or vp.x < 10.0:
 		return
+	# 左上角帧时计数（调试用，常显）
+	var fps_col := Color(0.5, 1.0, 0.6, 0.9) if _fps_ms < 17.0 else \
+		Color(1.0, 0.82, 0.3, 0.9) if _fps_ms < 25.0 else Color(1.0, 0.4, 0.3, 0.9)
+	_canvas.draw_string(_font, Vector2(14, 24), "%.0f ms" % _fps_ms,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, fps_col)
 	_draw_stats(vp)
 	_draw_markers(vp)
 	if _death == "":

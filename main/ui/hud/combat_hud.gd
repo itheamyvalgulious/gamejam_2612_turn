@@ -46,7 +46,30 @@ func _process(delta: float) -> void:
 	_level_left = maxf(0.0, _level_left - delta)
 	_toast_left = maxf(0.0, _toast_left - delta)
 	_tutorial_left = maxf(0.0, _tutorial_left - delta)
+	_fps_acc += delta
+	_fps_n += 1
+	if _fps_n >= 30:
+		_fps_ms = _fps_acc / _fps_n * 1000.0
+		_fps_acc = 0.0
+		_fps_n = 0
+	# 卡顿定位：每秒往日志写一行分项（cpu/物理帧步/渲染量）
+	_log_t += delta
+	if _log_t >= 1.0:
+		_log_t = 0.0
+		print("[hud] ms=%.0f cpu=%.1f phy=%.1f draws=%d prims=%d objs=%d" % [
+			_fps_ms,
+			Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+			Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)),
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME))])
 	_canvas.queue_redraw()
+
+
+var _fps_acc := 0.0
+var _fps_n := 0
+var _fps_ms := 0.0
+var _log_t := 0.0
 
 func set_level(index: int) -> void:
 	_level_idx = index
@@ -210,6 +233,10 @@ func _draw_hud() -> void:
 	var size := _canvas.size
 	if size.x < 10.0:
 		return
+	# 左上角帧时计数（调试卡顿时用）
+	var fps_col := Color(0.5, 1.0, 0.6, 0.85) if _fps_ms < 17.0 else \
+		Color(1.0, 0.82, 0.3, 0.85) if _fps_ms < 25.0 else Color(1.0, 0.4, 0.3, 0.9)
+	_text("%.0f ms" % _fps_ms, Vector2(14, 22), 15, fps_col)
 	if _level_left > 0.0:
 		var fade := clampf(_level_left / 0.52, 0.0, 1.0)
 		var origin := Vector2(38, 53)

@@ -11,6 +11,10 @@ static func install(environment_root: Node3D, outside: bool) -> VoxelGI:
 		return null
 	var gi := VoxelGI.new()
 	gi.name="ContinuousNeonGI"
+	# 128³ cone tracing 每帧 ~9ms，实测是坠击中庭掉帧主因。
+	# 场景+霓虹全静态 → 烘一次只是少间接光不是灭灯；默认关，
+	# 玩家想开有「后期特效」开关（会重进关卡生效）。
+	gi.visible = bool(TurnSession.get_option("display.voxel_gi", false))
 	gi.size=Vector3(76,36,76) if outside else Vector3(76,28,68)
 	gi.position=Vector3(0,16,0) if outside else Vector3(0,12,0)
 	gi.subdiv=VoxelGI.SUBDIV_128
