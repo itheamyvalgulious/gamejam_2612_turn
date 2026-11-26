@@ -110,7 +110,7 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 
 	_aa_turret(aa3, cover, platforms, 184.0, -16.0, Vector3(170.0, DECK_Y, 0.0))
 	_aa_turret(aa3, cover, platforms, 184.0, 16.0, Vector3(170.0, DECK_Y, 0.0))
-	_gate(root, aa3, cover, platforms, gates, G3, -17.5, 17.5)
+	_gate(root, aa3, cover, platforms, gates, G3, -17.2, 17.2)
 	_power_node(aa3, cover, 184.0, -13.0, 1.0, Vector3(184.0, DECK_Y, -16.0), Vector3(184.0, DECK_Y, 16.0))
 
 	_hangar_block(root, cover)
@@ -209,6 +209,7 @@ static func _mats() -> void:
 		"label": Kit.std(Color(0.620, 0.620, 0.580), 0.80, 0.0,
 			{"noise": 3.0, "grime": 0.46, "bump": 0.08, "streak": 0.34}),
 		"glass": Kit.glass(Color(0.10, 0.19, 0.25), 0.30),
+		"node_glass": Kit.glass(Color(0.30, 0.50, 0.65), 0.12),
 		"window_cool": Kit.emissive(Color(0.55, 0.78, 1.0), 1.2, 0.18),
 		"window_warm": Kit.emissive(Color(1.0, 0.78, 0.48), 0.9, 0.18),
 		"strip": Kit.emissive(Color(0.30, 0.84, 0.98), 1.25, 0.16),
@@ -228,6 +229,10 @@ static func _mats() -> void:
 		"soot": Kit.std(Color(0.020, 0.019, 0.018), 0.98, 0.0,
 			{"noise": 12.0, "grime": 0.08, "bump": 0.16}),
 	}
+	# 节点玻璃：Kit.glass 默认带金属反射，近看会变成黑筒；这里改成无金属、低不透明度
+	var ng: StandardMaterial3D = _M["node_glass"]
+	ng.metallic = 0.0
+	ng.roughness = 0.20
 
 
 # ================================================================== 环境
@@ -469,9 +474,9 @@ static func _hull_details(root: Node3D) -> void:
 			_tube(root, Vector3(px, -8.0, side * 19.0), Vector3(px, -8.0, pz - side * 0.2), 0.24, _M["truss"])
 			_tube(root, Vector3(px, -16.0, side * 20.0), Vector3(px, -16.0, pz - side * 0.2), 0.20, _M["truss"])
 	# 侧面挂载舱
-	_module_cyl(root, Vector3(34.0, -25.0, -26.0), 6.0, 20.0, _M["hull"])
-	_module_cyl(root, Vector3(122.0, -24.0, 29.0), 5.0, 18.0, _M["hull"])
-	_module_cyl(root, Vector3(158.0, -30.0, -8.0), 7.0, 16.0, _M["hull_dark"])
+	_module_cyl(root, Vector3(34.0, -25.0, -30.0), 6.0, 20.0, _M["hull"])
+	_module_cyl(root, Vector3(122.0, -24.0, 33.0), 5.0, 18.0, _M["hull"])
+	_module_cyl(root, Vector3(158.0, -43.0, -8.0), 7.0, 16.0, _M["hull_dark"])
 	# 船头两侧的天线阵
 	for side in [-1.0, 1.0]:
 		_antenna(root, Vector3(214.0, 0.0, side * 16.0), 13.0)
@@ -941,8 +946,8 @@ static func _arena_c(root: Node3D, cover: Array, platforms: Array) -> void:
 	# 门槛前黄黑条
 	_hazard_band(root, 187.4, 188.6, -15.0, 15.0)
 	# 地面加油软管
-	Kit.cable(root, Vector3(170.0, DECK_Y + 0.2, -10.0) * U, Vector3(176.0, DECK_Y + 0.2, -2.0) * U, 0.5 * U, 0.07 * U, _M["cable"])
-	Kit.cable(root, Vector3(172.0, DECK_Y + 0.2, -10.0) * U, Vector3(178.0, DECK_Y + 0.2, 1.0) * U, 0.6 * U, 0.07 * U, _M["cable"])
+	Kit.cable(root, Vector3(170.0, DECK_Y + 0.5, -10.0) * U, Vector3(176.0, DECK_Y + 0.5, -2.0) * U, 0.18 * U, 0.07 * U, _M["cable"])
+	Kit.cable(root, Vector3(172.0, DECK_Y + 0.5, -10.0) * U, Vector3(178.0, DECK_Y + 0.5, 1.0) * U, 0.22 * U, 0.07 * U, _M["cable"])
 
 
 # ================================================================== 通用实体
@@ -973,7 +978,7 @@ static func _cargo_pod(root: Node3D, cover: Array, platforms: Array, cx: float, 
 			_M["hazard_y"] if k % 2 == 0 else _M["hazard_k"])
 	_ring_y(cover, cx, cz, hx, hz, y0, y0 + h - 0.30)
 	platforms.append({"c": Vector3(cx, 0.0, cz) * U,
-		"hx": hx * U, "hz": hz * U, "h": (y0 + h) * U})
+		"hx": hx * U, "hz": hz * U, "h": (y0 + h + 0.07) * U})
 	root.set_meta("pod_" + tag, true)
 
 
@@ -998,7 +1003,7 @@ static func _crate(root: Node3D, cover: Array, platforms: Array,
 			_M["hazard_y"] if k % 2 == 0 else _M["hazard_k"])
 	_ring_y(cover, cx, cz, hx, hz, y0, y0 + h - 0.30)
 	platforms.append({"c": Vector3(cx, 0.0, cz) * U,
-		"hx": hx * U, "hz": hz * U, "h": (y0 + h) * U})
+		"hx": hx * U, "hz": hz * U, "h": (y0 + h + 0.05) * U})
 
 
 static func _pipe_housing(root: Node3D, cover: Array, platforms: Array,
@@ -1018,7 +1023,7 @@ static func _pipe_housing(root: Node3D, cover: Array, platforms: Array,
 	_b(root, Vector3(hx * 2.0, 0.16, 0.04), Vector3(cx, y0 + 0.08, cz + hz + 0.01), _M["hazard_y"])
 	_ring_y(cover, cx, cz, hx, hz, y0, y0 + h - 0.30)
 	platforms.append({"c": Vector3(cx, 0.0, cz) * U,
-		"hx": hx * U, "hz": hz * U, "h": (y0 + h) * U})
+		"hx": hx * U, "hz": hz * U, "h": (y0 + h + 0.04) * U})
 
 
 static func _fuel_tank(root: Node3D, cover: Array, cx: float, cz: float) -> void:
@@ -1088,7 +1093,7 @@ static func _aa_turret(aa: Node3D, cover: Array, platforms: Array, x: float, z: 
 	for k in 4:
 		_b(t, Vector3(0.10, 0.95, 2.2), Vector3(-1.45, 1.55, 0.0), _M["vent"])
 	# 顶部雷达：桅杆加高，把碟抬到炮塔顶 1.9 m 以上，避免看起来像可踩的平台
-	_b(t, Vector3(0.18, 2.00, 0.18), Vector3(-0.55, 3.55, 0.0), _M["steel_dark"])
+	_b(t, Vector3(0.18, 3.00, 0.18), Vector3(-0.55, 4.03, 0.0), _M["steel_dark"])
 	var dish := CylinderMesh.new()
 	dish.top_radius = 0.85 * U
 	dish.bottom_radius = 0.85 * U
@@ -1097,7 +1102,7 @@ static func _aa_turret(aa: Node3D, cover: Array, platforms: Array, x: float, z: 
 	var dm := MeshInstance3D.new()
 	dm.mesh = dish
 	dm.material_override = _M["steel"]
-	dm.position = Vector3(-0.55, 4.58, 0.0) * U
+	dm.position = Vector3(-0.55, 5.58, 0.0) * U
 	dm.rotation = Vector3(0.35, 0.0, 0.0)
 	t.add_child(dm)
 	# 通电警示条：琥珀色，和红色光闸区分开
@@ -1109,10 +1114,14 @@ static func _aa_turret(aa: Node3D, cover: Array, platforms: Array, x: float, z: 
 	var lamp := _omni_node(t, Vector3(-0.4, 2.9, 0.0), Color(1.0, 0.34, 0.08), 1.0, 11.0, 0.35)
 	aa.light(lamp, 1.0)
 	# 顶面维护格栅：把炮塔盖四周加宽 0.25 m，落点更好找
-	_b(t, Vector3(0.30, 0.06, 3.40), Vector3(-1.45, 2.56, 0.0), _M["steel_dark"])
-	_b(t, Vector3(0.30, 0.06, 3.40), Vector3(1.65, 2.56, 0.0), _M["steel_dark"])
-	_b(t, Vector3(3.40, 0.06, 0.30), Vector3(0.10, 2.56, -1.70), _M["steel_dark"])
-	_b(t, Vector3(3.40, 0.06, 0.30), Vector3(0.10, 2.56, 1.70), _M["steel_dark"])
+	_b(t, Vector3(0.30, 0.06, 3.40), Vector3(-1.45, 2.565, 0.0), _M["steel_dark"])
+	_b(t, Vector3(0.30, 0.06, 3.40), Vector3(1.65, 2.565, 0.0), _M["steel_dark"])
+	_b(t, Vector3(3.40, 0.06, 0.30), Vector3(0.10, 2.565, -1.70), _M["steel_dark"])
+	_b(t, Vector3(3.40, 0.06, 0.30), Vector3(0.10, 2.565, 1.70), _M["steel_dark"])
+	# 雷达桅杆根部也挡一下，避免站在顶面时相机穿进桅杆
+	var mast_pos: Vector3 = t.position + t.basis.x * (-0.55 * U)
+	cover.append({"c": Vector3(mast_pos.x, (DECK_Y + 2.53) * U, mast_pos.z),
+		"r": 0.22 * U + BALL, "h": 3.5 * U, "cam": true})
 	# 碰撞：炮座挡人，顶面格栅可站；侧碰撞停在台面下 0.30
 	_cov(cover, Vector3(x, DECK_Y, z), 1.9, 2.23)
 	platforms.append({"c": Vector3(x, 0.0, z) * U,
@@ -1124,26 +1133,28 @@ static func _gate(root: Node3D, aa: Node3D, cover: Array, platforms: Array, gate
 	var cz := (z0 + z1) * 0.5
 	var dz := z1 - z0
 	var wide := dz > 20.0
+	var pylon_out := 1.2 if wide else 0.5
+	var spon := 1.9 if wide else 1.2
 	var top := DECK_Y + 7.0
 	# 上/下发射轨：让红色光条像一道门，而不是一根栏杆
 	_b(aa, Vector3(0.34, 0.20, dz + 0.6), Vector3(x, DECK_Y + 0.12, cz), _M["steel_dark"])
-	_b(aa, Vector3(0.34, 0.20, dz + 0.6), Vector3(x, DECK_Y + 4.40, cz), _M["steel_dark"])
+	_b(aa, Vector3(0.34, 0.20, dz + 0.6), Vector3(x, DECK_Y + 5.40, cz), _M["steel_dark"])
 	for k in int((dz + 0.6) / 0.9):
 		var hz := cz - (dz + 0.6) * 0.5 + 0.45 + float(k) * 0.9
 		_b(aa, Vector3(0.38, 0.22, 0.42), Vector3(x, DECK_Y + 0.12, hz),
 			_M["hazard_y"] if k % 2 == 0 else _M["hazard_k"])
-	var top_rail := _b(aa, Vector3(0.36, 0.10, dz), Vector3(x, DECK_Y + 4.50, cz), _M["red"])
+	var top_rail := _b(aa, Vector3(0.36, 0.10, dz), Vector3(x, DECK_Y + 5.50, cz), _M["red"])
 	aa.part(top_rail, _M["red"], _M["off"])
 	platforms.append({"c": Vector3(x, 0.0, cz) * U,
-		"hx": 0.18 * U, "hz": dz * 0.5 * U, "h": (DECK_Y + 4.55) * U})
-	# 两根门柱
-	for zz in [z0 - 0.5, z1 + 0.5]:
+		"hx": 0.18 * U, "hz": dz * 0.5 * U, "h": (DECK_Y + 5.55) * U})
+	# 两根门柱；宽门的柱子退到矮护墙外面，避免和墙/光条穿在一起
+	for zz in [cz - dz * 0.5 - pylon_out, cz + dz * 0.5 + pylon_out]:
 		# 门柱落在小外伸台上，不从栈桥边上悬空
-		_b(root, Vector3(1.9, 0.34, 1.9), Vector3(x, DECK_Y - 0.17, zz), _M["deck"])
-		_b(root, Vector3(1.9, 1.0, 0.30), Vector3(x, DECK_Y - 0.85, zz + (1.0 if zz > cz else -1.0) * 0.80), _M["under"])
+		_b(root, Vector3(spon, 0.34, spon), Vector3(x, DECK_Y - 0.17, zz), _M["deck"])
+		_b(root, Vector3(spon, 1.0, 0.30), Vector3(x, DECK_Y - 0.85, zz + (1.0 if zz > cz else -1.0) * 0.55), _M["under"])
 		_tube(root, Vector3(x, DECK_Y - 0.35, zz), Vector3(x, 0.2, zz + (1.0 if zz > cz else -1.0) * 2.2), 0.16, _M["truss"])
 		platforms.append({"c": Vector3(x, 0.0, zz) * U,
-			"hx": 0.95 * U, "hz": 0.95 * U, "h": DECK_Y * U})
+			"hx": spon * 0.5 * U, "hz": spon * 0.5 * U, "h": DECK_Y * U})
 		_b(aa, Vector3(0.72, 7.2, 0.72), Vector3(x, DECK_Y + 3.6, zz), _M["armor"])
 		_b(aa, Vector3(0.86, 0.14, 0.86), Vector3(x, top + 0.07, zz), _M["armor_light"])
 		var pstrip := _b(aa, Vector3(0.10, 0.55, 0.10), Vector3(x - 0.38, DECK_Y + 5.9, zz), _M["red"])
@@ -1154,18 +1165,16 @@ static func _gate(root: Node3D, aa: Node3D, cover: Array, platforms: Array, gate
 		_b(aa, Vector3(0.72, 0.72, dz + 2.4), Vector3(x, top + 0.36, cz), _M["armor"])
 		var rail := _b(aa, Vector3(0.10, 0.06, dz + 1.4), Vector3(x - 0.38, top - 0.15, cz), _M["red"])
 		aa.part(rail, _M["red"], _M["off"])
-	else:
-		var rail2 := _b(aa, Vector3(0.08, 0.08, dz), Vector3(x, DECK_Y + 3.2, cz), _M["red"])
-		aa.part(rail2, _M["red"], _M["off"])
+	# 宽门不横顶梁，也不在中间加横杆；只保留 8.5 m 的顶轨
 	# 红色光条（9 / 13 / 18 条，视门宽）；门面抬到 4.4 m，炮塔顶也翻不过去
 	var n := int(maxf(7.0, floor(dz / 0.95)))
 	for i in n:
 		var zz := z0 + (dz * (float(i) + 0.5) / float(n))
-		var bar := _b(aa, Vector3(0.05, 4.40, 0.06), Vector3(x, DECK_Y + 2.25, zz), _M["red"])
+		var bar := _b(aa, Vector3(0.05, 5.40, 0.06), Vector3(x, DECK_Y + 2.75, zz), _M["red"])
 		aa.part(bar, _M["red"], _M["off"])
 	# 通电时门面本身是实体；断电时把碰撞高度归零
 	var blocker_start := cover.size()
-	_chain_y(cover, Vector2(x, z0), Vector2(x, z1), 0.08, DECK_Y, DECK_Y + 4.4)
+	_chain_y(cover, Vector2(x, z0), Vector2(x, z1), 0.08, DECK_Y, DECK_Y + 5.4)
 	for i in range(blocker_start, cover.size()):
 		aa.blocker(cover[i])
 	# 门口地面警示
@@ -1195,18 +1204,19 @@ static func _power_node(aa: Node3D, cover: Array, x: float, z: float, face: floa
 	for k in 9:
 		_b(n, Vector3(0.10, 2.2, 2.2), Vector3(-1.72, 1.5, 0.0), _M["vent"])
 	# 核心：玻璃管 + 内芯 + 环
-	_cyl(n, 0.48, 2.1, Vector3(0.0, 1.65, face * 1.32), _M["glass"])
+	_cyl(n, 0.48, 2.1, Vector3(0.0, 1.65, face * 1.32), _M["node_glass"])
 	var core := _cyl(n, 0.28, 1.8, Vector3(0.0, 1.65, face * 1.36), _M["core_on"])
 	aa.part(core, _M["core_on"], _M["off"])
 	for yy in [0.8, 1.65, 2.5]:
 		_torus(n, 0.52, 0.07, Vector3(0.0, yy, face * 1.34), _M["steel_dark"], Vector3.ZERO, 20)
-	# 控制台
-	_b(n, Vector3(1.7, 0.75, 0.55), Vector3(0.0, 0.85, face * 1.72), _M["steel_dark"])
-	var screen := _b(n, Vector3(0.90, 0.42, 0.04), Vector3(0.0, 1.10, face * 2.01), _M["screen"])
+	# 控制台：前面留出玻璃管，下面补一段支撑臂，避免看起来悬空
+	_b(n, Vector3(0.92, 0.22, 0.85), Vector3(0.0, 0.50, face * 1.55), _M["steel_dark"])
+	_b(n, Vector3(1.7, 0.75, 0.55), Vector3(0.0, 0.85, face * 2.16), _M["steel_dark"])
+	var screen := _b(n, Vector3(0.90, 0.42, 0.04), Vector3(0.0, 1.10, face * 2.46), _M["screen"])
 	aa.part(screen, _M["screen"], _M["off"])
 	# 五格进度灯：清完怪后按住 3 s，逐格转绿
 	for k in 5:
-		var pip := _b(n, Vector3(0.22, 0.14, 0.05), Vector3(-0.62 + float(k) * 0.31, 1.52, face * 2.02), _M["amber"])
+		var pip := _b(n, Vector3(0.22, 0.14, 0.05), Vector3(-0.62 + float(k) * 0.31, 1.52, face * 2.47), _M["amber"])
 		aa.part(pip, _M["amber"], _M["off_green"])
 	# 侧面断电手柄
 	_tube(n, Vector3(-1.05, 1.0, face * 1.55), Vector3(-1.25, 1.55, face * 1.82), 0.07, _M["red"])
@@ -1229,15 +1239,17 @@ static func _power_node(aa: Node3D, cover: Array, x: float, z: float, face: floa
 	_cov(cover, Vector3(x, DECK_Y, z), 2.25, 3.2)
 	# 从节点到两座炮塔的电缆
 	if t1 != Vector3.ZERO:
-		_cable_to(aa, Vector3(x, DECK_Y + 0.24, z), t1)
+		_cable_to(aa, Vector3(x, DECK_Y + 0.42, z), t1)
 	if t2 != Vector3.ZERO:
-		_cable_to(aa, Vector3(x, DECK_Y + 0.24, z), t2)
+		_cable_to(aa, Vector3(x, DECK_Y + 0.42, z), t2)
 
 
 static func _cable_to(parent: Node3D, a: Vector3, b: Vector3) -> void:
 	for k in 2:
 		var off := Vector3(0.0, 0.0, (float(k) - 0.5) * 0.26)
-		Kit.cable(parent, (a + off) * U, (b + off) * U, 0.34 * U, 0.105 * U, _M["cable"])
+		var aa := a + Vector3(0.0, 0.42, 0.0)
+		var bb := b + Vector3(0.0, 0.42, 0.0)
+		Kit.cable(parent, (aa + off) * U, (bb + off) * U, 0.16 * U, 0.105 * U, _M["cable"])
 
 
 # ================================================================== 船坞大门
