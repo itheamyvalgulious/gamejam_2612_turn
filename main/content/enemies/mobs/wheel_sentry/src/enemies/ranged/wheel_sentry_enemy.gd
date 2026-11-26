@@ -76,6 +76,7 @@ func setup_sentry(yaw: float, first_shot_delay := 0.95) -> void:
 	if level != null and level.has_method("sentry_ground_move"):
 		_ground_roll = level.sentry_ground_move
 		rig.support_ground = level.duelist_floor
+	_register_crowd.call_deferred()
 
 
 func _on_respawn() -> void:
@@ -660,3 +661,15 @@ func hud_alert(target: PlayerUnit) -> bool:
 		stop = beam.start + beam.direction * (edge.distance_to(beam.start) + float(cap["r"]))
 	var hit := Hit.sweep_sphere(beam.start, stop, beam.radius, cap["a"], cap["b"], cap["r"])
 	return hit.get("hit", false)
+
+
+## 同种怪跨实例合批：把锚点子树里的静态叶子交给 scene 根的 CrowdInstancer。
+func _register_crowd() -> void:
+	var crowd = get_tree().get_first_node_in_group("crowd_instancer")
+	if crowd == null:
+		return
+	var anchors: Array = rig.crowd_anchors() if rig.has_method("crowd_anchors") else []
+	if anchors.is_empty():
+		return
+	var slots: Array = (load("res://core/crowd.gd") as Script).collect_slots(rig, anchors)
+	crowd.register_enemy(rig, slots)

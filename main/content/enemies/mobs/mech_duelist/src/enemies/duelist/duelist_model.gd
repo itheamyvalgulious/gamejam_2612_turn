@@ -127,6 +127,12 @@ func _ready() -> void:
 	set_charge_state(-1.0)
 	DisplayPose.apply(self)
 	_skeleton.sync(true)
+	# 砍 draw call：骨骼 BoneAttachment + 驱动 pivot 作锚点，锚点子树里的
+	# 静态装甲/装饰件合并到锚点上。
+	var anchors: Array = [_blade_mount]
+	for a in find_children("*_Geometry", "BoneAttachment3D", true, false):
+		anchors.append(a)
+	MeshKit.merge_leaf_meshes(self, anchors)
 
 
 func _metal(material: StandardMaterial3D, color: Color, metal: float, rough: float) -> void:

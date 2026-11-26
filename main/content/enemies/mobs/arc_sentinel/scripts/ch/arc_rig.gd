@@ -1048,6 +1048,7 @@ func _build_arm() -> void:
 func _build_blade_fx() -> void:
 	var fx := preload("res://scripts/ch/arc_sword_fx.gd").new()
 	fx.name = "ArcSwordFX"
+	fx.set_meta("no_merge", true)  # 脚本每帧重写 mesh，禁止合并
 	blade_fx.add_child(fx)
 	blade_light = OmniLight3D.new()
 	blade_light.light_color = Color(1.0, 0.32, 0.06)

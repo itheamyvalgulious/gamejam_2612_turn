@@ -22,6 +22,7 @@ var parry_timer := 0.0        # 剩余弹反窗口
 var parry_cd := 0.0
 var block_push := Vector3.ZERO   # 格挡成功后被推开的残余速度
 var last_attack := ""
+var enemies: Array = []
 var pending_hitstop := 0.0
 var hurt_flash := 0.0
 var swing_serial := 0
@@ -93,7 +94,8 @@ func _sync_params() -> void:
 	rig.set_timings(t)
 
 
-func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
+func step(dt: float, arena: Dictionary, p_enemies: Array = []) -> void:
+	enemies = p_enemies
 	_sync_params()
 	if not alive:
 		return
@@ -150,9 +152,15 @@ func step(dt: float, arena: Dictionary, enemies: Array = []) -> void:
 	if B.just("attack_light"):
 		_attack_from_input(mv)
 	if B.just("attack_heavy"):
-		_attack("heavy")
-	if B.just("attack_spin"):
-		_attack("spin")
+		if rig.is_attacking:
+			_interrupt_swing(true)
+		else:
+			_attack("heavy")
+	elif B.just("attack_spin"):
+		if rig.is_attacking:
+			_interrupt_swing(false)
+		else:
+			_attack("spin")
 
 	# 举刀 / 架招：先把刀规划到威胁的必经之路上（读招 → 落点 → 机械臂过渡）
 	# 窗口内一定在规划；窗口过了只要威胁还在、刀还架着，就继续跟着它走。
@@ -559,7 +567,7 @@ func _begin_parry() -> void:
 	_return_left = 0.0
 
 
-## 「正对/侧/背」由按下瞬间按住的 WASD 决定
+## 「正对/侧/背」由按下瞬间按住的 WASD 决定；前向再按敌人位置细分 4 种。
 func _attack_from_input(mv: Vector2) -> void:
 	if absf(mv.x) > 0.5 and absf(mv.x) >= absf(mv.y):
 		if mv.x < 0.0:
@@ -569,13 +577,59 @@ func _attack_from_input(mv: Vector2) -> void:
 	elif mv.y > 0.5:
 		_attack("slash_back")
 	else:
-		_attack("slash_fwd")
+		_attack(_front_attack_id())
+
+
+## 4 种前向挥砍里选「能打到最近敌人」的那个；都够不到就默认 FRONT_R。
+func _front_attack_id() -> String:
+	var best: Node = null
+	var best_d := 1e9
+	for e in enemies:
+		if e == null or not e.alive or e.rig == null:
+			continue
+		var d: float = rig.global_position.distance_to(e.rig.global_position)
+		if d < best_d:
+			best_d = d
+			best = e
+	if best == null or best_d > 4.5:
+		return "slash_fwd"
+	var target: Vector3 = best.center() if best.has_method("center") \
+		else best.rig.global_position + Vector3(0, 1.2, 0)
+	var clip: String = rig.pick_front_clip(target, P.getf("attack.slash_fwd.lunge"))
+	return "slash_fwd:" + clip
+
+
+## Q/E 挥剑中强制停下立正；Q 同时破掉最近格挡怪的架刀（无视格挡）。
+func _interrupt_swing(break_guard: bool) -> void:
+	rig.cancel_attack()
+	last_attack = ""
+	if not break_guard:
+		return
+	var best: Node = null
+	var best_d := 1e9
+	for e in enemies:
+		if e == null or not e.alive or e.rig == null:
+			continue
+		var d: float = rig.global_position.distance_to(e.rig.global_position)
+		if d < best_d:
+			best_d = d
+			best = e
+	if best != null and best_d < 4.2 and best.has_method("break_guard"):
+		best.break_guard(rig.global_position)
 
 
 func _attack(move_id: String) -> void:
 	if not alive or rig.is_attacking:
 		return
-	rig.play_action(move_id, P.getf("attack.%s.lunge" % move_id))
+	# "slash_fwd:CLIP" = 按敌人位置细分出的前向 clip（slash_fwd_xx 系列）
+	var clip := ""
+	if move_id.begins_with("slash_fwd:"):
+		clip = move_id.split(":", true, 1)[1]
+		move_id = "slash_fwd"
+	if clip != "":
+		rig.play_action_clip(move_id, clip, P.getf("attack.%s.lunge" % move_id))
+	else:
+		rig.play_action(move_id, P.getf("attack.%s.lunge" % move_id))
 	last_attack = move_id
 	swing_serial += 1
 

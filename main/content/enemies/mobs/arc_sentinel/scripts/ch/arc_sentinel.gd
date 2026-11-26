@@ -98,6 +98,14 @@ func _ready() -> void:
 	_radius_cache = rig.measure_radius()
 	_refresh_clearance()
 	_build_fx()
+	# 砍 draw call：J 里所有关节 pivot 都是锚点（运行时都在动），
+	# 锚点子树里的静态装甲件合并到锚点上。_trail_mi/_impact_mi 被代码
+	# 直接引用 —— 拉黑。ArcSwordFX 在 rig 里已标 no_merge。
+	var anchors: Array = [_trail_mi, _impact_mi]
+	for j in rig.J.values():
+		if j is Node3D:
+			anchors.append(j)
+	MK.merge_leaf_meshes(self, anchors)
 
 
 # ================================================================== lifecycle

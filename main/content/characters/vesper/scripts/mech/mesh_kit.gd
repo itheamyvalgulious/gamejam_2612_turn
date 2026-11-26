@@ -901,3 +901,230 @@ static func energy_blade(length: float, width: float, thickness: float,
 			uvs.append(urow)
 		base_idx = _emit_smooth_grid(st, rows, norms, uvs, false, base_idx)
 	return st.commit()
+
+
+# ------------------------------------------------------------------ merge ---
+## 砍 draw call 的锚点式静态合并：
+##   - blocked 里的 Node3D = 「锚点」（会被代码驱动的 pivot / 会被单独拆走的
+##     装甲板）：把它子树里所有静态 MeshInstance3D 叶子合并到它自己身上。
+##   - blocked 里的 MeshInstance3D 或带 no_merge meta 的叶子 = 原样保留。
+##   - 不在任何锚点下的叶子合并到 root。
+##   - 每组先做「几何指纹相同 → MultiMesh」的 instancing，再按材质拼单 surface。
+## 返回合并掉的 MeshInstance 数量。
+static func merge_leaf_meshes(root: Node3D, blocked: Array = []) -> int:
+	var anchors := {}
+	for n in blocked:
+		if n == null:
+			continue
+		if n is MeshInstance3D:
+			n.set_meta("no_merge", true)
+		elif n is Node3D:
+			anchors[n] = true
+			n.set_meta("no_merge", true)
+	var buckets := {}
+	_collect(root, Transform3D.IDENTITY, root, anchors, buckets)
+	var saved := 0
+	for anchor in buckets:
+		saved += _emit_bucket(anchor, buckets[anchor])
+	for n in blocked:
+		if n != null and is_instance_valid(n) and n.has_meta("no_merge"):
+			n.remove_meta("no_merge")
+	return saved
+
+
+## DFS：anchor=当前生效锚点，xf=相对锚点的累计变换。
+## 遇到 no_merge 的 Node3D（子锚点）则以其为新锚点重算变换。
+## 遇到 no_merge 的叶子或普通叶子则记录/跳过。
+static func _collect(node: Node, xf: Transform3D, anchor: Node3D,
+		anchors: Dictionary, buckets: Dictionary) -> void:
+	for child in node.get_children():
+		var is_node3d := child is Node3D
+		if child.has_meta("no_merge"):
+			if is_node3d and anchors.has(child) and not (child is MeshInstance3D):
+				_collect(child, Transform3D.IDENTITY, child, anchors, buckets)
+			continue
+		if child is MeshInstance3D and child.get_child_count() == 0:
+			var bag: Array = buckets.get(anchor, [])
+			bag.append({"mi": child, "xf": xf * child.transform})
+			buckets[anchor] = bag
+		elif is_node3d:
+			_collect(child, xf * (child as Node3D).transform, anchor, anchors, buckets)
+
+
+static func _leaf_key(mi: MeshInstance3D) -> String:
+	return "%d|%d|%d|%d" % [mi.cast_shadow, mi.layers,
+		1 if mi.visible else 0, mi.gi_mode]
+
+
+static func _eff_material(mi: MeshInstance3D, s: int) -> Material:
+	var m: Material = mi.get_surface_override_material(s)
+	if m == null:
+		m = mi.material_override
+	if m == null:
+		m = mi.mesh.surface_get_material(s)
+	return m
+
+
+static func _mesh_mat_sig(mi: MeshInstance3D) -> String:
+	var sig := ""
+	for s in mi.mesh.get_surface_count():
+		sig += str(_eff_material(mi, s)) + ";"
+	return sig
+
+
+static func _mesh_fp(mesh: Mesh) -> String:
+	var fp := ""
+	for s in mesh.get_surface_count():
+		var arrays := mesh.surface_get_arrays(s)
+		var verts = arrays[Mesh.ARRAY_VERTEX]
+		var idxs = arrays[Mesh.ARRAY_INDEX]
+		var n: int = verts.size() if verts is PackedVector3Array else 0
+		var m: int = idxs.size() if idxs is PackedInt32Array else 0
+		var bb := ""
+		if n > 0:
+			var aabb := AABB(verts[0], Vector3.ZERO)
+			for v in verts:
+				aabb = aabb.expand(v)
+			bb = "%v|%v" % [aabb.position, aabb.size]
+		fp += "%d|%d|%s;" % [n, m, bb]
+	return fp
+
+
+## 把一个锚点收来的 member 列表（{"mi","xf"}）实例化/合并发射。
+static func _emit_bucket(anchor: Node3D, members: Array) -> int:
+	var instanced := {}
+	# 阶段 A：同几何指纹 → MultiMesh
+	var by_mesh := {}
+	for e in members:
+		var mi: MeshInstance3D = e["mi"]
+		var key := "%s|%s|%s" % [_mesh_fp(mi.mesh), _mesh_mat_sig(mi), _leaf_key(mi)]
+		var g: Array = by_mesh.get(key, [])
+		g.append(e)
+		by_mesh[key] = g
+	for key in by_mesh:
+		var g: Array = by_mesh[key]
+		if g.size() < 2:
+			continue
+		var ref: MeshInstance3D = g[0]["mi"]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = ref.mesh
+		mm.instance_count = g.size()
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "Inst%d" % g.size()
+		mmi.multimesh = mm
+		mmi.cast_shadow = ref.cast_shadow
+		mmi.layers = ref.layers
+		mmi.visible = ref.visible
+		mmi.gi_mode = ref.gi_mode
+		anchor.add_child(mmi)
+		for i in g.size():
+			mm.set_instance_transform(i, g[i]["xf"])
+		for e in g:
+			instanced[e["mi"]] = true
+	# 阶段 B：按材质拼单 surface
+	var groups := {}
+	for e in members:
+		var mi: MeshInstance3D = e["mi"]
+		if instanced.has(mi):
+			continue
+		for s in mi.mesh.get_surface_count():
+			var m := _eff_material(mi, s)
+			var st := SurfaceTool.new()
+			st.create_from(mi.mesh, s)
+			var src := st.commit()
+			if src == null or src.get_surface_count() == 0:
+				continue
+			var arrays := src.surface_get_arrays(0)
+			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			if verts.is_empty():
+				continue
+			var norms = arrays[Mesh.ARRAY_NORMAL]
+			var uvs = arrays[Mesh.ARRAY_TEX_UV]
+			var cols = arrays[Mesh.ARRAY_COLOR]
+			var idxs = arrays[Mesh.ARRAY_INDEX]
+			var fmt := "%d%d%d" % [
+				1 if norms is PackedVector3Array and norms.size() == verts.size() else 0,
+				1 if uvs is PackedVector2Array and uvs.size() == verts.size() else 0,
+				1 if cols is PackedColorArray and cols.size() == verts.size() else 0]
+			var key := "%s|%s|%s" % [str(m), _leaf_key(mi), fmt]
+			var g: Dictionary = groups.get(key, {"mat": m, "members": [], "flags": mi})
+			g["members"].append({"mi": mi, "xf": e["xf"], "verts": verts,
+				"norms": norms, "uvs": uvs, "cols": cols, "idxs": idxs})
+			groups[key] = g
+	var saved := 0
+	var to_remove := {}
+	for key in groups:
+		var g: Dictionary = groups[key]
+		var gmem: Array = g["members"]
+		var flags: MeshInstance3D = g["flags"]
+		var uniq := {}
+		for e in gmem:
+			uniq[e["mi"]] = true
+		if uniq.size() < 2:
+			continue
+		for mi in uniq:
+			to_remove[mi] = true
+		var v_out := PackedVector3Array()
+		var n_out := PackedVector3Array()
+		var t_out := PackedVector2Array()
+		var c_out := PackedColorArray()
+		var i_out := PackedInt32Array()
+		for e in gmem:
+			var xf: Transform3D = e["xf"]
+			var nm := xf.basis.inverse().transposed()
+			var base := v_out.size()
+			var verts: PackedVector3Array = e["verts"]
+			var norms = e["norms"]
+			var uvs = e["uvs"]
+			var cols = e["cols"]
+			var has_n: bool = norms is PackedVector3Array and norms.size() == verts.size()
+			var has_t: bool = uvs is PackedVector2Array and uvs.size() == verts.size()
+			var has_c: bool = cols is PackedColorArray and cols.size() == verts.size()
+			for i in verts.size():
+				v_out.append(xf * verts[i])
+				if has_n:
+					n_out.append((nm * norms[i]).normalized())
+				if has_t:
+					t_out.append(uvs[i])
+				if has_c:
+					c_out.append(cols[i])
+			var idxs = e["idxs"]
+			if idxs is PackedInt32Array and idxs.size() > 0:
+				for ix in idxs:
+					i_out.append(base + ix)
+			else:
+				for i in verts.size():
+					i_out.append(base + i)
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = v_out
+		if n_out.size() == v_out.size():
+			arrays[Mesh.ARRAY_NORMAL] = n_out
+		if t_out.size() == v_out.size():
+			arrays[Mesh.ARRAY_TEX_UV] = t_out
+		if c_out.size() == v_out.size():
+			arrays[Mesh.ARRAY_COLOR] = c_out
+		arrays[Mesh.ARRAY_INDEX] = i_out
+		var mesh := ArrayMesh.new()
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		if g["mat"] != null:
+			mesh.surface_set_material(0, g["mat"])
+		var merged := MeshInstance3D.new()
+		merged.name = "Merged"
+		merged.mesh = mesh
+		merged.cast_shadow = flags.cast_shadow
+		merged.layers = flags.layers
+		merged.visible = flags.visible
+		merged.gi_mode = flags.gi_mode
+		anchor.add_child(merged)
+		saved += uniq.size() - 1
+	for mi in instanced:
+		if is_instance_valid(mi) and mi.get_parent() != null:
+			mi.get_parent().remove_child(mi)
+			mi.queue_free()
+	for mi in to_remove:
+		if is_instance_valid(mi) and mi.get_parent() != null:
+			mi.get_parent().remove_child(mi)
+			mi.queue_free()
+	return saved

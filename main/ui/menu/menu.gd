@@ -24,6 +24,10 @@ func _ready() -> void:
 		var repro = load("res://tools/repro.gd").new()
 		repro.name = "ReproDriver"
 		get_tree().root.add_child.call_deferred(repro)
+	if "--soak20" in OS.get_cmdline_user_args() or "--soak-level" in " ".join(OS.get_cmdline_user_args()):
+		var sk = load("res://tools/soak20.gd").new()
+		sk.name = "Soak20"
+		get_tree().root.add_child.call_deferred(sk)
 	if "--repro-stab" in OS.get_cmdline_user_args():
 		var repro_stab = load("res://tools/repro_stab.gd").new()
 		repro_stab.name = "ReproStab"

@@ -128,8 +128,14 @@ func is_in_view(camera: Camera3D) -> bool:
 	return rig.body_in_view(camera)
 
 
+var _guard_broken := 0.0
+
+func break_guard(_source: Vector3) -> void:
+	_guard_broken = 1.2
+
+
 func blocks_when_seen() -> bool:
-	return true
+	return _guard_broken <= 0.0
 
 
 func constrain_player_motion(start: Vector3, goal: Vector3, radius: float) -> Vector3:
@@ -154,6 +160,7 @@ func on_attack_parried(normal: Vector3) -> void:
 
 func step(dt: float, ctx: Dictionary) -> void:
 	_used_ground_motion = false
+	_guard_broken = maxf(0.0, _guard_broken - dt)
 	if not alive:
 		_step_knockdown(dt, Fx.time_scale)
 		return

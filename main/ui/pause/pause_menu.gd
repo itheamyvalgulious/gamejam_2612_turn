@@ -233,6 +233,8 @@ func _settings() -> void:
 		Section.DISPLAY:
 			_fullscreen = _toggle("全屏", get_window().mode in [Window.MODE_FULLSCREEN,
 				Window.MODE_EXCLUSIVE_FULLSCREEN], "display.fullscreen")
+			_toggle("垂直同步", bool(_option("display.vsync", false)), "display.vsync")
+			_toggle("后期特效", bool(_option("display.post_fx", true)), "display.post_fx")
 			_slider("镜头震动", "cam.shake_scale", 0.0, 4.0, 0.05, 100.0)
 		Section.AUDIO:
 			_slider("总音量", "audio.master", 0.0, 1.5, 0.01, 100.0)

@@ -197,6 +197,25 @@ func _ready() -> void:
 	_update_legs(1.0 / 60.0, 0.0)
 	_update_arms(BASE_POSE)
 	_update_thrusters(0.0)
+	# 砍 draw call：把所有关节 pivot 都当锚点（它们运行时都在动），
+	# 每个锚点子树里的静态装甲件合并到锚点上。额外拉黑：
+	#   weapon_root  — _measure_blade 逐件量刃体半径（合并会混入 glow 撑大判定）
+	#   hair         — 每帧重建 mesh
+	#   head_green_dot / contact_shadow — 代码直接引用并改 transform
+	#   flame*       — 按名字查找、每帧改 visible/scale
+	var anchors: Array = [body, torso, head, weapon_root, hair,
+		head_green_dot, contact_shadow]
+	for leg in legs:
+		for key in ["root", "hip", "knee", "ankle"]:
+			if leg.get(key) != null:
+				anchors.append(leg[key])
+	for arm in arms:
+		for key in ["shoulder", "elbow", "wrist", "fore", "upper"]:
+			if arm.get(key) != null:
+				anchors.append(arm[key])
+	for n in find_children("flame*", "MeshInstance3D", true, false):
+		anchors.append(n)
+	MK.merge_leaf_meshes(self, anchors)
 	if auto_step:
 		set_process(true)
 

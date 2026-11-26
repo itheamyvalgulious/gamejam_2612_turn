@@ -77,6 +77,17 @@ func play_action(action: String, lunge: float) -> void:
 	clear_blade_path()
 	_attack_queue.clear()
 	var clip := _clip(CLIPS[action])
+	_play_clip(action, clip, lunge)
+
+
+## 按敌人位置细分出的具体 clip 直出（前向 4 选 1）。
+func play_action_clip(action: String, clip_name: String, lunge: float) -> void:
+	clear_blade_path()
+	_attack_queue.clear()
+	_play_clip(action, _clip(clip_name), lunge)
+
+
+func _play_clip(action: String, clip: Dictionary, lunge: float) -> void:
 	var timing: Dictionary = _timings.get("heavy" if action == "plunge" else action, {})
 	var trail: Array = clip["trail"]
 	var duration: float = clip["duration"]
@@ -121,6 +132,62 @@ func _lunge_at(t: float) -> float:
 
 func in_hit_window() -> bool:
 	return is_attacking and attack_elapsed >= attack_hit_from and attack_elapsed <= attack_hit_to
+
+
+## 挥剑中强制停下立正（Q/E 用）：立刻收刀回待机姿态。
+func cancel_attack() -> void:
+	if not is_attacking:
+		return
+	attack_elapsed = _attack_total
+	attack_time = float(_attack.get("duration", 0.0))
+	_finish_attack()
+	plan_blade_return(0.14)
+
+
+## 「哪个前向挥砍能打到 target」：对 4 个 FRONT/RISE clip 离线采样刀尖
+## 轨迹（trail 窗内），选离目标最近、且最早覆盖到目标的 clip。
+## 返回 CLIPS 字典里的 clip 名（"FRONT_R"/"FRONT_L"/"RISE_R"/"RISE_L"）。
+func pick_front_clip(target: Vector3, lunge: float, reach := 0.62) -> String:
+	var names := ["FRONT_R", "FRONT_L", "RISE_R", "RISE_L"]
+	var torso_xf := _torso_transform(torso.rotation)
+	var saved := _attack
+	var spin_xf := weapon_spin.transform if weapon_spin != null else Transform3D.IDENTITY
+	var fwd := -global_basis.z.normalized()
+	var best: String = names[0]
+	var best_score := 1e9
+	for n in names:
+		var clip := _clip(n)
+		_attack = clip
+		var trail: Array = clip.get("trail", [0.0, 1.0])
+		var authored := _eval_curve(clip.get("lunge", []), float(clip.get("duration", 1.0)))
+		var min_d := 1e9
+		var reach_t := 1e9
+		for i in 15:
+			var t: float = lerpf(float(trail[0]), float(trail[1]), float(i) / 14.0)
+			var pose := _evaluate_keys(t)
+			var wr := Transform3D(
+				Basis.from_euler(Vector3(float(pose["wrx"]), float(pose["wry"]), float(pose["wrz"]))),
+				Vector3(float(pose["wpx"]), float(pose["wpy"]), float(pose["wpz"])))
+			var wx: Transform3D = torso_xf * wr * spin_xf
+			var lunged := _eval_curve(clip.get("lunge", []), t)
+			if absf(authored) > 0.001:
+				lunged = lunged / absf(authored) * lunge
+			var tip: Vector3 = (wx * Vector3(0.0, BLADE_Y0 + BLADE_LEN, 0.0)) + fwd * lunged
+			var base: Vector3 = (wx * Vector3(0.0, BLADE_Y0, 0.0)) + fwd * lunged
+			# 刀是线段不是点：横扫/上撩的刀尖都远，但刀身会扫过目标所在高度。
+			var d := Geometry3D.get_closest_point_to_segment(
+				target, base, tip).distance_to(target)
+			if d < min_d:
+				min_d = d
+			if d <= reach and reach_t > 1e8:
+				reach_t = t
+		# 主排序：贴多近（横扫贴胸口 > 上撩贴头）；reach_t 只作同档的平局权重。
+		var score := min_d * 10.0 + (reach_t if reach_t < 1e8 else 100.0)
+		if score < best_score:
+			best_score = score
+			best = n
+	_attack = saved
+	return best
 
 
 func blade_span() -> Vector2:
@@ -349,3 +416,34 @@ func _measure_blade(buckets := 30) -> Array:
 		if radii[index] > 0.002:
 			discs.append({"y": lo + (float(index) + 0.5) * width, "r": radii[index]})
 	return discs
+
+
+## debug：单 clip 的 min_d / reach_t（开发用）
+func _pick_debug(target: Vector3, clip_name: String, lunge: float) -> Array:
+	var torso_xf := _torso_transform(torso.rotation)
+	var saved := _attack
+	var spin_xf := weapon_spin.transform if weapon_spin != null else Transform3D.IDENTITY
+	var fwd := -global_basis.z.normalized()
+	var clip := _clip(clip_name)
+	_attack = clip
+	var trail: Array = clip.get("trail", [0.0, 1.0])
+	var authored := _eval_curve(clip.get("lunge", []), float(clip.get("duration", 1.0)))
+	var min_d := 1e9
+	var reach_t := 1e9
+	for i in 15:
+		var t: float = lerpf(float(trail[0]), float(trail[1]), float(i) / 14.0)
+		var pose := _evaluate_keys(t)
+		var wr := Transform3D(
+			Basis.from_euler(Vector3(float(pose["wrx"]), float(pose["wry"]), float(pose["wrz"]))),
+			Vector3(float(pose["wpx"]), float(pose["wpy"]), float(pose["wpz"])))
+		var wx: Transform3D = torso_xf * wr * spin_xf
+		var lunged := _eval_curve(clip.get("lunge", []), t)
+		if absf(authored) > 0.001:
+			lunged = lunged / absf(authored) * lunge
+		var tip: Vector3 = (wx * Vector3(0.0, BLADE_Y0 + BLADE_LEN, 0.0)) + fwd * lunged
+		var base: Vector3 = (wx * Vector3(0.0, BLADE_Y0, 0.0)) + fwd * lunged
+		var d := Geometry3D.get_closest_point_to_segment(target, base, tip).distance_to(target)
+		if d < min_d: min_d = d
+		if d <= 0.62 and reach_t > 1e8: reach_t = t
+	_attack = saved
+	return [min_d, reach_t]
