@@ -1236,7 +1236,7 @@ static func _power_node(aa: Node3D, cover: Array, x: float, z: float, face: floa
 	var lamp2 := _omni_node(n, Vector3(0.0, 6.3, 0.0), Color(1.0, 0.46, 0.12), 1.4, 22.0, 0.30)
 	aa.light(lamp2, 1.4)
 	# 碰撞
-	_cov(cover, Vector3(x, DECK_Y, z), 2.25, 3.2)
+	_cov(cover, Vector3(x, DECK_Y, z), 2.60, 3.2)
 	# 从节点到两座炮塔的电缆
 	if t1 != Vector3.ZERO:
 		_cable_to(aa, Vector3(x, DECK_Y + 0.42, z), t1)
