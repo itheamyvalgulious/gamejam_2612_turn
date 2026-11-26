@@ -796,24 +796,23 @@ static func _lab(root: Node3D, cover: Array) -> void:
 	_b(root, Vector3(0.55, 2.5, 12.0), Vector3(x1 - 0.28, cy + 8.75, 0.0), _M["hull_light"])
 	_b(root, Vector3(0.55, 5.0, 3.0), Vector3(x1 - 0.28, cy + 5.0, -4.5), _M["hull"])
 	_b(root, Vector3(0.55, 5.0, 3.0), Vector3(x1 - 0.28, cy + 5.0, 4.5), _M["hull"])
-	# 破口四周的烧灼/变形区
-	_b(root, Vector3(0.10, 5.6, 6.6), Vector3(x1 + 0.02, cy + 5.0, 0.0), _M["soot"])
-	_b(root, Vector3(0.10, 1.1, 8.2), Vector3(x1 + 0.02, cy + 1.55, 0.0), _M["soot"])
-	_b(root, Vector3(0.10, 1.1, 8.2), Vector3(x1 + 0.02, cy + 8.6, 0.0), _M["soot"])
-	# 破口边框：橙色应急灯带
-	_b(root, Vector3(0.08, 0.14, 6.2), Vector3(x1 + 0.10, cy + 2.45, 0.0), _M["amber"])
-	_b(root, Vector3(0.08, 0.14, 6.2), Vector3(x1 + 0.10, cy + 7.55, 0.0), _M["amber"])
-	for zz in [-3.08, 3.08]:
-		_b(root, Vector3(0.08, 5.1, 0.14), Vector3(x1 + 0.10, cy + 5.0, zz), _M["amber"])
+	# 破口四周：不规则烧痕，不再是一整块黑色矩形
+	for k in 7:
+		var a := TAU * float(k) / 7.0
+		_b(root, Vector3(0.07, 1.3, 1.1), Vector3(x1 + 0.03, cy + 5.0 + sin(a) * 2.8, cos(a) * 3.25),
+			_M["soot"], Vector3(0.7 * sin(a), 1.2 * cos(a), 0.4 * sin(a)))
+	# 两个小应急灯（不是一圈方框）
+	for zz in [-2.35, 2.35]:
+		_b(root, Vector3(0.10, 0.20, 0.20), Vector3(x1 + 0.14, cy + 7.25, zz), _M["amber"])
 
 	# 内部：地板 / 天花 / 后墙 / 实验台 / 应急灯（透过破口能看到）
 	_b(root, Vector3(12.0, 0.20, 6.0), Vector3(-13.0, cy + 2.55, 0.0), _M["steel_dark"])
 	_b(root, Vector3(12.0, 0.20, 6.0), Vector3(-13.0, cy + 7.45, 0.0), _M["soot"])
 	_b(root, Vector3(0.30, 5.0, 6.0), Vector3(-19.2, cy + 5.0, 0.0), _M["hull_dark"])
 	# 后墙的冷光灯板
-	_b(root, Vector3(0.06, 2.2, 4.0), Vector3(-18.95, cy + 5.0, 0.0), _M["lamp_dim"])
-	for zz in [-2.8, 2.8]:
-		_b(root, Vector3(12.0, 5.0, 0.18), Vector3(-13.0, cy + 5.0, zz), _M["soot"])
+	_b(root, Vector3(0.06, 2.2, 4.0), Vector3(-18.95, cy + 5.0, 0.0), _M["window_cool"])
+	for zz in [-3.05, 3.05]:
+		_b(root, Vector3(12.0, 5.0, 0.18), Vector3(-13.0, cy + 5.0, zz), _M["hull_dark"])
 	# 两排实验台
 	for zz in [-2.0, 2.0]:
 		_b(root, Vector3(10.0, 0.72, 1.2), Vector3(-13.0, cy + 3.0, zz), _M["steel_dark"])
@@ -826,10 +825,19 @@ static func _lab(root: Node3D, cover: Array) -> void:
 	_torus(root, 1.12, 0.08, Vector3(-13.0, cy + 4.78, 0.0), _M["steel_dark"], Vector3.ZERO, 24)
 	# 顶部冷光条与应急红灯
 	_b(root, Vector3(10.0, 0.10, 0.10), Vector3(-13.0, cy + 7.15, 0.0), _M["strip"])
+	_b(root, Vector3(10.0, 0.06, 0.10), Vector3(-13.0, cy + 2.66, 0.0), _M["strip_warm"])
 	_b(root, Vector3(0.45, 0.45, 0.45), Vector3(-9.0, cy + 6.85, 0.0), _M["red"])
-	_omni(root, Vector3(-12.0, cy + 4.6, 0.0), Color(0.72, 0.86, 1.0), 2.2, 12.0, 0.40)
+	_omni(root, Vector3(-12.0, cy + 4.6, 0.0), Color(0.72, 0.86, 1.0), 3.2, 16.0, 0.45)
+	_omni(root, Vector3(-8.5, cy + 3.8, 0.0), Color(0.95, 0.86, 0.72), 1.2, 8.0, 0.35)
 	_omni(root, Vector3(-9.0, cy + 6.4, 0.0), Color(1.0, 0.18, 0.10), 1.4, 8.0, 0.35)
 
+	# 洞口内翻板片：破坏方洞轮廓
+	for k in 8:
+		var a := TAU * float(k) / 8.0
+		var py := cy + 5.0 + sin(a) * 2.40
+		var pz := cos(a) * 2.85
+		_b(root, Vector3(1.05, 0.14, 0.60), Vector3(x1 - 0.02, py, pz), _M["hull"],
+			Vector3(0.40 * sin(a), 0.95 * cos(a), 0.50 * sin(a)))
 	# 撕裂外翻的板片：沿洞边一圈
 	for k in 12:
 		var a := TAU * float(k) / 12.0
