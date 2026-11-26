@@ -14,6 +14,7 @@ const Rig = preload("res://team/vesper/integration/campaign_rig.gd")
 const Units = preload("res://src/core/units.gd")
 # 直接 preload：不依赖全局类缓存，headless / 首次 clone 都能跑
 const InterceptS = preload("res://src/game/intercept.gd")
+const PlayerBladeTerrain = preload("res://core/player_blade_terrain.gd")
 
 var rig
 var cam: GameCam
@@ -34,6 +35,7 @@ var air_jumps := 0
 var jump_buffer_dt := 0.0
 var coyote_left := 0.0
 var _was_in_window := false
+var blade_terrain := PlayerBladeTerrain.new()
 var projectiles = null
 
 # 弹反拦截规划的运行状态
@@ -58,6 +60,7 @@ func _ready() -> void:
 	rig = Rig.new()
 	rig.name = "Mech"
 	rig.auto_step = false
+	rig.terrain_blade_enabled = true
 	rig.set_process(false)
 	rig.scale = Vector3.ONE * Units.to_units(1.0)
 	add_child(rig)
@@ -99,6 +102,7 @@ func step(dt: float, arena: Dictionary, p_enemies: Array = []) -> void:
 	_sync_params()
 	if not alive:
 		return
+	blade_terrain.begin_player_step(rig)
 	parry_timer = maxf(0.0, parry_timer - dt)
 	parry_cd = maxf(0.0, parry_cd - dt)
 	hurt_flash = maxf(0.0, hurt_flash - dt)
@@ -563,7 +567,7 @@ func _clamp_to_arena(arena: Dictionary) -> void:
 
 
 func _begin_parry() -> void:
-	if parry_cd > 0.0 or rig.is_attacking:
+	if parry_cd > 0.0 or rig.is_attacking or blade_terrain.recovering:
 		return
 	parry_timer = P.getf("parry.window")
 	parry_cd = P.getf("parry.cooldown") + P.getf("parry.window")
@@ -624,7 +628,7 @@ func _interrupt_swing(break_guard: bool) -> void:
 
 
 func _attack(move_id: String) -> void:
-	if not alive or rig.is_attacking:
+	if not alive or rig.is_attacking or blade_terrain.recovering:
 		return
 	# "slash_fwd:CLIP" = 按敌人位置细分出的前向 clip（slash_fwd_xx 系列）
 	var clip := ""
@@ -694,6 +698,7 @@ func hurt(_amount: float, _from_dir := Vector3.FORWARD, cause := "") -> void:
 
 
 func reset(pos: Transform3D) -> void:
+	blade_terrain.reset()
 	alive = true
 	hp = P.getf("rules.player_hp")
 	invuln = 0.0

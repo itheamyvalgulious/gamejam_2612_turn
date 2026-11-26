@@ -4,6 +4,7 @@ class_name LevelUnit
 ## 尺度：本文件里的硬编码距离 / 速度都是**世界单位**（1 u = 0.547 m，见 src/core/units.gd）；
 ## 玩家可见的数值一律走 P.getm()（真实米）。
 
+const PlayerBladeTerrain = preload("res://core/player_blade_terrain.gd")
 const WallShadow = preload("res://src/fx/wall_shadow.gd")
 const StaticBatch = preload("res://core/static_batch.gd")
 
@@ -43,6 +44,7 @@ func start_level() -> void:
 		_clear_arena()
 		_clear_enemies()
 		arena = _arena_builder.build(Vector3.ZERO)
+		PlayerBladeTerrain.install_arena_walls(arena)
 		arena_node = arena["node"]
 		add_child(arena_node)
 		StaticBatch.apply(arena_node)

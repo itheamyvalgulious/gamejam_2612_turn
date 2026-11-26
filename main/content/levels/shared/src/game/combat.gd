@@ -24,7 +24,7 @@ static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_
 			continue
 		var res: Dictionary = Hit.sweep_blade_parts(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_discs,
 			rig.weapon_scale, e.hit_parts())
-		if not bool(res.get("hit", false)):
+		if not bool(res.get("hit", false)) or not player.blade_terrain.allows_hit(rig, res):
 			continue
 		e.last_hit_serial = serial
 		var point: Vector3 = res.get("point", rig.global_position)

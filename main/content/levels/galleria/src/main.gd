@@ -227,10 +227,10 @@ func _process(delta: float) -> void:
 		level.prepare_player()
 		player.step(dt, level.arena, level.enemies)
 		level.constrain_player()
-		player.adjust_blade_to_terrain(dt)
+		player.blade_terrain.advance_player(player.rig, dt, player.swing_serial, Snd, Fx)
 	level.step(dt, ctx)
-	var terrain_clear: Callable = level.terrain_blade_clear if player.terrain_blade_enabled else Callable()
-	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []), replay, dt, terrain_clear)
+	var terrain_clear: Callable = level.terrain_blade_clear
+	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []), replay, dt)
 	var final_hit := {}
 	for ev in p_events:
 		if ev["kind"] == "kill" and ev["enemy"] == level.finishing_enemy:

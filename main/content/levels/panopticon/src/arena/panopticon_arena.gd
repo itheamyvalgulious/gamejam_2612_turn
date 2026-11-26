@@ -88,6 +88,7 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 		"bounds": bounds,
 		"bounds_circle": (RADIUS - 1.0) * U,
 		"walls": walls,
+		"blade_center_cylinder": Vector2(TANK_R, TANK_TOP) * U,
 		"cover": cover,
 		"platforms": platforms,
 		"camera_open": false,

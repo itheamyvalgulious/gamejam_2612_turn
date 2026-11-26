@@ -51,8 +51,6 @@ func start_level(_idx: int) -> void:
 	if projectiles != null:
 		projectiles.clear_all()
 	player.rig.ground_height = arena["player_spawn"].origin.y
-	player.terrain_blade_enabled = arena.get("height_test", false)
-	player.rig.terrain_blade_enabled = player.terrain_blade_enabled
 	player.reset(arena["player_spawn"])
 	plunge_armed = false
 	drop_start_height = player.rig.global_position.y
@@ -229,6 +227,7 @@ func _rebuild_collision_cache() -> void:
 					_solid_grid[key] = []
 				(_solid_grid[key] as Array).append(i)
 	_solid_seen.resize(_solid_boxes.size())
+	_solid_seen.fill(0)
 	_solid_stamp = 0
 	_collision_ready = true
 
@@ -620,6 +619,8 @@ func prepare_player() -> void:
 		arm_plunge()
 
 func arm_plunge() -> void:
+	if player.blade_terrain.recovering:
+		return
 	plunge_armed = true
 	player.rig.vertical_velocity = minf(player.rig.vertical_velocity,-18.0)
 	player.rig.play_action("plunge", 0.0)

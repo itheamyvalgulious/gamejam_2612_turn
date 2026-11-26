@@ -17,6 +17,8 @@ const BED_TOP := 0.59
 const TABLE_TOP := 0.75
 const CAB_TOP := 1.30
 const DIV_TOP := 1.30
+const DIV_HALF_WIDTH := 11.10
+const DIV_HALF_DEPTH := 0.09
 const BED_LEN := 2.05
 const BED_HALF_W := 0.475
 
@@ -70,7 +72,7 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 		_platform(platforms, cover, Vector3(x + 1.75, 0.0, z_head + dir * 0.36), 0.22, 0.22, TABLE_TOP)
 
 	# 中央岛两排之间的实体隔墙（1.30 m，可以跳上去走）
-	platforms.append({"c": Vector3.ZERO, "hx": 11.10 * U, "hz": 0.09 * U, "h": DIV_TOP * U})
+	platforms.append({"c": Vector3.ZERO, "hx": DIV_HALF_WIDTH * U, "hz": DIV_HALF_DEPTH * U, "h": DIV_TOP * U})
 	# 圆柱掩体太粗会把人推得跳不上墙，这里沿墙布一排细圆柱
 	var wstep := 0.9
 	var wn := int(22.2 / wstep)
@@ -100,6 +102,8 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 		"floor_y": 0.0,
 		"bounds": bounds,
 		"walls": walls,
+		"blade_boxes": [AABB(Vector3(-DIV_HALF_WIDTH, 0.0, -DIV_HALF_DEPTH) * U,
+			Vector3(DIV_HALF_WIDTH * 2.0, DIV_TOP, DIV_HALF_DEPTH * 2.0) * U)],
 		"cover": cover,
 		"platforms": platforms,
 		"camera_open": false,

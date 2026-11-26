@@ -277,6 +277,8 @@ func prepare_player() -> void:
 		arm_plunge()
 
 func arm_plunge() -> void:
+	if player.blade_terrain.recovering:
+		return
 	plunge_armed = true
 	player.rig.vertical_velocity = minf(player.rig.vertical_velocity,-18.0)
 	player.rig.play_action("plunge", 0.0)
