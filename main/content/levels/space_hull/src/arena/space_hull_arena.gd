@@ -91,18 +91,18 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 	_arena_c(root, cover, platforms)
 
 	# 三道防空门禁 + 三个供能节点（都在同一棵 AA 节点下，F8 一次切全部）
-	_aa_turret(aa, cover, 28.0, -6.0, Vector3(18.0, DECK_Y, 0.0))
-	_aa_turret(aa, cover, 28.0, 6.0, Vector3(18.0, DECK_Y, 0.0))
+	_aa_turret(aa, cover, platforms, 28.0, -6.0, Vector3(18.0, DECK_Y, 0.0))
+	_aa_turret(aa, cover, platforms, 28.0, 6.0, Vector3(18.0, DECK_Y, 0.0))
 	_gate(root, aa, cover, platforms, gates, G1, -4.4, 4.4)
 	_power_node(aa, cover, 24.0, -6.0, 1.0, Vector3(28.0, DECK_Y, -6.0), Vector3(28.0, DECK_Y, 6.0))
 
-	_aa_turret(aa, cover, 107.5, -6.5, Vector3(96.0, DECK_Y, 0.0))
-	_aa_turret(aa, cover, 107.5, 6.5, Vector3(96.0, DECK_Y, 0.0))
+	_aa_turret(aa, cover, platforms, 107.5, -6.5, Vector3(96.0, DECK_Y, 0.0))
+	_aa_turret(aa, cover, platforms, 107.5, 6.5, Vector3(96.0, DECK_Y, 0.0))
 	_gate(root, aa, cover, platforms, gates, G2, -5.0, 5.0)
 	_power_node(aa, cover, 104.0, 6.0, -1.0, Vector3(107.5, DECK_Y, 6.5), Vector3(107.5, DECK_Y, -6.5))
 
-	_aa_turret(aa, cover, 184.0, -16.0, Vector3(170.0, DECK_Y, 0.0))
-	_aa_turret(aa, cover, 184.0, 16.0, Vector3(170.0, DECK_Y, 0.0))
+	_aa_turret(aa, cover, platforms, 184.0, -16.0, Vector3(170.0, DECK_Y, 0.0))
+	_aa_turret(aa, cover, platforms, 184.0, 16.0, Vector3(170.0, DECK_Y, 0.0))
 	_gate(root, aa, cover, platforms, gates, G3, -17.5, 17.5)
 	_power_node(aa, cover, 184.0, -13.0, 1.0, Vector3(184.0, DECK_Y, -16.0), Vector3(184.0, DECK_Y, 16.0))
 
@@ -1053,7 +1053,7 @@ static func _hazard_band_ring(root: Node3D, cx: float, cz: float, r: float, y: f
 
 
 # ================================================================== 防空炮 / 光闸 / 供能节点
-static func _aa_turret(aa: Node3D, cover: Array, x: float, z: float, aim: Vector3) -> void:
+static func _aa_turret(aa: Node3D, cover: Array, platforms: Array, x: float, z: float, aim: Vector3) -> void:
 	var t := Node3D.new()
 	t.position = Vector3(x, DECK_Y, z) * U
 	var dir := aim - Vector3(x, DECK_Y, z)
@@ -1101,8 +1101,10 @@ static func _aa_turret(aa: Node3D, cover: Array, x: float, z: float, aim: Vector
 	aa.part(rear, _M["amber"], _M["off"])
 	var lamp := _omni_node(t, Vector3(-0.4, 2.9, 0.0), Color(1.0, 0.34, 0.08), 1.0, 11.0, 0.35)
 	aa.light(lamp, 1.0)
-	# 碰撞：整个炮座按圆柱挡人
-	_cov(cover, Vector3(x, DECK_Y, z), 1.9, 3.0)
+	# 碰撞：炮座挡人，顶面（装甲盖 0.22 m）可站；侧碰撞停在台面下 0.30
+	_cov(cover, Vector3(x, DECK_Y, z), 1.9, 2.53)
+	platforms.append({"c": Vector3(x, 0.0, z) * U,
+		"hx": 1.35 * U, "hz": 1.45 * U, "h": (DECK_Y + 2.53) * U})
 
 
 static func _gate(root: Node3D, aa: Node3D, cover: Array, platforms: Array, gates: Array,
