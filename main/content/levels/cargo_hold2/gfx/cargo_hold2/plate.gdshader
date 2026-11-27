@@ -13,6 +13,7 @@ uniform float seed = 0.0;
 uniform float grate : hint_range(0.0, 1.0) = 0.0;
 uniform float wear_amount : hint_range(0.0, 2.0) = 1.0;
 uniform float tile_m : hint_range(0.4, 4.0) = 1.22;
+uniform float metal_base : hint_range(0.0, 1.0) = 0.22;
 uniform float metal_scale : hint_range(0.0, 1.0) = 1.0;
 uniform float rough_bias : hint_range(-0.2, 0.4) = 0.0;
 
@@ -75,9 +76,9 @@ void fragment() {
 	float micro = (m_noise2(uv * 240.0 + s) - 0.5) * micro_fade;
 	h += micro * 0.00004;
 	ALBEDO = col;
-	METALLIC = mix(0.22, 0.72, tread) * (1.0 - grime * 0.35) * metal_scale;
+	METALLIC = mix(metal_base, 0.72, tread) * (1.0 - grime * 0.35) * metal_scale;
 	ROUGHNESS = clamp(0.46 + micro * 0.06 + rough_bias + grime * 0.32 + scuff * 0.12 - lane * 0.08 + grate_rib * 0.15, 0.16, 0.98);
-	SPECULAR = 0.5;
+	SPECULAR = 0.60;
 	AO = clamp(1.0 - seam * 0.55 - seam2 * 0.18 - grime * 0.25 - grate_rib * 0.55, 0.0, 1.0);
 	AO_LIGHT_AFFECT = 0.2;
 	NORMAL = m_bump(NORMAL, VERTEX, h, 1.0);

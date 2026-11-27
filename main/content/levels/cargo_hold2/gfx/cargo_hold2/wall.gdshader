@@ -13,6 +13,7 @@ uniform vec3 accent_col : source_color = vec3(0.80, 0.34, 0.06);
 uniform int style : hint_range(0, 4) = 0;
 uniform float seed = 0.0;
 uniform float grime : hint_range(0.0, 2.0) = 0.8;
+uniform float rough_bias : hint_range(-0.2, 0.2) = 0.0;
 
 varying vec3 vseed;
 varying float vwear;
@@ -144,13 +145,13 @@ void fragment() {
 	grime_mask = m_sat(floor_dirt * 0.9 + streaks * 0.45 + corner * 0.25 * wear);
 	col = mix(col, trim_col * 0.8, grime_mask * 0.35);
 	col *= 1.0 - grime_mask * 0.18;
-	rough = clamp(rough + grime_mask * 0.16, 0.05, 1.0);
+	rough = clamp(rough + grime_mask * 0.16 + rough_bias, 0.05, 1.0);
 	ao *= 1.0 - grime_mask * 0.12;
 
 	ALBEDO = col;
 	METALLIC = metal * (1.0 - grime_mask * 0.4);
 	ROUGHNESS = rough;
-	SPECULAR = 0.45;
+	SPECULAR = 0.57;
 	AO = clamp(ao, 0.0, 1.0);
 	AO_LIGHT_AFFECT = 0.2;
 	NORMAL = m_bump(NORMAL, VERTEX, h, 1.0);

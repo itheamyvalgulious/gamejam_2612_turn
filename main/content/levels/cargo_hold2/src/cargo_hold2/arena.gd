@@ -83,23 +83,27 @@ static func _glow(color: Color, energy: float) -> StandardMaterial3D:
 
 
 static func _materials(kit: CargoMeshKit) -> void:
-	kit.material("floor", _shader("plate", {"base_col": Color("625f75"), "tile_m": 2.7, "rough_bias": 0.24}))
-	kit.material("wall", _shader("wall", {"base_col": Color("65647a"), "trim_col": Color("323047"), "style": 4, "grime": 0.32}))
-	for pair in [["metal", "9fabc2"], ["metal_dark", "28263a"], ["orion_frame", "4e465f"], ["track", "7e6888"]]:
-		kit.material(pair[0], _shader("metal", {"tint": Color(pair[1]), "rough_base": 0.62, "rust_amount": 0.07, "oil_grime": 0.13}))
-	kit.material("bare_steel", _shader("metal", {"tint": Color("a9afbc"), "rough_base": 0.39,
+	kit.material("floor", _shader("plate", {"base_col": Color("797d82"), "tile_m": 2.7,
+		"metal_base": 0.46, "rough_bias": -0.17}))
+	kit.material("wall", _shader("wall", {"base_col": Color("74787d"), "trim_col": Color("363a40"),
+		"accent_col": Color("8f8273"), "style": 4, "grime": 0.32, "rough_bias": -0.13}))
+	for pair in [["metal", "a6adb5", 0.29], ["metal_dark", "34383e", 0.38],
+		["orion_frame", "585d64", 0.36], ["track", "767a81", 0.33]]:
+		kit.material(pair[0], _shader("metal", {"tint": Color(pair[1]), "rough_base": pair[2],
+			"rust_amount": 0.05, "oil_grime": 0.13}))
+	kit.material("bare_steel", _shader("metal", {"tint": Color("acb4bd"), "rough_base": 0.23,
 		"rust_amount": 0.06, "oil_grime": 0.19}))
-	kit.material("safety_yellow", _shader("metal", {"tint": Color("b78143"), "rough_base": 0.54,
+	kit.material("safety_yellow", _shader("metal", {"tint": Color("aa9375"), "rough_base": 0.42,
 		"metal_amount": 0.31, "pattern": 1}))
-	kit.material("tread", _shader("plate", {"base_col": Color("454659"), "grate": 1.0,
+	kit.material("tread", _shader("plate", {"base_col": Color("4b4e54"), "grate": 1.0,
 		"tile_m": 1.4, "rough_bias": 0.02}))
 	var normal := NormalMap.texture()
 	for i in 3:
 		kit.material("container_" + str(i), _shader("container", {
-			"paint": [Color("536477"), Color("755576"), Color("896a56")][i],
-			"seed": float(i + 2), "rust": 0.09, "surface_normal": normal}))
-	for detail in [["cyan", "59c6d4", 1.2], ["violet", "b880ec", 1.1], ["amber", "f5b36f", 0.75],
-		["white", "dbe5f6", 1.35], ["paint", "b88973", 0.12]]:
+			"paint": [Color("626b74"), Color("737078"), Color("807a70")][i],
+			"seed": float(i + 2), "rust": 0.06, "surface_normal": normal}))
+	for detail in [["cyan", "83bdc5", 1.15], ["violet", "aea4c4", 0.80], ["amber", "d9b590", 0.68],
+		["white", "e5e7eb", 1.53], ["paint", "a99787", 0.08]]:
 		kit.material(detail[0], _glow(Color(detail[1]), detail[2]))
 
 
@@ -549,8 +553,8 @@ func _panel(content: String, at: Vector3, scale: float, facing := 0.0) -> void:
 	sign_label.font_size = 58
 	sign_label.pixel_size = 0.01 * scale / 0.13
 	sign_label.outline_size = 3
-	sign_label.outline_modulate = Color("292439")
-	sign_label.modulate = Color("d4cadf")
+	sign_label.outline_modulate = Color("26292e")
+	sign_label.modulate = Color("d3d5d9")
 	sign_label.position = at
 	sign_label.rotation.y = facing
 	_root.add_child(sign_label)
@@ -560,10 +564,10 @@ func _lighting() -> void:
 	var world := WorldEnvironment.new()
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color("161323")
+	env.background_color = Color("171a1e")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color("c6bedb")
-	env.ambient_light_energy = 0.55
+	env.ambient_light_color = Color("d5d8dd")
+	env.ambient_light_energy = 0.62
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.tonemap_exposure = 1.13
 	env.glow_enabled = true
@@ -571,25 +575,31 @@ func _lighting() -> void:
 	env.ssao_enabled = true
 	env.ssao_radius = 0.85
 	env.ssao_intensity = 1.08
+	env.ssr_enabled = true
+	env.ssr_max_steps = 24
+	env.ssr_fade_in = 0.12
+	env.ssr_fade_out = 1.8
+	env.ssr_depth_tolerance = 0.30
 	env.fog_enabled = true
-	env.fog_light_color = Color("26263e")
+	env.fog_light_color = Color("282d34")
 	env.fog_density = 0.0012
 	world.environment = env
 	_root.add_child(world)
-	_light(Vector3(-18, 5.0, 32.0), Color("e8c7e7"), 1.87, 13.0)
-	_light(Vector3(-20, 6.9, 20), Color("f6d6bd"), 3.1, 21.0)
-	_light(Vector3(-5, 7.5, 9), Color("d5daff"), 3.0, 21.0)
+	_light(Vector3(-18, 5.0, 32.0), Color("e1e5e9"), 1.87, 13.0)
+	_light(Vector3(-20, 6.9, 20), Color("f4e8dc"), 3.1, 21.0)
+	_light(Vector3(-5, 7.5, 9), Color("e0e6ee"), 3.0, 21.0)
 	for z in [-23.0, -9.0, 5.0, 24.0, 37.0]:
 		for x in [-27.0, 0.0, 23.0, 36.0]:
-			var color := Color("d8deff") if x != -27.0 else Color("d0b4ee")
+			var color := Color("e1e5ed") if x != -27.0 else Color("d8d7e4")
 			_light(Vector3(x, 9.5 if x != 0.0 else 11.0, z), color, 3.8, 26.0)
-	_light(Vector3(27, 6.6, -38), Color("b6e3fa"), 2.8, 16.0)
-	_light(Vector3(-18, 4.85, 34.7), Color("ffd7ad"), 1.48, 9.1)
-	_work_light(Vector3(-16.8, 7.65, 25.3), TARGET, Color("ffe2cb"), 3.45, 13.5)
-	_work_light(Vector3(5.6, 11.8, -11.5), BASIC_SPAWN + Vector3.UP, Color("f3dfd3"), 4.15, 21.0)
+	_light(Vector3(27, 6.6, -38), Color("d4e2e8"), 2.8, 16.0)
+	_light(Vector3(-18, 4.85, 34.7), Color("faead6"), 1.48, 9.1)
+	_work_light(Vector3(-16.8, 7.65, 25.3), TARGET, Color("fbefe4"), 3.45, 13.5)
+	_work_light(Vector3(5.6, 11.8, -11.5), BASIC_SPAWN + Vector3.UP, Color("f1e7de"), 4.15, 21.0)
 	for at in [Vector3(-9, 6.65, 11.9), Vector3(7.9, 7.0, -26.1), Vector3(26.8, 7.55, -31.2),
 		Vector3(EXIT_X, 6.85, -43.8)]:
 		var lamp := _light(at, Color("ff3159"), 0.0, 19.0)
+		lamp.light_specular = 0.22
 		_beacons.append(lamp)
 
 
@@ -598,6 +608,7 @@ func _work_light(at: Vector3, target: Vector3, tint: Color, power: float, reach:
 	lamp.transform = Transform3D(Basis.looking_at((target - at).normalized(), Vector3.UP), at)
 	lamp.light_color = tint
 	lamp.light_energy = power
+	lamp.light_specular = 0.82
 	lamp.spot_range = reach
 	lamp.spot_angle = 43.0
 	lamp.spot_attenuation = 0.9
@@ -623,7 +634,7 @@ func _light(at: Vector3, tint: Color, power: float, reach: float) -> OmniLight3D
 	lamp.light_energy = power
 	lamp.omni_range = reach
 	lamp.omni_attenuation = 1.2
-	lamp.light_specular = 0.22
+	lamp.light_specular = 0.72
 	_root.add_child(lamp)
 	return lamp
 

@@ -98,7 +98,7 @@ void fragment() {
 	ALBEDO = col;
 	METALLIC = clamp(metal * (1.0 - rust_mask * 0.55) * (1.0 - drip * 0.25), 0.0, 1.0);
 	ROUGHNESS = clamp(rough + rust_mask * 0.38 + drip * 0.15, 0.05, 1.0);
-	SPECULAR = 0.5;
+	SPECULAR = 0.63;
 	AO = clamp(ao * (1.0 - rust_mask * 0.15) * (1.0 - drip * 0.2), 0.0, 1.0);
 	AO_LIGHT_AFFECT = 0.25;
 	NORMAL = m_bump(NORMAL, VERTEX, h, 1.0);
