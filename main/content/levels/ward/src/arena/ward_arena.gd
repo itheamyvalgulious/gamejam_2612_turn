@@ -9,6 +9,25 @@ const Kit := preload("res://src/arena/kit.gd")
 
 const U := 1.0 / 0.547
 const BALL := 1.2
+
+## 导航元信息：病房 —— 地面矩形 + 床/柜/隔墙 platforms 顶面；
+## 障碍 = cover 圆棱柱 + 边界/内墙棱柱（隔墙 prism 已含在 cover/blade_boxes 同高区内，
+## 这里用一条手写棱柱补隔墙体）。
+static func nav_spec(_arena: Dictionary) -> Dictionary:
+	return {
+		"floor_margin": 0.4 * U,
+		"walls_obstacles": true,
+		"walls_sight": true,
+		"cover_obstacles": true,
+		"cover_shrink": BALL,
+		"platforms": true,
+		"obstacles": [{
+			"aabb": AABB(Vector3(-DIV_HALF_WIDTH, 0.0, -DIV_HALF_DEPTH) * U,
+				Vector3(DIV_HALF_WIDTH * 2.0, DIV_TOP, DIV_HALF_DEPTH * 2.0) * U),
+			"pad": "actor", "sight": true,
+		}],
+	}
+
 const HALF_X := 20.0
 const HALF_Z := 11.0
 const H := 6.5

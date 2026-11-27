@@ -8,6 +8,28 @@ const STAIR_BOTTOM := -10.0
 const STAIR_TOP := 18.0
 const DECK_HEIGHT := 8.0
 
+## 导航元信息（NavField.build 的 spec）：
+##   面 —— 地面 bounds 矩形 + walkable 顶面（两块高台甲板 + 28 级踏面）；
+##   线 —— 南侧返程楼梯中线，a 端落地、b 端上台，沿中线插值高度；
+##   障碍 —— 全部非 walkable solids（立面、栏杆、柜体、踏面护边）。
+static func nav_spec(_arena: Dictionary) -> Dictionary:
+	return {
+		"floor_margin": 2.4,
+		"walls_obstacles": false,
+		"cover_obstacles": true,
+		"platforms": false,
+		"ignore_box": [
+			AABB(Vector3(STAIR_X - STAIR_WIDTH * 0.5 - 0.1, 0.0, STAIR_BOTTOM - 0.1),
+				Vector3(STAIR_WIDTH + 0.2, DECK_HEIGHT - 0.05, STAIR_TOP - STAIR_BOTTOM + 0.2)),
+		],
+		"lines": [{
+			"a": Vector2(STAIR_X, STAIR_BOTTOM),
+			"b": Vector2(STAIR_X, STAIR_TOP),
+			"y0": 0.0, "y1": DECK_HEIGHT,
+			"width": STAIR_WIDTH, "kind": "stair",
+		}],
+	}
+
 static func build(height_test := false) -> Dictionary:
 	return new().build_scene(height_test)
 

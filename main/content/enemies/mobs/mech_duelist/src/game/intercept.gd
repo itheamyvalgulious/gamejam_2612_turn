@@ -26,16 +26,16 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	var prig = player.rig
 	if rig == null or prig == null or not rig.is_attacking:
 		return {"ok": false}
-	if rig.blade_discs.is_empty():
+	if rig.blade_proxy == null or rig.blade_proxy.pieces.is_empty():
 		return {"ok": false}
 	var t_now: float = rig.attack_elapsed
 	var t_end: float = rig.attack_hit_to
 	if t_now > t_end:
 		return {"ok": false}
-	var cap: Dictionary = player.capsule()
-	var a: Vector3 = cap["a"]
-	var b: Vector3 = cap["b"]
-	var r: float = cap["r"]
+	# Multi-cilindro del jugador: el arco de amenaza se evalúa contra cada
+	# pieza real (requirement #2), no contra una sola capsulota.
+	var parts: Array = player.rig.hit_parts() if player.rig != null \
+		and player.rig.has_method("hit_parts") else []
 	# 在剩余判定窗口里往前扫：刀最早什么时候进到「身上 + margin」以内
 	var e0: float = maxf(t_now, rig.attack_hit_from)
 	var n := 8
@@ -44,7 +44,7 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	var prev := e0
 	for i in n + 1:
 		var e: float = lerpf(e0, t_end, float(i) / float(n))
-		var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e), rig, a, b, r)
+		var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e), rig, parts)
 		if float(near["gap"]) <= margin:
 			lo = prev
 			hi = e
@@ -55,13 +55,13 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	# 二分细化「第一次进入 margin」的时刻：落点才不会在帧间跳来跳去
 	for i in 4:
 		var mid: float = (lo + hi) * 0.5
-		var nm: Dictionary = nearest_on_blade(rig.predict_weapon_xf(mid), rig, a, b, r)
+		var nm: Dictionary = nearest_on_blade(rig.predict_weapon_xf(mid), rig, parts)
 		if float(nm["gap"]) <= margin:
 			hi = mid
 		else:
 			lo = mid
 	var e_hit := hi
-	var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e_hit), rig, a, b, r)
+	var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e_hit), rig, parts)
 	var blade_pt: Vector3 = near["blade_pt"]
 	var body_pt: Vector3 = near["body_pt"]
 	var y: float = near["y"]
@@ -122,33 +122,32 @@ static func projectile_threat(player, it: Dictionary, reach: float, blade_speed:
 	return _finish(ip, vel, out_dir, eta, "shot", null)
 
 
-## 机体胶囊（线段 a-b，半径 r）离敌人刀身最近的那一对点
-static func nearest_on_blade(xf: Transform3D, rig, a: Vector3, b: Vector3, cap_r: float) -> Dictionary:
-	var discs: Array = rig.blade_discs
-	var best := {"gap": 1e9, "blade_pt": xf.origin, "body_pt": a, "y": 1.2}
-	if discs.is_empty():
+## 机体多段胶囊（parts: [{a,b,r,...}]）离敌人刀身最近的那一对点（凸体代理版）
+## Blade geometry goes through BladeProxy; the defender body is the
+## multi-cylinder set from hit_parts() — never a single fat capsule.
+static func nearest_on_blade(xf: Transform3D, rig, parts: Array) -> Dictionary:
+	var best := {"gap": 1e9, "blade_pt": xf.origin, "body_pt": xf.origin, "y": 1.2}
+	var proxy: BladeProxy = rig.blade_proxy
+	if proxy == null or proxy.pieces.is_empty():
 		return best
-	var scale: float = rig.weapon_scale
-	var stride := maxi(1, int(round(float(discs.size()) / 12.0)))
-	var i := 0
-	while i < discs.size():
-		var d: Dictionary = discs[i]
-		var y: float = float(d["y"])
-		if y < 0.2:                       # 跳过刀柄/配重，只测刀身
-			i += stride
-			continue
-		var p: Vector3 = xf * Vector3(0.0, y, 0.0)
-		var q: Vector3 = Hit.closest_on_segment(p, a, b)
-		var dir := p - q
-		var rr: float = float(d["r"]) * scale
-		var gap := dir.length() - rr - cap_r
-		if gap < float(best["gap"]):
+	# 跳过刀柄/配重区（y<0.2 的 piece 不参与接近度估计）
+	var span := Vector2(0.2, INF)
+	for part: Dictionary in parts:
+		var pa: Vector3 = part["a"]
+		var pb: Vector3 = part["b"]
+		var pr: float = float(part["r"])
+		var res: Dictionary = BladeProxy.gap_to_capsule(xf, proxy, pa, pb, pr, span)
+		if float(res["gap"]) < float(best["gap"]):
+			var q: Vector3 = res["body_pt"]
+			var dir: Vector3 = (res["blade_pt"] as Vector3) - q
 			var surf := q
 			if dir.length_squared() > 0.0001:
-				surf = q + dir.normalized() * cap_r
-			best = {"gap": gap, "blade_pt": p, "body_pt": surf, "y": y}
-		i += stride
+				surf = q + dir.normalized() * pr
+			var local: Vector3 = res["blade_local"]
+			best = {"gap": float(res["gap"]), "blade_pt": res["blade_pt"],
+				"body_pt": surf, "y": local.y}
 	return best
+
 
 
 ## 收尾：由威胁的运动方向 + 来向决定刀轴与刀面

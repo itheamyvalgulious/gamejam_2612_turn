@@ -39,8 +39,10 @@ func _on_respawn() -> void:
 		_blade_now = _blade()
 		_blade_prev = _blade_now
 
-# Intercept and damage checks share the blade profile in world units.
+# Intercept and damage checks share the blade proxy in world units.
+# blade_discs 仅作调试剖面；命中判定走 blade_proxy（16 棱柱包等离子刃缘）。
 var blade_discs: Array = []
+var blade_proxy: BladeProxy
 var weapon_scale := 1.0
 var last_dt := 0.0
 var is_attacking: bool:
@@ -72,6 +74,13 @@ func _ready() -> void:
 	_blade_length = rig.rig.marker_tip.global_position.distance_to(_blade_now.origin)
 	for i in 7:
 		blade_discs.append({"y": _blade_length * float(i) / 6.0, "r": EDGE_RADIUS})
+	# 等离子弧刃没有网格：用外切 24 棱柱包住圆柱刃缘
+	# （r/cos(π/24) 外接半径 → 圆柱全包含，体胀仅 +0.9%）
+	blade_proxy = BladeProxy.from_prism(
+		BladeProxy.regular_ring(24, EDGE_RADIUS / cos(PI / 24.0)),
+		0.0, _blade_length)
+	for clip in ATTACK_CLIPS:
+		_ensure_blade_cache(clip)
 
 
 func use_ground_routes(move: Callable, support: Callable, waypoint: Callable) -> void:
@@ -114,13 +123,9 @@ func break_guard(_source: Vector3) -> void:
 
 
 func hit_parts() -> Array:
-	var up := Vector3.UP * SCALE
-	var front: Vector3 = rig.global_basis.z.normalized() * SCALE
-	var center_at: Vector3 = rig.global_position
-	return [
-		{"a": center_at - front * 0.37 + up * 0.3, "b": center_at + front * 0.39 + up * 0.38, "r": 0.48 * SCALE},
-		{"a": center_at + up * 0.57, "b": center_at + up * 1.14, "r": 0.40 * SCALE},
-	]
+	# Cápsulas por articulación (chasis/torreta/brazo/orugas) ajustadas por
+	# BodyColliders — la unión contiene todos los vértices del cuerpo.
+	return rig.rig.body_colliders() if rig != null and rig.rig != null else []
 
 
 func step(dt: float, ctx: Dictionary) -> void:
@@ -148,7 +153,8 @@ func step(dt: float, ctx: Dictionary) -> void:
 			_wp_age -= dt
 			if not _wp_valid or _wp_age <= 0.0 \
 					or center_at.distance_squared_to(_wp_from) > 0.36 \
-					or target.distance_squared_to(_wp_goal) > 0.36:
+					or target.distance_squared_to(_wp_goal) > 0.36 \
+					or center_at.distance_squared_to(_wp_next) < 0.16:
 				_wp_next = _waypoint.call(center_at, target)
 				_wp_from = center_at
 				_wp_goal = target
@@ -158,6 +164,27 @@ func step(dt: float, ctx: Dictionary) -> void:
 		else:
 			_wp_valid = false
 		var heading := (chase - center_at).slide(Vector3.UP)
+		# 多怪防堆叠/互卡：软排斥周围活体非虚化敌人
+		var sep := Vector3.ZERO
+		if level != null and level.get("enemies") is Array:
+			for other in level.get("enemies"):
+				if other == self or other == null or not is_instance_valid(other) or not bool(other.get("alive")):
+					continue
+				if String(other.get("kind")) == "phase":
+					continue
+				var op: Vector3 = other.ground_position()
+				if absf(op.y - center_at.y) > 2.4:
+					continue
+				var away := (center_at - op).slide(Vector3.UP)
+				var d2 := away.length_squared()
+				if d2 < 2.8 * 2.8:
+					if d2 < 0.001:
+						away = Vector3.RIGHT if get_instance_id() > other.get_instance_id() else Vector3.LEFT
+						d2 = 1.0
+					var d := sqrt(d2)
+					sep += (away / d) * ((2.8 - d) / 2.8)
+		if sep.length_squared() > 0.001 and heading.length_squared() > 0.01:
+			heading = (heading.normalized() + sep * 0.85).normalized() * heading.length()
 		var desired: float = atan2(heading.x, heading.z) if heading.length_squared() > 0.0001 else rig.rotation.y
 		rig.rotation.y = rotate_toward(rig.rotation.y, desired, dt * 6.0)
 		if distance <= 3.25 and clear and _cooldown <= 0.0:
@@ -205,18 +232,48 @@ func _move_toward(from: Vector3, target: Vector3, heading: Vector3, dt: float) -
 	var pace := minf(P.getf("mob.speed"), 8.0)
 	var forward: Vector3 = rig.global_basis.z.normalized()
 	if _ground_move.is_valid():
-		if heading.normalized().dot(forward) < 0.55:
+		if heading.normalized().dot(forward) < 0.25:
 			return 0.0
 		var at: Vector3 = _ground_move.call(from, from + heading.limit_length(pace * dt))
 		rig.global_position = at
 		return (at - from).slide(Vector3.UP).length() / dt
-	if level.has_method("navigation_direction"):
-		forward = level.navigation_direction(from, target, forward)
+	# 没接 use_ground_routes 的哨兵保持直行（旧 AStarGrid2D 回退已删除）。
 	rig.global_position += forward * pace * dt
 	return pace
 
 
+const BLADE_CACHE_SAMPLES := 32
+static var _blade_pose_cache := {}   # clip -> {dur: float, samples: Array[{tool, tip}]}
+
+
+func _ensure_blade_cache(clip: String) -> Dictionary:
+	if _blade_pose_cache.has(clip):
+		return _blade_pose_cache[clip]
+	var dur: float = rig.anim.duration(clip)
+	var samples: Array = []
+	for i in BLADE_CACHE_SAMPLES + 1:
+		var t: float = dur * float(i) / float(BLADE_CACHE_SAMPLES)
+		var joints: Dictionary = rig.predict_blade_pose_for(clip, t) if rig.has_method("predict_blade_pose_for") else rig.predict_blade_pose(t)
+		samples.append({"tool": joints["tool"], "tip": joints["tip"]})
+	var entry := {"dur": dur, "samples": samples}
+	_blade_pose_cache[clip] = entry
+	return entry
+
+
 func predict_weapon_xf(time: float) -> Transform3D:
+	var clip: String = rig.current_anim
+	if clip in ATTACK_CLIPS and rig != null and rig.anim != null:
+		var entry := _ensure_blade_cache(clip)
+		var dur: float = maxf(float(entry["dur"]), 1e-4)
+		var samples: Array = entry["samples"]
+		var u := clampf(time / dur, 0.0, 1.0) * float(BLADE_CACHE_SAMPLES)
+		var i0 := mini(int(floor(u)), BLADE_CACHE_SAMPLES - 1)
+		var frac := u - float(i0)
+		var s0: Dictionary = samples[i0]
+		var s1: Dictionary = samples[i0 + 1]
+		var tool_l: Vector3 = (s0["tool"] as Vector3).lerp(s1["tool"] as Vector3, frac)
+		var tip_l: Vector3 = (s0["tip"] as Vector3).lerp(s1["tip"] as Vector3, frac)
+		return _blade_transform(rig.to_global(tool_l), rig.to_global(tip_l))
 	var joints: Dictionary = rig.predict_blade_pose(time)
 	return _blade_transform(rig.to_global(joints["tool"]), rig.to_global(joints["tip"]))
 
@@ -224,12 +281,15 @@ func predict_weapon_xf(time: float) -> Transform3D:
 func resolve_attack(target) -> Dictionary:
 	if not is_attacking or not target.alive or attack_elapsed < attack_hit_from or attack_elapsed > attack_hit_to:
 		return {"hit": false}
+	if target.rig == null or rig.global_position.distance_squared_to(target.rig.global_position) > 9.0 * 9.0:
+		return {"hit": false}
 	var push: Vector3 = (target.rig.global_position - rig.global_position).slide(Vector3.UP).normalized()
 	if P.getb("parry.melee_block"):  # 碰到刀即格挡：不再要求先举起
 		var guard: Dictionary = Hit.blade_vs_blade_swept(
-			target.rig.weapon_prev_xf, target.rig.weapon_xf, target.rig.blade_discs,
-			target.rig.weapon_scale, target.rig.blade_span(),
-			_blade_prev, _blade_now, blade_discs, weapon_scale, Vector2(0.0, _blade_length))
+			target.rig.weapon_prev_xf, target.rig.weapon_xf, target.rig.blade_proxy,
+			_blade_prev, _blade_now, blade_proxy, 0.05,
+			target.rig.blade_span(), Vector2(0.0, _blade_length),
+			3, 4, -1)
 		if guard.get("hit", false):
 			var contact: Vector3 = guard["point"]
 			if not level.has_method("melee_clear") or level.melee_clear(center(), contact):
@@ -238,9 +298,9 @@ func resolve_attack(target) -> Dictionary:
 				return {"hit": false, "parried": true, "melee": true, "pos": contact, "normal": guard["normal"], "push": push}
 	var parts: Array = target.rig.hit_parts() if target.rig != null and target.rig.has_method("hit_parts") \
 		else []
-	var hit: Dictionary = Hit.sweep_blade_parts(_blade_prev, _blade_now, blade_discs, weapon_scale, parts) \
+	var hit: Dictionary = Hit.sweep_blade_parts(_blade_prev, _blade_now, blade_proxy, parts) \
 		if not parts.is_empty() \
-		else Hit.sweep_blade(_blade_prev, _blade_now, blade_discs, weapon_scale,
+		else Hit.sweep_blade(_blade_prev, _blade_now, blade_proxy,
 			target.capsule()["a"], target.capsule()["b"], target.capsule()["r"])
 	if not hit.get("hit", false):
 		return {"hit": false}
@@ -266,34 +326,57 @@ func _choose_attack(target) -> String:
 	var pspan: Vector2 = target.rig.blade_span()
 	var pb0: Vector3 = target.rig.weapon_xf * Vector3(0, pspan.x, 0)
 	var pb1: Vector3 = target.rig.weapon_xf * Vector3(0, pspan.y, 0)
-	const CLIPS := ["attack1", "attack2"]
+	# 选择器用解析线-线近似做便宜估计（与 active_parry 的扫描同款）：
+	# 只需要「碰到/没碰到」决策语义，不用逐位姿 GJK —— 旧实现一次选刀
+	# ~20 组凸体扫描、实测单帧 100ms+，是周期性大尖峰的主因。
+	# 命中的真实判定仍走 Combat/Hit 的精确路径，这里只影响 attack1/2 的选择。
+	var reach := EDGE_RADIUS + 0.18        # 刃厚 + 命中余量（近似）
+	var blade_reach := EDGE_RADIUS + 0.30  # 刀-刀近距离近似（含对方刃厚）
+	var prev_e0 := Vector3.INF
+	var prev_e1 := Vector3.INF
+	var have_prev := false
 	var scores: Array = []
-	for clip in CLIPS:
-		var dur: float = rig.anim.duration(clip)
+	for clip in ATTACK_CLIPS:
+		var entry := _ensure_blade_cache(clip)
+		var dur: float = maxf(float(entry["dur"]), 1e-4)
+		var samples: Array = entry["samples"]
 		var t0: float = dur * HIT_FROM
 		var t1: float = dur * HIT_TO
 		var touch_body := false
 		var touch_blade := false
-		var prev_xf := Transform3D.IDENTITY
-		var have_prev := false
+		prev_e0 = Vector3.INF
+		prev_e1 = Vector3.INF
+		have_prev = false
 		for i in 6:
 			var e: float = lerpf(t0, t1, float(i) / 5.0)
-			var joints: Dictionary = rig.predict_blade_pose_for(clip, e)
-			var xf: Transform3D = _blade_transform(rig.to_global(joints["tool"]),
-				rig.to_global(joints["tip"]))
+			var u := clampf(e / dur, 0.0, 1.0) * float(BLADE_CACHE_SAMPLES)
+			var i0 := mini(int(floor(u)), BLADE_CACHE_SAMPLES - 1)
+			var frac := u - float(i0)
+			var s0: Dictionary = samples[i0]
+			var s1: Dictionary = samples[i0 + 1]
+			var edge0: Vector3 = rig.to_global((s0["tool"] as Vector3).lerp(s1["tool"] as Vector3, frac))
+			var edge1: Vector3 = rig.to_global((s0["tip"] as Vector3).lerp(s1["tip"] as Vector3, frac))
 			if have_prev:
-				# 这一小段扫掠会不会扫到身体 / 扫到我的刀
-				var hb: Dictionary = Hit.sweep_blade_parts(prev_xf, xf, blade_discs,
-					weapon_scale, parts)
-				if bool(hb.get("hit", false)):
-					touch_body = true
-				var hg: Dictionary = Hit.blade_vs_blade_swept(prev_xf, xf, blade_discs,
-					weapon_scale, Vector2(0.0, _blade_length),
-					target.rig.weapon_prev_xf, target.rig.weapon_xf,
-					target.rig.blade_discs, target.rig.weapon_scale, pspan)
-				if bool(hg.get("hit", false)):
+				# 扫掠四边形近似：当前刀段、上一位姿刀段、柄端轨迹、尖
+				# 端轨迹四条边到目标的最近距 —— 包住两步采样间的扫掠面。
+				for part: Dictionary in parts:
+					var cap_a: Vector3 = part["a"]
+					var cap_b: Vector3 = part["b"]
+					var d := _seg_seg_d(edge0, edge1, cap_a, cap_b)
+					d = minf(d, _seg_seg_d(prev_e0, prev_e1, cap_a, cap_b))
+					d = minf(d, _seg_seg_d(prev_e0, edge0, cap_a, cap_b))
+					d = minf(d, _seg_seg_d(prev_e1, edge1, cap_a, cap_b))
+					if d - float(part["r"]) <= reach:
+						touch_body = true
+						break
+				var db := _seg_seg_d(edge0, edge1, pb0, pb1)
+				db = minf(db, _seg_seg_d(prev_e0, prev_e1, pb0, pb1))
+				db = minf(db, _seg_seg_d(prev_e0, edge0, pb0, pb1))
+				db = minf(db, _seg_seg_d(prev_e1, edge1, pb0, pb1))
+				if db <= blade_reach:
 					touch_blade = true
-			prev_xf = xf
+			prev_e0 = edge0
+			prev_e1 = edge1
 			have_prev = true
 		var score := 0
 		if touch_body:
@@ -302,7 +385,41 @@ func _choose_attack(target) -> String:
 			score -= 3
 		scores.append(score)
 	var pick_idx := _attack % 2 if scores[0] == scores[1] else (0 if scores[0] > scores[1] else 1)
-	return CLIPS[pick_idx]
+	return ATTACK_CLIPS[pick_idx]
+
+
+## 两线段轴心距（_choose_attack 的解析近似用；与 active_parry._seg_seg 同式）。
+static func _seg_seg_d(p1: Vector3, q1: Vector3, p2: Vector3, q2: Vector3) -> float:
+	var d1 := q1 - p1
+	var d2 := q2 - p2
+	var r := p1 - p2
+	var a := d1.dot(d1)
+	var e := d2.dot(d2)
+	var f := d2.dot(r)
+	var s := 0.0
+	var t := 0.0
+	if a <= 0.000001 and e <= 0.000001:
+		return r.length()
+	if a <= 0.000001:
+		t = clampf(f / e, 0.0, 1.0)
+	else:
+		var c := d1.dot(r)
+		if e <= 0.000001:
+			s = clampf(-c / a, 0.0, 1.0)
+		else:
+			var b := d1.dot(d2)
+			var den := a * e - b * b
+			s = clampf((b * f - c * e) / den, 0.0, 1.0) if den > 0.000001 else 0.0
+			t = (b * s + f) / e
+			if t < 0.0:
+				t = 0.0
+				s = clampf(-c / a, 0.0, 1.0)
+			elif t > 1.0:
+				t = 1.0
+				s = clampf((b - c) / a, 0.0, 1.0)
+	var c0 := p1 + d1 * s
+	var c1 := p2 + d2 * t
+	return c0.distance_to(c1)
 
 
 func _blade() -> Transform3D:

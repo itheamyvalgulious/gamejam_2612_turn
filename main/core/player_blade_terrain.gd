@@ -1,94 +1,94 @@
 extends "res://core/blade_terrain.gd"
-## Connects the shared terrain sweep to the player's rig and combat effects.
+## 玩家的刀可自由穿入地形（不对刀施加任何力/弹回/卡姿），
+## 仅通过纯解析几何检测刀身与地形的交汇，在接触面留下灼烧痕迹与火花。
 
-const BLADE_WALL_LAYER := 1 << 15
-const PLAYER_MASK := TERRAIN_MASK | BLADE_WALL_LAYER
-const WALL_DEPTH := 0.24
+const BladeScorch = preload("res://core/blade_scorch.gd")
+
+var _geometry = null
+var _has_prev := false
+var _prev_base := Vector3.ZERO
+var _prev_tip := Vector3.ZERO
+var _prev_mid := Vector3.ZERO
+var _last_scorch_pos := Vector3(INF, INF, INF)
+var _last_scorch_n := Vector3.ZERO
+var _last_spark_ms := 0
+var _last_sound_ms := 0
+var _scorch: Node3D = null
 
 
-func _init() -> void:
-	super._init()
-	_query.collision_mask = PLAYER_MASK
+func reset() -> void:
+	super.reset()
+	_has_prev = false
+	_last_scorch_pos = Vector3(INF, INF, INF)
+	_last_scorch_n = Vector3.ZERO
+	if _scorch != null and is_instance_valid(_scorch):
+		_scorch.call("clear")
 
 
-func begin_player_step(rig) -> void:
-	if recovering and rig.is_attacking:
-		rig.stop_terrain_swing()
+func begin_player_step(_rig) -> void:
+	pass
 
 
-func advance_player(rig, dt: float, serial: int, sound: Node, fx: Node) -> void:
+func _ensure_scorch(rig) -> Node3D:
+	if _scorch != null and is_instance_valid(_scorch):
+		return _scorch
+	var scene: Node = rig.get_tree().current_scene if rig != null and rig.get_tree() != null else null
+	if scene == null:
+		return null
+	var existing: Node = scene.get_node_or_null("BladeScorch")
+	if existing != null and existing is Node3D:
+		_scorch = existing as Node3D
+		return _scorch
+	var node := BladeScorch.new()
+	node.name = "BladeScorch"
+	scene.add_child(node)
+	_scorch = node
+	return _scorch
+
+
+func advance_player(rig, dt: float, _serial: int, sound: Node, fx: Node,
+		geometry = null) -> void:
+	if geometry != null:
+		_geometry = geometry
 	var authored: Transform3D = rig.weapon_spin.global_transform
-	var shoulder: Vector3 = rig.arms[0]["shoulder"].global_position
-	var strike := serial if rig.is_attacking else -1
-	var pose := advance(rig.get_world_3d().direct_space_state, authored, rig.blade_span(), shoulder, dt, strike)
 	rig.weapon_xf = authored
-	if recovering or not pose.is_equal_approx(authored):
-		rig.apply_terrain_blade(pose, shoulder_recoil())
-	rig.update_terrain_trail(dt, recovering)
-	if impact.is_empty():
-		return
-	var point: Vector3 = impact["point"]
-	var strength: float = impact["strength"]
-	sound.play_at("clang", point, {"gain": lerpf(0.46, 0.96, strength)})
-	fx.spark(point, impact["normal"], lerpf(0.38, 0.95, strength))
-	fx.shake(0.22 * strength)
+	rig.update_terrain_trail(dt, false)
+	impact.clear()
+	var span: Vector2 = rig.blade_span()
+	var base: Vector3 = authored * Vector3(0.0, span.x, 0.0)
+	var tip: Vector3 = authored * Vector3(0.0, span.y, 0.0)
+	var mid: Vector3 = (base + tip) * 0.5
+	if _geometry != null:
+		var hit: Dictionary = _geometry.raycast(base, tip)
+		var seg_move := tip.distance_to(_prev_tip) if _has_prev else 0.0
+		if hit.is_empty() and _has_prev and seg_move > 0.04:
+			hit = _geometry.raycast(_prev_tip, tip)
+			if hit.is_empty():
+				hit = _geometry.raycast(_prev_mid, mid)
+		if not hit.is_empty():
+			var point: Vector3 = hit["point"]
+			var normal: Vector3 = hit["normal"]
+			var tang: Vector3 = (tip - _prev_tip).slide(normal) if _has_prev else (tip - base).slide(normal)
+			if tang.length_squared() < 1e-4:
+				tang = (tip - base).slide(normal)
+			if point.distance_squared_to(_last_scorch_pos) >= 0.15 * 0.15 or normal.dot(_last_scorch_n) < 0.85:
+				var scorch := _ensure_scorch(rig)
+				if scorch != null:
+					scorch.call("add_mark", point, normal, tang, clampf(seg_move * 1.4, 0.30, 0.75), 0.14)
+				_last_scorch_pos = point
+				_last_scorch_n = normal
+			var now_ms := Time.get_ticks_msec()
+			if fx != null and now_ms - _last_spark_ms >= 60:
+				_last_spark_ms = now_ms
+				fx.spark(point, normal, 0.42)
+			if sound != null and now_ms - _last_sound_ms >= 180:
+				_last_sound_ms = now_ms
+				sound.play_at("clang", point, {"gain": 0.28})
+	_prev_base = base
+	_prev_tip = tip
+	_prev_mid = mid
+	_has_prev = true
 
 
-func allows_hit(rig, contact: Dictionary) -> bool:
-	var at: float = contact.get("t", 1.0)
-	var hilt: Vector3 = rig.weapon_prev_xf.origin.lerp(rig.weapon_xf.origin, at)
-	var space: PhysicsDirectSpaceState3D = rig.get_world_3d().direct_space_state
-	var point: Vector3 = contact["point"]
-	return _segment_clear(space, hilt, contact.get("blade_point", point)) and _segment_clear(space, hilt, point)
-
-
-static func _segment_clear(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3) -> bool:
-	if from.is_equal_approx(to):
-		return true
-	var ray := PhysicsRayQueryParameters3D.create(from, to, PLAYER_MASK)
-	ray.hit_from_inside = true
-	return space.intersect_ray(ray).is_empty()
-
-
-static func install_arena_walls(arena: Dictionary) -> void:
-	var root: Node3D = arena["node"]
-	var body := StaticBody3D.new()
-	body.name = "PlayerBladeWalls"
-	# These arenas resolve movement using wall segments. Use the same geometry
-	# for the blade without adding walls to the other physics systems.
-	body.collision_layer = BLADE_WALL_LAYER
-	body.collision_mask = 0
-	for wall: Dictionary in arena["walls"]:
-		var a: Vector2 = wall["a"]
-		var b: Vector2 = wall["b"]
-		var edge := b - a
-		var base: float = wall.get("base_y", arena.get("floor_y", 0.0))
-		var height: float = wall["h"] - base
-		if edge.length_squared() < 0.0001 or height <= 0.0:
-			continue
-		var inward: Vector2 = wall["n"]
-		var center := (a + b) * 0.5 - inward * (WALL_DEPTH * 0.5)
-		_add_box(body, Vector3(center.x, base + height * 0.5, center.y),
-			Vector3(edge.length(), height, WALL_DEPTH), -edge.angle())
-	for box: AABB in arena.get("blade_boxes", []):
-		_add_box(body, box.get_center(), box.size)
-	var dimensions: Vector2 = arena.get("blade_center_cylinder", Vector2.ZERO)
-	if dimensions.x > 0.0:
-		var cylinder := CylinderShape3D.new()
-		cylinder.radius = dimensions.x
-		cylinder.height = dimensions.y
-		var volume := CollisionShape3D.new()
-		volume.shape = cylinder
-		volume.position.y = dimensions.y * 0.5
-		body.add_child(volume)
-	root.add_child(body)
-
-
-static func _add_box(body: StaticBody3D, center: Vector3, size: Vector3, yaw := 0.0) -> void:
-	var box := BoxShape3D.new()
-	box.size = size
-	var volume := CollisionShape3D.new()
-	volume.shape = box
-	volume.position = center
-	volume.rotation.y = yaw
-	body.add_child(volume)
+func allows_hit(_rig, _contact: Dictionary) -> bool:
+	return true

@@ -12,6 +12,15 @@ const SIZE := Vector3(8.0, 6.0, 6.0)
 const CYAN := Color("36dceb")
 const AMBER := Color("ffb45e")
 
+## 导航元信息：平整舱面 —— 地面矩形 + 集装箱 solids 作障碍棱柱。
+static func nav_spec(_arena: Dictionary) -> Dictionary:
+	return {
+		"floor_margin": 3.0,
+		"walls_obstacles": false,
+		"cover_obstacles": true,
+		"platforms": false,
+	}
+
 static func shader_mat(file: String, values: Dictionary) -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://gfx/cargo_hold2/" + file + ".gdshader")

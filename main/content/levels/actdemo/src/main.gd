@@ -224,7 +224,7 @@ func _process(delta: float) -> void:
 	var ctx := level.context()
 	if player.alive:
 		player.step(dt, level.arena, level.enemies)
-		player.blade_terrain.advance_player(player.rig, dt, player.swing_serial, Snd, Fx)
+		player.blade_terrain.advance_player(player.rig, dt, player.swing_serial, Snd, Fx, level.get("geometry"))
 	level.step(dt, ctx)
 	var p_events := Combat.player_swing(player, level.enemies, cam, level.arena.get("walls", []))
 	for ev in p_events:

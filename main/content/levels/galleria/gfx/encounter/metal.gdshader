@@ -56,9 +56,10 @@ void fragment() {
 		float seam = m_panels(uv, vec2(1.6, 0.95), 0.5, s, cell, f, rnd);
 		col *= 1.0 + (rnd - 0.5) * 0.10;
 		col = mix(col, tint * 0.45, seam * 0.6);
-		float chips = smoothstep(0.67, 0.79, m_turb2(uv * 2.6 + s, 3)) * detail * clamp(vwear, 0.0, 1.0);
+		float t_chip = m_turb2(uv * 2.6 + s, 3);
+		float chips = smoothstep(0.67, 0.79, t_chip) * detail * clamp(vwear, 0.0, 1.0);
 		// primer halo around bare-metal chips
-		float primer = smoothstep(0.50, 0.60, m_turb2(uv * 2.6 + s, 3)) * (1.0 - chips);
+		float primer = smoothstep(0.50, 0.60, t_chip) * (1.0 - chips);
 		col = mix(col, col * 0.55 + vec3(0.16, 0.11, 0.08), primer * 0.18);
 		metal = mix(metal, 0.95, chips);
 		rough = mix(rough, 0.24, chips);

@@ -51,7 +51,8 @@ var blade_effect_endpoint: Callable
 var sampling_attack := false
 var legs: Array[Dictionary] = []
 var arms: Array[Dictionary] = []
-var blade_discs: Array = []
+var blade_discs: Array = []        # 仅调试剖面；命中判定走 blade_proxy（凸体近似）
+var blade_proxy: BladeProxy        # combat rig 在 _ready 里 fit 出来
 var _lamp: Node3D
 var _warning_spill: OmniLight3D
 var _core_spill: OmniLight3D

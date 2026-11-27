@@ -13,6 +13,7 @@ class_name PlayerUnit
 const Rig = preload("res://team/vesper/integration/campaign_rig.gd")
 # 直接 preload：不依赖全局类缓存，headless / 首次 clone 都能跑
 const InterceptS = preload("res://src/game/intercept.gd")
+const ActiveParry = preload("res://core/active_parry.gd")
 const PlayerBladeTerrain = preload("res://core/player_blade_terrain.gd")
 const Units = preload("res://src/core/units.gd")
 const IMPACT_SLIDE_TIME := 0.52
@@ -32,6 +33,10 @@ var pending_hitstop := 0.0
 var hurt_flash := 0.0
 var swing_serial := 0
 var hurt_serial := -1
+var hurt_serials := {}
+var measured_velocity := Vector3.ZERO
+var _prev_rig_pos := Vector3.ZERO
+var _plan_vel := Vector3.ZERO
 var last_cause := ""
 var hp := 100.0
 var invuln := 0.0
@@ -50,10 +55,18 @@ var _plan_body_yaw := 0.0
 var _plan_left := 0.0
 var _plan_idle := 0.0      # 已经多久没看到威胁了（收势的触发条件）
 var _reach_enemy := 0      # 换刀路径搜索的缓存：敌人 instance id
+var _reach_serial := -1
 var _reach_from := -1.0    # 该刀的判定窗口起点
 var _reach_to := -1.0      # 该刀的判定窗口终点
 var _reach_alt := {}       # 该刀的可达拦截点（搜一次，全刀复用，空=用原方案）
 var _return_left := 0.0
+
+# 迎击/格挡统计（parry bench + HUD 诊断）：swings=敌人挥刀数、blocks=挡下、
+# hits=被打中、strikes=规划出的主动迎击、fallback=退回「架住等它来」次数
+var parry_stats := {"swings": 0, "blocks": 0, "hits": 0, "strikes": 0, "fallback": 0}
+var _swing_seen := {}
+var _last_strike := {}      # 最近一次迎击方案 {P, e, enemy, plan_ms, eta}
+var parry_contact := {}     # on_block 接触帧数值（play_bench 定格截图用）
 
 var _last_swing_before := Transform3D.IDENTITY
 var _swing_prev_xf := Transform3D.IDENTITY
@@ -105,7 +118,13 @@ func step(dt: float, arena: Dictionary, p_enemies: Array = []) -> void:
 	enemies = p_enemies
 	_sync_params()
 	if not alive:
+		measured_velocity = Vector3.ZERO
 		return
+	if dt > 0.0001 and _prev_rig_pos != Vector3.ZERO:
+		measured_velocity = (rig.global_position - _prev_rig_pos) / dt
+	else:
+		measured_velocity = Vector3.ZERO
+	_prev_rig_pos = rig.global_position
 	blade_terrain.begin_player_step(rig)
 	parry_timer = maxf(0.0, parry_timer - dt)
 	parry_cd = maxf(0.0, parry_cd - dt)
@@ -230,7 +249,15 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 		for e in enemies:
 			if e == null or not is_instance_valid(e) or not e.alive:
 				continue
+			var serial := int(e.get("swung_serial")) if e.get("swung_serial") != null else -1
+			if serial >= 0 and int(_swing_seen.get(e.get_instance_id(), -1)) != serial:
+				_swing_seen[e.get_instance_id()] = serial
+				parry_stats["swings"] += 1
+			var _t0 := Time.get_ticks_usec()
 			var t: Dictionary = InterceptS.melee_threat(self, e, margin)
+			parry_stats["ms_threat"] = maxf(float(parry_stats.get("ms_threat", 0.0)),
+				(Time.get_ticks_usec() - _t0) / 1000.0)
+			parry_stats["n_threat"] = int(parry_stats.get("n_threat", 0)) + 1
 			if not bool(t.get("ok", false)):
 				continue
 			if float(t["eta"]) > lead:
@@ -260,11 +287,6 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 	# 躯干在世界里的朝向（机体 + 腰环）：身体还在转的时候，刀要跟着重新规划
 	var body_yaw: float = rig.heading + rig.torso.rotation.y
 	var turned: float = absf(wrapf(body_yaw - _plan_body_yaw, -PI, PI))
-	# 新威胁 / 落点跑掉了 / 身体转过角度了 / 上一条路径已经走完 → 重新规划
-	if _intercept_on and _plan_left > 0.0 and _plan_point.distance_to(point) <= 0.22 \
-			and turned <= 0.12:
-		_plan_left -= dt
-		return
 	# 本击签名：一刀只搜一次可达拦截点（连段里每一击窗口不同）。
 	# 用 instance id + 判定窗口做键（纯整数比较，零分配）。
 	var erig = null
@@ -275,20 +297,106 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 		elif enemy != null and enemy.has_method("get"):
 			erig = enemy.get("rig")
 	var eid := 0
+	var cur_serial := -1
 	var win_from := -1.0
 	var win_to := -1.0
 	if erig != null:
 		eid = erig.get_instance_id()
-		win_from = float(erig.get("attack_hit_from"))
-		win_to = float(erig.get("attack_hit_to"))
+		var _enemy_obj = best.get("enemy")
+		if _enemy_obj != null and _enemy_obj.get("swung_serial") != null:
+			cur_serial = int(_enemy_obj.get("swung_serial"))
+		var _wf = erig.get("attack_hit_from")
+		var _wt = erig.get("attack_hit_to")
+		win_from = float(_wf) if _wf != null else -1.0
+		win_to = float(_wt) if _wt != null else -1.0
+	# 陈旧方案归因清理：敌刀新一击/挥砍结束很久后 _last_strike 不再有效，
+	# 后续格挡应记 kind=fallback 而不是挂在过期方案上。
+	if not _last_strike.is_empty() \
+			and (eid != 0 and eid != int(_last_strike.get("eid", 0)) \
+				or (not rig.strike_active() and Time.get_ticks_msec()
+					- int(_last_strike.get("plan_ms", 0)) > 900)):
+		_last_strike = {}
 	# 换了一击必须重新规划，哪怕接触点位置几乎没变。
-	var new_strike := eid != 0 and (eid != _reach_enemy \
+	var new_strike := eid != 0 and (eid != _reach_enemy or cur_serial != _reach_serial \
 		or not is_equal_approx(win_from, _reach_from) or not is_equal_approx(win_to, _reach_to))
-	# 新威胁 / 落点跑掉了 / 身体转过角度了 / 上一条路径已经走完 → 重新规划
-	if not new_strike and _intercept_on and _plan_left > 0.0 \
+	var vel_changed := (measured_velocity - _plan_vel).length() > 1.5
+	var urgent_shot := String(best["kind"]) == "shot" and eta < 0.30
+	if not new_strike and not urgent_shot and not vel_changed and _intercept_on and _plan_left > 0.0 \
 			and _plan_point.distance_to(point) <= 0.22 and turned <= 0.12:
 		_plan_left -= dt
 		return
+	if not new_strike and not urgent_shot and not vel_changed and _intercept_on and _plan_left > 0.0 \
+			and Time.get_ticks_msec() - int(parry_stats.get("_plan_stamp", 0)) < 80:
+		_plan_left -= dt
+		return
+	# ================= 主动迎击（近战）=================
+	# 不再把刀架在落点等它来：沿敌刀扫掠轨迹枚举接触候选
+	# （不穿模自身 → IK 可达 → 关节不硬超限），取「最远 → 最自然」的一刀，
+	# 让刀以 v = e·speed 的速度在接触帧横切穿过敌刀。
+	var _in_recover: bool = not new_strike and _intercept_on and rig.strike_active() and rig.strike_in_recover()
+	if String(best["kind"]) == "melee" and eta <= 0.24 and not _in_recover:
+		if not new_strike and _intercept_on and rig.strike_active():
+			if not (rig.strike_in_approach() and _plan_point.distance_to(point) > 0.45 and eta < 0.14):
+				_plan_left -= dt
+				return
+		rig.set_strike_speed(P.getf("parry.plan_speed"))
+		var _f0 := Time.get_ticks_usec()
+		var strike: Dictionary = ActiveParry.find(self, best["enemy"], margin,
+			P.getf("parry.torso_turn"), P.getf("parry.plan_speed"))
+		parry_stats["ms_find"] = maxf(float(parry_stats.get("ms_find", 0.0)),
+			(Time.get_ticks_usec() - _f0) / 1000.0)
+		if strike.has("contact"):
+			var _p0 := Time.get_ticks_usec()
+			var res2: Dictionary = rig.plan_strike(strike["contact"], strike["e_world"],
+				float(strike["eta"]), 0.35, 0.55, strike.get("src"))
+			parry_stats["ms_strike"] = maxf(float(parry_stats.get("ms_strike", 0.0)),
+				(Time.get_ticks_usec() - _p0) / 1000.0)
+			if not res2.is_empty():
+				parry_stats["strikes"] += 1
+				_last_strike = {"P": strike.get("P", point),
+					"e": strike["e_world"], "enemy": best["enemy"],
+					"eid": eid,
+					"plan_ms": Time.get_ticks_msec(), "eta": float(strike["eta"])}
+				var cd: float = strike["contact"].get("dist", 0.0)
+				if cd > 0.0:
+					parry_stats["contact_d"] = parry_stats.get("contact_d", [])
+					parry_stats["contact_d"].append(snappedf(cd, 0.01))
+				var evd: Dictionary = strike.get("eval", {})
+				parry_stats["rej_self"] = int(parry_stats.get("rej_self", 0)) + int(evd.get("self", 0))
+				parry_stats["rej_joints"] = int(parry_stats.get("rej_joints", 0)) + int(evd.get("joints", 0))
+				parry_stats["rej_reach"] = int(parry_stats.get("rej_reach", 0)) + int(evd.get("reach", 0))
+				parry_stats["rej_spin"] = int(parry_stats.get("rej_spin", 0)) + int(evd.get("spin", 0))
+				_reach_enemy = eid
+				_reach_serial = cur_serial
+				_reach_from = win_from
+				_reach_to = win_to
+				_reach_alt = {}
+				_intercept_on = true
+				_intercept_kind = "melee"
+				_plan_point = point
+				_plan_body_yaw = body_yaw
+				_plan_vel = measured_velocity
+				_plan_left = float(res2.get("dur", 0.12))
+				parry_stats["_plan_stamp"] = Time.get_ticks_msec()
+				return
+			# plan_strike 自身失败（世界→局部退化）也走 fallback
+			parry_stats["fallback"] += 1
+		else:
+			var gk := "gate_" + String(strike.get("gate", "?"))
+			parry_stats[gk] = int(parry_stats.get(gk, 0)) + 1
+			var ev2: Dictionary = strike.get("eval", strike)
+			parry_stats["rej_self"] = int(parry_stats.get("rej_self", 0)) + int(ev2.get("self", 0))
+			parry_stats["rej_joints"] = int(parry_stats.get("rej_joints", 0)) + int(ev2.get("joints", 0))
+			parry_stats["rej_reach"] = int(parry_stats.get("rej_reach", 0)) + int(ev2.get("reach", 0))
+			parry_stats["rej_spin"] = int(parry_stats.get("rej_spin", 0)) + int(ev2.get("spin", 0))
+			# 挥砍还在飞 / 敌刀已贴身：保持当前规划不动。
+			# 这时撤掉在飞的 strike 去换「架住」，等于主动把刀从交叠区挪开。
+			if not new_strike and _intercept_on and rig.strike_active() and not rig.strike_in_recover():
+				_plan_left -= dt
+				return
+			parry_stats["fallback"] += 1
+	# 没有可行迎击候选 → 回退到旧的「架住等它来」并在 HUD 标注
+	var _fb_kind := "melee_fallback" if String(best["kind"]) == "melee" else ""
 	var dur := clampf(eta * 0.9, 0.05, 0.20)
 	# 接触点够不到时（突进下劈等差离的招），在敌刀路径上换可达拦截点。
 	# 搜索按「敌人 + 第几刀」缓存，一次出刀只搜一次：全帧搜索会拖垮帧率，
@@ -296,12 +404,32 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 	var plan_point := point
 	var plan_axis: Vector3 = best["axis"]
 	var plan_eta := eta
+	if String(best["kind"]) == "shot":
+		var tt: float = P.getf("parry.torso_turn")
+		var nrm: Vector3 = best["normal"]
+		var best_m := 1e9
+		for ang in [0.0, 0.785398, -0.785398]:
+			var cand_ax: Vector3 = best["axis"] if ang == 0.0 else (best["axis"] as Vector3).rotated(nrm, ang)
+			var m2: float = rig.blade_reach_miss(plan_point, cand_ax, nrm, tt)
+			if m2 < best_m:
+				best_m = m2
+				plan_axis = cand_ax
+	# 整条格挡路径墙钟预算：_find_reachable_intercept（8段×件×gap）+
+	# plan_blade_intercept（IK）实测可达 140ms，是格挡卡顿主犯。
+	var _r0 := Time.get_ticks_usec()
 	if rig.has_method("intercept_blade_segment") and eid != 0:
-		if new_strike:
+		if new_strike and (String(best["kind"]) != "melee" or eta <= 0.24):
 			_reach_enemy = eid
+			_reach_serial = cur_serial
 			_reach_from = win_from
 			_reach_to = win_to
 			_reach_alt = _find_reachable_intercept(erig, best, P.getf("parry.torso_turn"))
+			parry_stats["ms_reach"] = maxf(float(parry_stats.get("ms_reach", 0.0)),
+				(Time.get_ticks_usec() - _r0) / 1000.0)
+			# 可达点搜索超 6ms 后不再复核/规划：保持现刀（上一帧方案或持刀），
+			# 这帧直接 return，后续帧缓存在，零回归。
+			if (Time.get_ticks_usec() - _r0) / 1000.0 > 6.0:
+				parry_stats["gate_budget_reach"] = int(parry_stats.get("gate_budget_reach", 0)) + 1
 		# 每次重规划都复核，缓存也要验：替换点只是「敌刀路径上有静态交点」
 		# 远远不够 —— 换到机械臂够不到的点，表现就是格挡手被放到错误位置
 		# （横斩举到头顶、上段劈垂到腰），刀明明举了却挡不住。
@@ -318,19 +446,26 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 			plan_point = _reach_alt["point"]
 			plan_axis = _reach_alt["axis"]
 			plan_eta = float(_reach_alt["eta"])
-	var dur2 := clampf(plan_eta * 0.9, 0.05, 0.20)
+	var dur2 := clampf(plan_eta * 0.65, 0.015, 0.10) if String(best["kind"]) == "melee" else clampf(plan_eta * 0.9, 0.02, 0.20)
+	var _p1 := Time.get_ticks_usec()
 	var res: Dictionary = rig.plan_blade_intercept(plan_point, plan_axis, best["normal"],
 		P.getf("parry.torso_turn"), dur2, P.getf("parry.plan_speed"))
+	parry_stats["ms_planb"] = maxf(float(parry_stats.get("ms_planb", 0.0)),
+		(Time.get_ticks_usec() - _p1) / 1000.0)
+	if (Time.get_ticks_usec() - _p1) / 1000.0 > 6.0:
+		parry_stats["gate_budget_planb"] = int(parry_stats.get("gate_budget_planb", 0)) + 1
 	if res.is_empty():
 		# 规划失败也要保持架着并立刻重试；否则刀停在上一帧的落点，
 		# 会眼睁睁看着敌刀从旁边擦过去（_intercept_on 已是 true）。
 		_plan_left = 0.0
 		return
 	_intercept_on = true
-	_intercept_kind = String(best["kind"])
+	_intercept_kind = _fb_kind if _fb_kind != "" else String(best["kind"])
 	_plan_point = plan_point
 	_plan_body_yaw = body_yaw
+	_plan_vel = measured_velocity
 	_plan_left = float(res.get("dur", dur2))
+	parry_stats["_plan_stamp"] = Time.get_ticks_msec()
 
 
 
@@ -341,6 +476,7 @@ func _plan_intercept(dt: float, enemies: Array) -> void:
 ## 且只保留「敌刀砍到胶囊之前」的点。返回的候选必须比原落点的预测
 ## 段距明显更好才采用，否则返回空（调用方保持原方案，零回归）。
 func _find_reachable_intercept(erig, best: Dictionary, torso_turn: float, t_start := -1.0) -> Dictionary:
+	var _outer0 := Time.get_ticks_usec()
 	if erig == null or not erig.has_method("predict_weapon_xf"):
 		return {}
 	var hit_to: float = float(erig.get("attack_hit_to"))
@@ -354,39 +490,52 @@ func _find_reachable_intercept(erig, best: Dictionary, torso_turn: float, t_star
 			maxf(t_elapsed, hit_from))
 		if not strict.is_empty() or hit_from <= t_elapsed + 0.001:
 			return strict
+		# 递归两遍=预算翻倍；strict 已耗时超 4ms 时不再放宽重搜
+		if (Time.get_ticks_usec() - _outer0) / 1000.0 > 4.0:
+			return {}
 		# 窗内没有可达解（连段窗口极短）时才放宽到「从此刻起」。
 		t_now = t_elapsed
-	var discs: Array = erig.get("blade_discs")
-	var wscale: float = float(erig.get("weapon_scale"))
-	if hit_to <= t_now or discs.is_empty():
+	var eproxy: BladeProxy = erig.get("blade_proxy")
+	if hit_to <= t_now or eproxy == null or eproxy.pieces.is_empty():
 		return {}
 	var out_dir: Vector3 = best["normal"]
-	var cap: Dictionary = capsule()
-	var espan := _piece_span(discs)
-	# 敌刀全程刀段缓存 + 胶囊接触时刻（第一次有 disc 碰到胶囊）。
+	# Multi-cilindro del jugador: el contacto se estima contra las piezas
+	# reales (requirement #2); la hoja enemiga se mide via BladeProxy (req #1).
+	var parts: Array = rig.hit_parts() if rig.has_method("hit_parts") else []
+	# 敌刀参与判定的轴区间：有 blade_span() 就用（duelist 的开刀扫掠段），
+	# 否则取凸体代理自身的包围区间（arc sentinel）。
+	var espan: Vector2 = erig.blade_span() if erig.has_method("blade_span") else eproxy.span
+	# 敌刀全程刀位姿缓存 + 部件接触时刻（第一次有刀体碰到任一部件胶囊）。
+
 	const STEPS := 8
+	var dl := Time.get_ticks_usec() + 4000   # 全程 4ms 硬顶：超时返回空（保持现刀）
 	var e_times: Array = []
+	var e_xfs: Array = []
 	var e_segs: Array = []
 	var e_contact := hit_to
 	for i in STEPS + 1:
+		if Time.get_ticks_usec() > dl:
+			return {}
 		var e: float = lerpf(t_now, hit_to, float(i) / float(STEPS))
 		var xf: Transform3D = erig.predict_weapon_xf(e)
 		e_times.append(e)
+		e_xfs.append(xf)
 		e_segs.append([xf * Vector3(0.0, espan.x, 0.0), xf * Vector3(0.0, espan.y, 0.0)])
 		if i > 0 and e_contact >= hit_to:
-			for d in discs:
-				var dp: Vector3 = xf * Vector3(0.0, float(d["y"]), 0.0)
-				if _pt_seg_dist(dp, cap["a"], cap["b"]) <= float(d["r"]) * wscale + float(cap["r"]):
+			var es0: Vector3 = e_segs[i][0]
+			var es1: Vector3 = e_segs[i][1]
+			for part: Dictionary in parts:
+				if _seg_seg_dist(es0, es1, part["a"], part["b"]) - float(part["r"]) <= 0.25:
 					e_contact = e
 					break
+
 	if e_contact <= t_now + 0.02:
 		return {}
 	# 不回归的判据：原方案若静止姿态就能切进敌刀路径（gap≈0），一律不动。
 	# 只有原方案静态不相交、而新候选静态真相交（gap≈0）时才替换。
-	var orig_gap := _predicted_gap(rig, best["point"], best["axis"], out_dir, torso_turn, e_segs, e_times)
-	# 与 blade_vs_blade 同口径：刀轴间距 ≤ 双方刀半径和 + slack 就算「切进去了」。
-	# 之前用 0.06（几乎要刀轴重合）会把本来挡得住的落点误判成挡不住，
-	# 于是把刀换到远处够不到的位置 —— 那就是「手放错位置还挡不住」。
+	var orig_gap := _predicted_gap(rig, best["point"], best["axis"], out_dir,
+		torso_turn, e_xfs, e_segs, eproxy, espan)
+	# 与剑挡剑同口径：凸体表面间隙 ≤ slack 就算「切进去了」。
 	const CLASH_GAP := 0.30
 	if orig_gap <= CLASH_GAP:
 		return {}
@@ -404,11 +553,14 @@ func _find_reachable_intercept(erig, best: Dictionary, torso_turn: float, t_star
 	var max_shift: float = 1.80 if base_reach > 0.30 else 0.90
 	var base_axes: Array = [best["axis"], Vector3.UP, Vector3.FORWARD, Vector3.RIGHT]
 	if erig.has_method("predict_weapon_xf"):
-		base_axes.append((erig.predict_weapon_xf(t_now).basis * Vector3(0, 1, 0)).normalized())
+		base_axes.append((e_xfs[0].basis * Vector3(0, 1, 0)).normalized())
 	for ax0 in base_axes:
+		if Time.get_ticks_usec() > dl:
+			return {}
 		if ax0.length_squared() < 0.01:
 			continue
-		if _predicted_gap(rig, base_pt, ax0, out_dir, torso_turn, e_segs, e_times) > CLASH_GAP:
+		if _predicted_gap(rig, base_pt, ax0, out_dir, torso_turn, e_xfs, e_segs,
+				eproxy, espan) > CLASH_GAP:
 			continue
 		var m0: float = rig.blade_reach_miss(base_pt, ax0, out_dir, torso_turn)
 		if m0 <= 0.32 and m0 < pick_miss:
@@ -421,18 +573,17 @@ func _find_reachable_intercept(erig, best: Dictionary, torso_turn: float, t_star
 	# 贴脸点不许要：落在身体周围 1.45u 以内的话，刀放过去也来不及、
 	# 而且会被身体自身挡住，表现就是「举起来了但没挡住」。
 	const MIN_CANDIDATE_GAP := 1.45
+	var cand_pts: Array = eproxy.sample_points(0.05)
 	for i in e_times.size():
 		var e: float = e_times[i]
 		if e >= e_contact:
 			continue
-		var xf: Transform3D = erig.predict_weapon_xf(e)
-		# disc 抽稀采样（每 3 个取 1）：34 个 disc 全枚举会让这一次搜索
-		# 变成一帧卡顿；抽稀后仍能覆盖整条刀身，精度足够。
-		for di in range(0, discs.size(), 3):
-			var y: float = float(discs[di]["y"])
-			if y < 0.05:
-				continue
-			var pt: Vector3 = xf * Vector3(0.0, y, 0.0)
+		var xf: Transform3D = e_xfs[i]
+		# 凸体顶点抽稀采样：逐帧全枚举会卡顿；抽稀后仍能覆盖整条刀身。
+		for pi in range(0, cand_pts.size(), 4):
+			if Time.get_ticks_usec() > dl:
+				return {}
+			var pt: Vector3 = xf * (cand_pts[pi] as Vector3)
 			var chest_gap := pt.distance_to(chest)
 			if chest_gap > CANDIDATE_RANGE or chest_gap < MIN_CANDIDATE_GAP:
 				continue
@@ -464,37 +615,49 @@ func _find_reachable_intercept(erig, best: Dictionary, torso_turn: float, t_star
 			daxes.append(Vector3.FORWARD)
 			daxes.append(Vector3.RIGHT)
 			for ax in daxes:
+				if Time.get_ticks_usec() > dl:
+					return {}
 				if ax.length_squared() < 0.01:
 					continue
-				var gap := _predicted_gap(rig, pt, ax, out_dir, torso_turn, e_segs, e_times)
+				var gap := _predicted_gap(rig, pt, ax, out_dir, torso_turn,
+					e_xfs, e_segs, eproxy, espan)
 				if gap < best_gap:
 					# 兜底路径：沿敌刀路径取最早可达的交点（改刀轴失败的极端情况）
 					return {"point": pt, "axis": ax, "eta": clampf(e - t_now, 0.04, 0.20)}
 	return {}
 
 
-## 预测「刀架在该落点后，敌刀全程扫过来」的最小刀段间隙。
-## 只算刀最终停在落点上的静止姿态——这是「真碰撞」的保守判据：
-## 刀停在那里都碰不到敌刀路径，就肯定挡不住；能碰到（≈0）才是真架住。
+## 预测「刀架在该落点后，敌刀全程扫过来」的最小真实间隙。
+## 先按刀轴线段距离粗筛（凸体半径上界），过关的候选再用凸体最短距离
+## 精确度量——「架在那里都碰不到」才算挡不住，避免线模型把格挡判死。
 func _predicted_gap(rig, point: Vector3, axis: Vector3, face: Vector3,
-		torso_turn: float, e_segs: Array, _e_times: Array) -> float:
+		torso_turn: float, e_xfs: Array, e_segs: Array,
+		eproxy: BladeProxy, espan: Vector2) -> float:
 	var seg: Array = rig.intercept_blade_segment(point, axis, face, torso_turn)
 	if seg.is_empty():
 		return 1e9
-	var gap := 1e9
+	# 粗筛：刀轴线段最小距离超过包络上界就肯定交不上
+	const PRUNE := 0.55
+	var min_axis := 1e9
 	for k in e_segs.size():
-		gap = minf(gap, _seg_seg_dist(seg[0], seg[1], e_segs[k][0], e_segs[k][1]))
+		min_axis = minf(min_axis, _seg_seg_dist(seg[0], seg[1], e_segs[k][0], e_segs[k][1]))
+	if min_axis > PRUNE:
+		return min_axis
+	var res: Dictionary = rig.intercept_blade_xf(point, axis, face, torso_turn)
+	if res.is_empty():
+		return 1e9
+	var wx: Transform3D = res["xf"]
+	var own: BladeProxy = rig.blade_proxy
+	if own == null or own.pieces.is_empty():
+		return min_axis
+	var ospan: Vector2 = rig.blade_span()
+	var gap := 1e9
+	for xf in e_xfs:
+		var g := BladeProxy.closest_gap(wx, own, xf, eproxy, ospan, espan)
+		gap = minf(gap, float(g["gap"]))
+		if gap <= 0.0:
+			break
 	return gap
-
-
-## 刀身 discs 的 y 范围 → 刀段端点参数
-static func _piece_span(discs: Array) -> Vector2:
-	var lo := 1e9
-	var hi := -1e9
-	for d in discs:
-		lo = minf(lo, float(d["y"]))
-		hi = maxf(hi, float(d["y"]))
-	return Vector2(lo, hi)
 
 
 static func _pt_seg_dist(p: Vector3, a: Vector3, b: Vector3) -> float:
@@ -548,6 +711,8 @@ func _end_intercept() -> void:
 func on_block(push_dir: Vector3, speed: float) -> void:
 	if not alive:
 		return
+	parry_stats["blocks"] += 1
+	_capture_parry_contact()
 	var d := push_dir
 	d.y = 0.0
 	if d.length_squared() < 0.0001:
@@ -574,6 +739,111 @@ func step_impact(dt: float, arena: Dictionary) -> void:
 	rig.global_position += _impact_slide * (previous * previous * previous - remaining * remaining * remaining)
 	_clamp_to_arena(arena)
 	rig.weapon_xf = rig.weapon_xf.translated(rig.global_position - from)
+
+
+## 接触帧数值：我方刀轴 a、敌刀轴 b、出刃向 e、速度 v、以及和预测接触
+## 点/时刻的偏差。play_bench 用它定格截图 + 打日志。
+func _swing_phase() -> String:
+	if not rig.strike_active():
+		return "idle"
+	return ["approach", "strike", "recover"][rig._swing_path.phase()]
+
+
+func _capture_parry_contact() -> void:
+	var enemy = _last_strike.get("enemy")
+	if enemy == null or not is_instance_valid(enemy):
+		# fallback/旧路径格挡也记录（kind=fallback，无计划可对照）
+		for e in enemies:
+			if e != null and is_instance_valid(e) and e.get("alive") \
+					and ActiveParry.strike_source(e) != null:
+				enemy = e
+				break
+	if enemy == null or not is_instance_valid(enemy):
+		return
+	var src = ActiveParry.strike_source(enemy)
+	if src == null or not src.has_method("predict_weapon_xf"):
+		return
+	var a_w: Vector3 = rig.weapon_spin.global_transform.basis.y.normalized()
+	var my_span: Vector2 = rig.blade_span()
+	var xf_my: Transform3D = rig.weapon_spin.global_transform
+	var s0: Vector3 = xf_my * Vector3(0, my_span.x, 0)
+	var s1: Vector3 = xf_my * Vector3(0, my_span.y, 0)
+	# 敌刀轴优先真值（weapon_spin / _blade_now / weapon_xf），
+	# 预测表兜底 —— 与 tracker 同源，量「实际」的 a·b。
+	var xf_e := Transform3D.IDENTITY
+	var live_spin = src.get("weapon_spin")
+	if live_spin != null and is_instance_valid(live_spin):
+		xf_e = live_spin.global_transform
+	else:
+		var live_xf = src.get("_blade_now")
+		if live_xf is Transform3D and not live_xf.is_equal_approx(Transform3D.IDENTITY):
+			xf_e = live_xf
+		elif src.get("weapon_xf") is Transform3D \
+				and not src.get("weapon_xf").is_equal_approx(Transform3D.IDENTITY):
+			xf_e = src.get("weapon_xf")
+		else:
+			var v_t = src.get("attack_elapsed")
+			if v_t == null:
+				return
+			xf_e = src.predict_weapon_xf(float(v_t))
+	var b_w: Vector3 = (xf_e.basis * Vector3(0, 1, 0)).normalized()
+	var es: Vector2 = src.blade_span() if src.has_method("blade_span") else src.get("blade_proxy").span
+	var e0: Vector3 = xf_e * Vector3(0, es.x, 0)
+	var e1: Vector3 = xf_e * Vector3(0, es.y, 0)
+	var near := ActiveParry._seg_seg(s0, s1, e0, e1)
+	var P_w: Vector3 = near["c0"]
+	var chest: Vector3 = rig.global_position + Vector3(0, 2.2, 0)
+	var n_dir: Vector3 = (P_w - chest)
+	var v_w: Vector3 = Vector3(_last_strike.get("e", Vector3.ZERO))
+	if v_w.length_squared() < 0.01:
+		v_w = a_w.cross(b_w)
+		if v_w.length_squared() < 0.01:
+			v_w = n_dir
+	v_w = v_w.normalized()
+	var va: Vector3 = v_w.cross(a_w)
+	var t_err := (Time.get_ticks_msec() - int(_last_strike.get("plan_ms", 0))) / 1000.0 \
+		- float(_last_strike.get("eta", 0.0)) if not _last_strike.is_empty() else 99.0
+	var ab := a_w.dot(b_w)
+	# 实测刀速：连续两帧 weapon_xf 原点差分（不只是计划值）
+	var v_meas := 0.0
+	var ve_dot := 0.0
+	if _swing_prev_xf != Transform3D.IDENTITY and _swing_cur_xf != Transform3D.IDENTITY:
+		var v_vec: Vector3 = (_swing_cur_xf.origin - _swing_prev_xf.origin) \
+			/ maxf(get_process_delta_time(), 0.001)
+		v_meas = v_vec.length()
+		ve_dot = v_vec.dot(v_w)
+	var pos_err := P_w.distance_to(_last_strike.get("P", P_w))
+	# 归因 = 这次格挡发生时是否有迎击计划在飞（kind=="melee" 只有 strike
+	# 计划置位，fallback 是 "melee_fallback"）+ 接触时刻基本吻合。
+	# pos_err 只作指标不进 gate：敌刀是长段，两刃实际交点可以合理偏离 P。
+	var tracked: bool = rig.strike_active() and _intercept_kind == "melee" \
+		and absf(t_err) < 1.0 and not _last_strike.is_empty()
+	# 主动迎击有效：|a·b|≤0.25（a⊥b）、e 朝敌（≥0.30）、接触时刻/位置偏差小
+	var valid: bool = tracked and absf(ab) <= 0.25 \
+		and v_w.dot(n_dir.normalized() if n_dir.length_squared() > 0.001 else Vector3.FORWARD) >= 0.30
+	if valid:
+		parry_stats["ab_ok"] = int(parry_stats.get("ab_ok", 0)) + 1
+		parry_stats["active_valid"] = int(parry_stats.get("active_valid", 0)) + 1
+	elif tracked:
+		parry_stats["ab_bad"] = int(parry_stats.get("ab_bad", 0)) + 1
+		parry_stats["active_invalid"] = int(parry_stats.get("active_invalid", 0)) + 1
+	if _last_strike.is_empty():
+		parry_stats["blocks_fb"] = int(parry_stats.get("blocks_fb", 0)) + 1
+	parry_contact = {
+		"seq": parry_stats["blocks"], "tracked": tracked, "valid": valid,
+		"kind": "fallback" if _last_strike.is_empty() else "active",
+		"phase": _swing_phase(),
+		"tk": (rig._swing_path._track_b.is_valid()
+			if rig._swing_path != null else false),
+		"v_meas": snappedf(v_meas, 0.1),
+		"ve_dot": snappedf(ve_dot, 0.1),
+		"ab_dot": snappedf(ab, 0.001),
+		"en_dot": snappedf(v_w.dot(n_dir.normalized()) if n_dir.length_squared() > 0.001 else 0.0, 0.001),
+		"va_deg": snappedf(rad_to_deg(va.angle_to(v_w)), 0.1),
+		"v_mag": snappedf(P.getf("parry.plan_speed"), 0.1),
+		"pos_err": snappedf(P_w.distance_to(_last_strike.get("P", P_w)), 0.01),
+		"t_err": snappedf(t_err, 0.01),
+	}
 
 
 func _on_footstep(pos: Vector3, strength: float) -> void:
@@ -683,6 +953,8 @@ func is_guard_up() -> bool:
 func parry_plan_label() -> String:
 	if not _intercept_on:
 		return ""
+	if _intercept_kind == "melee_fallback":
+		return "它的刀（守）"
 	return "它的刀" if _intercept_kind == "melee" else "飞行物"
 
 
@@ -700,11 +972,16 @@ func apply_body_collision(position_after_collision: Vector3) -> void:
 	_swing_cur_xf = rig.weapon_xf
 
 
+## ⚠ Sólo cápsula de contorno para queries gruesas (cámara/distancia).
+## Prohibido usarla para daño o bloqueo: eso va por rig.hit_parts()
+## (multi-cilindro, requirement #2).
 func capsule() -> Dictionary:
 	return rig.combat_capsule()
 
 
 func hurt(_amount: float, _from_dir := Vector3.FORWARD, cause := "") -> void:
+	if _amount > 0.0:
+		parry_stats["hits"] += 1     # 统计先于无敌：god_mode 也要知道漏了几刀
 	if not alive or P.getb("rules.god_mode"):
 		return
 	if _amount <= 0.0:
@@ -740,7 +1017,13 @@ func reset(pos: Transform3D) -> void:
 	air_jumps = 0
 	jump_buffer_dt = 0.0
 	hurt_serial = -1
+	hurt_serials = {}
+	measured_velocity = Vector3.ZERO
+	_prev_rig_pos = pos.origin
+	_plan_vel = Vector3.ZERO
 	swing_serial = 0
+	parry_stats = {"swings": 0, "blocks": 0, "hits": 0, "strikes": 0, "fallback": 0}
+	_swing_seen = {}
 	parry_timer = 0.0
 	parry_cd = 0.0
 	block_push = Vector3.ZERO

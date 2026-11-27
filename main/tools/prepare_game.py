@@ -284,8 +284,8 @@ def services(prefix, autoloads):
 
 
 def build():
-    generated: dict[Path, bytes] = pack_designs(ENEMIES)
-    for relative, data in dependencies(VESPER, ["integration/campaign_rig.gd"]):
+    generated: dict[Path, bytes] = pack_designs(ENEMIES, MAIN)
+    for relative, data in dependencies(VESPER, ["integration/campaign_rig.gd"], MAIN):
         if isinstance(data, str):
             data = RESOURCE_PATH.sub(
                 lambda match: "res://runtime/" + (VESPER_RUNTIME / match[1]).as_posix(),

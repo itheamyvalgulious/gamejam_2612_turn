@@ -130,7 +130,7 @@ func environment(outside := false) -> void:
 	# 做成「后期特效」设置项，嫌卡的玩家可自行关闭。
 	var post_fx: bool = bool(TurnSession.get_option("display.post_fx", true))
 	env.ssr_enabled = post_fx
-	env.ssr_max_steps = 48
+	env.ssr_max_steps = 20
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.glow_enabled = true
 	env.glow_intensity = 0.35

@@ -23,8 +23,10 @@ static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_
 			continue
 		if e.last_hit_serial == serial:
 			continue
-		var res: Dictionary = Hit.sweep_blade_parts(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_discs,
-			rig.weapon_scale, e.hit_parts())
+		if rig.global_position.distance_squared_to(e.center()) > 9.0 * 9.0:
+			continue
+		var res: Dictionary = Hit.sweep_blade_parts(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy,
+			e.hit_parts())
 		if not bool(res.get("hit", false)) or not player.blade_terrain.allows_hit(rig, res):
 			continue
 		e.last_hit_serial = serial
@@ -51,7 +53,10 @@ static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_
 		var entry := {}
 		if e.has_method("hurt_by_blade"):
 			if dmg >= e.hp:
-				entry = Hit.blade_entry(replay.blade_samples(rig, dt), res)
+				var lvl_ref: Variant = e.get("level")
+				var use_death_field := lvl_ref is Node and (lvl_ref as Node).get_meta(&"death_field", null) != null
+				if not use_death_field:
+					entry = Hit.blade_entry(replay.blade_samples(rig, dt), res, rig.blade_proxy)
 				if entry.is_empty():
 					var cut := travel.normalized()
 					var inward := -normal
@@ -80,15 +85,28 @@ static func enemy_swing(enemy, player: PlayerUnit, terrain_clear := Callable()) 
 	var rig = enemy.rig
 	if rig == null or not rig.has_method("in_hit_window") or not rig.in_hit_window():
 		return {"hit": false}
-	if enemy.swung_serial == player.hurt_serial:
+	var eid: int = enemy.get_instance_id()
+	var serials = player.get("hurt_serials")
+	if serials is Dictionary and int(serials.get(eid, -1)) == enemy.swung_serial:
+		return {"hit": false}
+	elif not (serials is Dictionary) and enemy.swung_serial == player.hurt_serial:
+		return {"hit": false}
+	if rig.global_position.distance_squared_to(player.rig.global_position) > 10.0 * 10.0:
 		return {"hit": false}
 	# 碰到刀即格挡：不要求先举起；格挡成功立刻消耗这一刀。
 	if P.getb("parry.melee_block"):
+		var _cl0 := Time.get_ticks_usec()
 		var clash: Dictionary = Hit.blade_vs_blade_swept(
-			player.rig.weapon_prev_xf, player.rig.weapon_xf, player.rig.blade_discs,
-			player.rig.weapon_scale, player.rig.blade_span(),
-			rig.weapon_prev_xf, rig.weapon_xf, rig.blade_discs, rig.weapon_scale, rig.blade_span())
+			player.rig.weapon_prev_xf, player.rig.weapon_xf, player.rig.blade_proxy,
+			rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy, 0.05,
+			player.rig.blade_span(), rig.blade_span(), 3, 4, -1)
+		if player.get("parry_stats") is Dictionary:
+			player.parry_stats["ms_clash"] = maxf(
+				float(player.parry_stats.get("ms_clash", 0.0)),
+				(Time.get_ticks_usec() - _cl0) / 1000.0)
 		if bool(clash.get("hit", false)) and _blade_path_is_clear(rig, clash, terrain_clear):
+			if serials is Dictionary:
+				serials[eid] = enemy.swung_serial
 			player.hurt_serial = enemy.swung_serial
 			var push: Vector3 = player.rig.global_position - rig.global_position
 			push.y = 0.0
@@ -104,10 +122,12 @@ static func enemy_swing(enemy, player: PlayerUnit, terrain_clear := Callable()) 
 				"push": push}
 	# 受击判定走机体原件分段（骨盆/胸/头/肩/四肢），不再用单颗大胶囊：
 	# 高过头顶的横斩不会蹭到空气判定，贴腿扫过来的刀也打得到。
-	var res: Dictionary = Hit.sweep_blade_parts(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_discs,
-		rig.weapon_scale, player.rig.hit_parts())
+	var res: Dictionary = Hit.sweep_blade_parts(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy,
+			player.rig.hit_parts())
 	if not bool(res.get("hit", false)) or not _blade_path_is_clear(rig, res, terrain_clear):
 		return {"hit": false}
+	if serials is Dictionary:
+		serials[eid] = enemy.swung_serial
 	player.hurt_serial = enemy.swung_serial
 	var dmg: float = float(enemy.damage)
 	player.hurt(dmg, res.get("normal", Vector3.UP))
@@ -127,8 +147,10 @@ static func _blade_path_is_clear(rig, contact: Dictionary, clear: Callable) -> b
 static func blade_blocks(rig, prev: Vector3, pos: Vector3, radius: float) -> bool:
 	if rig == null:
 		return false
-	var res: Dictionary = Hit.segment_vs_blade(prev, pos, rig.weapon_xf, rig.blade_discs,
-		rig.weapon_scale, radius)
+	if rig.get("weapon_prev_xf") is Transform3D and not rig.weapon_prev_xf.is_equal_approx(Transform3D.IDENTITY):
+		var res: Dictionary = Hit.segment_vs_blade_swept(prev, pos, rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy, radius)
+		return bool(res.get("hit", false))
+	var res: Dictionary = Hit.segment_vs_blade(prev, pos, rig.weapon_xf, rig.blade_proxy, radius)
 	return bool(res.get("hit", false))
 
 
@@ -136,5 +158,5 @@ static func blade_blocks(rig, prev: Vector3, pos: Vector3, radius: float) -> boo
 static func blade_contacts_point(rig, p: Vector3, radius: float) -> bool:
 	if rig == null:
 		return false
-	var res: Dictionary = Hit.blade_vs_sphere(rig.weapon_xf, rig.blade_discs, rig.weapon_scale, p, radius)
+	var res: Dictionary = Hit.blade_vs_sphere(rig.weapon_xf, rig.blade_proxy, p, radius)
 	return bool(res.get("hit", false))

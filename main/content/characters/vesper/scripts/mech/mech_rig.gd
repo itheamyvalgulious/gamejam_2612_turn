@@ -20,6 +20,7 @@ extends Node3D
 ##             both fists track the hilt, 360-degree waist spin, blade ribbons.
 
 const MK = preload("res://scripts/mech/mesh_kit.gd")
+const BodyColliders = preload("res://core/body_colliders.gd")
 const MAT = preload("res://scripts/mech/materials.gd")
 const BB = preload("res://scripts/mech/body_builder.gd")
 const Trail = preload("res://scripts/mech/blade_trail.gd")
@@ -1409,64 +1410,57 @@ func body_aabb() -> AABB:
 	return out
 
 
+var _body_colliders: Dictionary = {}
+
+## 多圆柱体受击判定件：由 BodyColliders 按关节局部空间拟合，
+## 并集完全包含机身网格顶点（验证器 verify_body_parts.gd 逐顶点检查）。
+## 每帧调用零拟合成本：只把局部胶囊经锚点 global_transform 变到世界系。
 func hit_parts() -> Array:
-	var parts: Array = []
-	if body == null:
-		return parts
-	var s := global_transform.basis.get_scale().x
-	if s < 0.001:
-		s = 1.0
-	# 骨盆（腰环以下，四条腿的挂点都在这圈上）
-	parts.append({"a": body.global_position - Vector3(0, 0.18 * s, 0),
-		"b": body.global_position + Vector3(0, 0.20 * s, 0), "r": 0.56 * s, "label": "pelvis"})
-	# 胸口 / 头 / 背包 / 肩甲：跟着腰环转
-	if torso != null:
-		parts.append({"a": torso.global_transform * Vector3(0, 0.12, 0),
-			"b": torso.global_transform * Vector3(0, 0.60, 0), "r": 0.44 * s, "label": "chest"})
-		parts.append({"a": torso.global_transform * Vector3(0, 0.30, 0.14),
-			"b": torso.global_transform * Vector3(0, 0.34, 0.46), "r": 0.42 * s, "label": "pack"})
-	if head != null:
-		var hc: Vector3 = head.global_position
-		var hs := head.global_transform.basis.get_scale().x
-		parts.append({"a": hc, "b": hc + Vector3(0, 0.18 * hs, 0), "r": 0.22 * hs, "label": "head"})
-	for p in pauldrons:
-		if not is_instance_valid(p):
-			continue
-		var ps: float = p.global_transform.basis.get_scale().x
-		parts.append({"a": p.global_position, "b": p.global_position + Vector3(0, 0.10 * ps, 0),
-			"r": 0.30 * ps, "label": "pauldron"})
-	# 四条腿：关节到关节（腿骨在世界里是斜着撑开的，所以必须跟着关节走）
+	if _body_colliders.is_empty():
+		_body_colliders = _build_body_colliders()
+	return BodyColliders.world_parts(_body_colliders)["parts"]
+
+
+## 粗筛 AABB：先查它再逐件扫掠，敌人多时代价明显低于逐件全测。
+func hit_broadphase() -> AABB:
+	if _body_colliders.is_empty():
+		_body_colliders = _build_body_colliders()
+	return BodyColliders.world_parts(_body_colliders)["broadphase"]
+
+
+func _build_body_colliders() -> Dictionary:
+	var anchors: Array = []
+	for n in [body, lower_body, torso, head]:
+		if n != null:
+			anchors.append(n)
+	anchors.append_array(pauldrons)
 	for leg in legs:
-		var hip = leg.get("hip")
-		var knee = leg.get("knee")
-		var ankle = leg.get("ankle")
-		if hip == null or knee == null or ankle == null:
-			continue
-		if not (is_instance_valid(hip) and is_instance_valid(knee) and is_instance_valid(ankle)):
-			continue
-		parts.append({"a": hip.global_position, "b": knee.global_position,
-			"r": 0.30 * s, "label": "leg"})
-		parts.append({"a": knee.global_position, "b": ankle.global_position,
-			"r": 0.25 * s, "label": "leg"})
-		var toe: Vector3 = ankle.global_position \
-			+ ankle.global_transform.basis.x.normalized() * 0.34 * s
-		parts.append({"a": ankle.global_position, "b": toe, "r": 0.24 * s, "label": "foot"})
-	# 双臂：肩→肘→腕，最后给拳头一个球
+		for k in ["hip", "knee", "ankle"]:
+			if leg.get(k) != null:
+				anchors.append(leg[k])
 	for arm in arms:
-		var sh = arm.get("shoulder")
-		var el = arm.get("elbow")
-		var wr = arm.get("wrist")
-		if sh == null or el == null or wr == null:
-			continue
-		if not (is_instance_valid(sh) and is_instance_valid(el) and is_instance_valid(wr)):
-			continue
-		parts.append({"a": sh.global_position, "b": el.global_position,
-			"r": 0.24 * s, "label": "arm"})
-		parts.append({"a": el.global_position, "b": wr.global_position,
-			"r": 0.21 * s, "label": "arm"})
-		parts.append({"a": wr.global_position, "b": wr.global_position,
-			"r": 0.20 * s, "label": "hand"})
-	return parts
+		for k in ["shoulder", "elbow", "wrist"]:
+			if arm.get(k) != null:
+				anchors.append(arm[k])
+	return BodyColliders.build({
+		"root": self,
+		"anchors": anchors,
+		"k_max": 3,
+		"budget": 40,
+		"mesh_filter": _body_mesh_filter,
+	})
+
+
+## 机身网格判定：剑刃/头发/投影/喷焰是表现件，不参与「身体」判定（同 body_aabb）。
+func _body_mesh_filter(mi: MeshInstance3D) -> bool:
+	if String(mi.name).begins_with("flame"):
+		return false
+	var n: Node = mi
+	while n != null and n != self:
+		if n == weapon_spin or n == hair or n == contact_shadow or n == weapon_root:
+			return false
+		n = n.get_parent()
+	return true
 
 
 func get_knee_angle(index: int) -> float:

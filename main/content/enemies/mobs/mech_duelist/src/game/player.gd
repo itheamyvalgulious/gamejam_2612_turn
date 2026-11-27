@@ -419,6 +419,9 @@ func parry_progress() -> float:
 	return clampf(1.0 - parry_timer / w, 0.0, 1.0)
 
 
+## ⚠ Sólo cápsula de contorno para queries gruesas (cámara/distancia).
+## Prohibido usarla para daño o bloqueo: eso va por rig.hit_parts()
+## (multi-cilindro, requirement #2).
 func capsule() -> Dictionary:
 	return Hit.rig_capsule(rig, 1.1, 3.4)
 

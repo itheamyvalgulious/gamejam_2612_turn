@@ -3,8 +3,8 @@ const SceneArena = preload("res://src/encounter/arena.gd")
 const Sentinel = preload("res://src/game/arc_encounter.gd")
 const Sentry = preload("res://src/game/wheel_encounter.gd")
 const Phase = preload("res://src/game/shard_encounter.gd")
+const LevelDeathField = preload("res://core/death_field.gd")
 const ACTOR_RADIUS := 1.75
-var nav: AStarGrid2D
 var plunge_armed := false
 var drop_start_height := 0.0
 var was_airborne := false
@@ -31,13 +31,15 @@ func start_level(_idx: int) -> void:
 	plunge_armed = false
 	drop_start_height = player.rig.global_position.y
 	if nav == null:
-		build_navigation()
+		nav = NavField.build(arena, SceneArena.nav_spec(arena))
+		geometry = LevelGeometry.build(arena)
 	player.rig.arena_bounds = Vector2.ZERO
 	player_previous = player.rig.global_position
 	cam.yaw = 0
 	cam.pitch = -0.12
 	cam.snap(arena)
 	rng.randomize()
+	LevelDeathField.install(self)
 	total_enemies = enemies.size()
 	state = "fight"
 	state_t = 0
@@ -63,6 +65,8 @@ func _spawn_encounters() -> void:
 		if entry["kind"] == "archer":
 			enemy.setup_sentry(PI, 0.95 + float(archers.size()) * 0.35)
 			archers.append(enemy)
+		elif entry["kind"] == "mob":
+			enemy.use_ground_routes(sentinel_ground_move, sentinel_support_floor, sentinel_waypoint)
 		enemy.spawn_xf = enemy.global_transform
 		if enemy.rig != null:
 			enemy.spawn_rig_xf = enemy.rig.transform
@@ -72,10 +76,7 @@ func step(dt: float, ctx: Dictionary) -> void:
 	state_t += dt
 	if state == "fight":
 		for enemy in enemies:
-			var old: Vector3 = enemy.rig.global_position
 			enemy.step(dt, ctx)
-			if enemy.kind == "mob":
-				enemy.rig.global_position = resolve_motion(old, enemy.rig.global_position, false)
 	elif state == "clear":
 		# Finish this independent room; never load the demo's next arena.
 		for enemy in enemies:
@@ -107,7 +108,8 @@ func constrain_player() -> void:
 	if plunge_armed and was_airborne and rig.jump_state == "LANDING":
 		land_plunge(resolved)
 	for enemy in enemies:
-		if not enemy.alive or enemy.hit_parts().is_empty() or absf(resolved.y-enemy.ground_position().y)>3:
+		if not enemy.alive or absf(resolved.y-enemy.ground_position().y)>3 \
+				or enemy.hit_parts().is_empty():
 			continue
 		var offset: Vector3 = resolved-enemy.ground_position()
 		offset.y = 0
@@ -194,12 +196,6 @@ func choose_phase_point(enemy) -> int:
 
 
 
-func melee_clear(a: Vector3, b: Vector3) -> bool:
-	for box: AABB in arena["solids"]:
-		if box.intersects_segment(a, b) != null:
-			return false
-	return true
-
 func combat_targets() -> Array:
 	var targets: Array = []
 	for enemy in enemies:
@@ -220,44 +216,6 @@ func constrain_camera() -> void:
 		if hit != null:
 			nearest = minf(nearest, maxf(0.1, focus.distance_to(hit)-0.15))
 	cam.camera.global_position = focus + direction*nearest
-
-func build_navigation() -> void:
-	nav = AStarGrid2D.new()
-	nav.region = Rect2i(-23,-23,47,47)
-	nav.cell_size = Vector2(1.5,1.5)
-	nav.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
-	nav.update()
-	for x in range(-23,24):
-		for z in range(-23,24):
-			var p := Vector3(x*1.5,0,z*1.5)
-			var blocked := not position_clear(p,2.1,false)
-			blocked = blocked or absf(p.x)>SceneArena.HALF_WIDTH-3 or absf(p.z)>SceneArena.HALF_DEPTH-3
-			nav.set_point_solid(Vector2i(x,z),blocked)
-
-func nearest_cell(pos: Vector3) -> Vector2i:
-	var start := Vector2i(clampi(roundi(pos.x/1.5),-23,23),clampi(roundi(pos.z/1.5),-23,23))
-	if not nav.is_point_solid(start):
-		return start
-	var best := start
-	var distance := INF
-	for x in range(-23,24):
-		for z in range(-23,24):
-			var cell := Vector2i(x,z)
-			if not nav.is_point_solid(cell) and Vector2(cell-start).length_squared()<distance:
-				best = cell
-				distance = Vector2(cell-start).length_squared()
-	return best
-
-func navigation_direction(position_at: Vector3, goal: Vector3, heading: Vector3) -> Vector3:
-	if nav == null or position_clear(position_at + heading * 2.0, 2.1, false) and melee_clear(position_at + Vector3.UP, goal + Vector3.UP):
-		return heading
-	var path := nav.get_point_path(nearest_cell(position_at), nearest_cell(goal))
-	for point in path:
-		var direction := Vector3(point.x - position_at.x, 0.0, point.y - position_at.z)
-		if direction.length() > 0.9:
-			return direction.normalized()
-	return heading
-
 
 func floor_at(pos: Vector3, max_height: float) -> float:
 	var height := 0.0

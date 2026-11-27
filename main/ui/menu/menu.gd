@@ -24,6 +24,10 @@ func _ready() -> void:
 		var play_bench := preload("res://tools/play_bench.gd").new()
 		play_bench.name = "PlayBenchDriver"
 		get_tree().root.add_child.call_deferred(play_bench)
+	if "--blade-terrain-check" in OS.get_cmdline_user_args():
+		var btc := preload("res://tools/blade_terrain_check.gd").new()
+		btc.name = "BladeTerrainCheckDriver"
+		get_tree().root.add_child.call_deferred(btc)
 	if "--repro" in OS.get_cmdline_user_args():
 		var repro = load("res://tools/repro.gd").new()
 		repro.name = "ReproDriver"
@@ -40,6 +44,10 @@ func _ready() -> void:
 		var repro2 = load("res://tools/repro2.gd").new()
 		repro2.name = "Repro2"
 		get_tree().root.add_child.call_deferred(repro2)
+	if "--verify-body" in OS.get_cmdline_user_args():
+		var verifier = load("res://tools/verify_body_parts.gd").new()
+		verifier.name = "VerifyBodyDriver"
+		get_tree().root.add_child.call_deferred(verifier)
 	theme = Style.theme()
 	ThemeDB.fallback_font = theme.default_font
 	_selected = TurnSession.selected_level_index

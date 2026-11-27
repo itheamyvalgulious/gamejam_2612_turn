@@ -22,8 +22,8 @@ static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_
 			continue
 		if e.last_hit_serial == serial:
 			continue
-		var res: Dictionary = Hit.sweep_blade_parts(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_discs,
-			rig.weapon_scale, e.hit_parts())
+		var res: Dictionary = Hit.sweep_blade_parts(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy,
+			e.hit_parts())
 		if not bool(res.get("hit", false)):
 			continue
 		e.last_hit_serial = serial
@@ -73,9 +73,9 @@ static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
 	# 碰到刀即格挡：不要求先举起；格挡成功立刻消耗这一刀。
 	if P.getb("parry.melee_block"):
 		var clash: Dictionary = Hit.blade_vs_blade_swept(
-			player.rig.weapon_prev_xf, player.rig.weapon_xf, player.rig.blade_discs,
-			player.rig.weapon_scale, player.rig.blade_span(),
-			rig.weapon_prev_xf, rig.weapon_xf, rig.blade_discs, rig.weapon_scale, rig.blade_span())
+			player.rig.weapon_prev_xf, player.rig.weapon_xf, player.rig.blade_proxy,
+			rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy, 0.03,
+			player.rig.blade_span(), rig.blade_span())
 		if bool(clash.get("hit", false)):
 			player.hurt_serial = enemy.swung_serial
 			var push: Vector3 = player.rig.global_position - rig.global_position
@@ -91,8 +91,8 @@ static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
 				"push": push}
 	# 受击判定走机体原件分段（骨盆/胸/头/肩/四肢），不再用单颗大胶囊：
 	# 高过头顶的横斩不会蹭到空气判定，贴腿扫过来的刀也打得到。
-	var res: Dictionary = Hit.sweep_blade_parts(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_discs,
-		rig.weapon_scale, player.rig.hit_parts())
+	var res: Dictionary = Hit.sweep_blade_parts(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy,
+			player.rig.hit_parts())
 	if not bool(res.get("hit", false)):
 		return {"hit": false}
 	player.hurt_serial = enemy.swung_serial
@@ -106,8 +106,7 @@ static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
 static func blade_blocks(rig, prev: Vector3, pos: Vector3, radius: float) -> bool:
 	if rig == null:
 		return false
-	var res: Dictionary = Hit.segment_vs_blade(prev, pos, rig.weapon_xf, rig.blade_discs,
-		rig.weapon_scale, radius)
+	var res: Dictionary = Hit.segment_vs_blade(prev, pos, rig.weapon_xf, rig.blade_proxy, radius)
 	return bool(res.get("hit", false))
 
 
@@ -115,5 +114,5 @@ static func blade_blocks(rig, prev: Vector3, pos: Vector3, radius: float) -> boo
 static func blade_contacts_point(rig, p: Vector3, radius: float) -> bool:
 	if rig == null:
 		return false
-	var res: Dictionary = Hit.blade_vs_sphere(rig.weapon_xf, rig.blade_discs, rig.weapon_scale, p, radius)
+	var res: Dictionary = Hit.blade_vs_sphere(rig.weapon_xf, rig.blade_proxy, p, radius)
 	return bool(res.get("hit", false))

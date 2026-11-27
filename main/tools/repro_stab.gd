@@ -51,12 +51,13 @@ func _test() -> void:
 		if rig.is_attacking and i % 2 == 0:
 			var clash: Dictionary = Hit.blade_vs_blade_swept(
 				_player.rig.weapon_prev_xf, _player.rig.weapon_xf,
-				_player.rig.blade_discs, _player.rig.weapon_scale, _player.rig.blade_span(),
-				rig.weapon_prev_xf, rig.weapon_xf, rig.blade_discs, rig.weapon_scale, rig.blade_span())
+				_player.rig.blade_proxy,
+				rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy, 0.03,
+				_player.rig.blade_span(), rig.blade_span())
 			var eb: Transform3D = rig.weapon_xf
 			var es := Vector2(1e9, -1e9)
-			for d in rig.blade_discs:
-				es.x = minf(es.x, float(d["y"])); es.y = maxf(es.y, float(d["y"]))
+			if rig.blade_proxy != null:
+				es = rig.blade_proxy.span
 			print("[stab] f=%d el=%.3f gap=%.2f hit=%s parry=%s eb0=%s eb1=%s plan=%s" % [
 				i, rig.attack_elapsed, float(clash.get("gap",-1)),
 				res.get("hit"), res.get("parried"),

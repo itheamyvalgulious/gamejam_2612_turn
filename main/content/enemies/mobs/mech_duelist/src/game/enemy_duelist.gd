@@ -169,7 +169,8 @@ func step(dt: float, ctx: Dictionary) -> void:
 	_used_ground_motion = false
 	_guard_broken = maxf(0.0, _guard_broken - dt)
 	if not alive:
-		_step_knockdown(dt, Fx.time_scale)
+		if _knockdown != null:
+			_step_knockdown(dt, Fx.time_scale)
 		return
 	player = ctx.get("player")
 	if not player.alive:
@@ -321,15 +322,23 @@ func hurt(amount: float, normal := Vector3.UP, _knock := 0.0) -> void:
 	super.hurt(amount, normal, 0.0)
 
 
+var _cut_point := Vector3.ZERO
+var _cut_travel := Vector3.ZERO
+
+
 func hurt_by_blade(amount: float, normal: Vector3, knock: float, travel: Vector3, contact: Dictionary) -> void:
 	_blade_impulse = contact.get("force", travel if travel.slide(Vector3.UP).length_squared() > 0.001 else -normal)
 	_blade_part = contact.get("part", "")
 	_blade_side = contact.get("side", 0.0)
+	_cut_point = contact.get("point", contact.get("blade_point", center()))
+	_cut_travel = travel
 	hurt(amount, normal, knock)
 	if alive:
 		_blade_impulse = Vector3.ZERO
 		_blade_part = ""
 		_blade_side = 0.0
+		_cut_point = Vector3.ZERO
+		_cut_travel = Vector3.ZERO
 
 
 func die() -> void:
@@ -339,12 +348,21 @@ func die() -> void:
 	rig.cancel_strike()
 	sequence.sync_audio(true)
 	sequence.hide()
-	_knockdown = Knockdown.new()
-	var path := {}
-	var launch_dir := _blade_impulse.slide(Vector3.UP).normalized()
-	if level != null and level.has_method("duelist_defeat_path") and not launch_dir.is_zero_approx():
-		path = level.duelist_defeat_path(rig.global_position, launch_dir)
-	_knockdown.begin(rig, _blade_impulse, path, _blade_part, _blade_side)
+	# 新物理死亡：DeathField 接手时走切割 ragdoll；旧 Knockdown/Wreckage
+	# 演出保留但不再触发（重生兼容照旧）。
+	var field: Object = level.get_meta(&"death_field") if level != null else null
+	if field != null and not get_meta(&"death_done", false):
+		set_meta(&"death_done", true)
+		var travel := _cut_travel if _cut_travel.length_squared() > 0.001 \
+			else _blade_impulse.slide(Vector3.UP)
+		field.enemy_died(self, {"contact": _cut_point, "travel": travel})
+	else:
+		_knockdown = Knockdown.new()
+		var path := {}
+		var launch_dir := _blade_impulse.slide(Vector3.UP).normalized()
+		if level != null and level.has_method("duelist_defeat_path") and not launch_dir.is_zero_approx():
+			path = level.duelist_defeat_path(rig.global_position, launch_dir)
+		_knockdown.begin(rig, _blade_impulse, path, _blade_part, _blade_side)
 	if level != null:
 		level.on_enemy_died(self)
 
@@ -354,7 +372,7 @@ func knockdown_landing_position() -> Vector3:
 
 
 func show_fatal_damage(point: Vector3) -> void:
-	if alive or _pending_armor_break or _wreckage != null or _blade_part.is_empty():
+	if alive or _knockdown == null or _pending_armor_break or _wreckage != null or _blade_part.is_empty():
 		return
 	_knockdown.capture_contact_pose(rig)
 	_break_point = rig.to_local(point)
@@ -362,7 +380,7 @@ func show_fatal_damage(point: Vector3) -> void:
 
 
 func advance_fatal_reaction(dt: float, rate: float) -> void:
-	if not alive and _knockdown != null:
+	if not alive and _knockdown != null and rate > 0.0:
 		_step_knockdown(dt, rate)
 
 

@@ -57,8 +57,9 @@ func _test_parry() -> void:
 			var mind := 1e9
 			if not thr2.is_empty() and bool(thr2.get("ok", false)):
 				var tp: Vector3 = thr2["point"]
-				for d in rig.blade_discs:
-					mind = minf(mind, (eb2 * Vector3(0, float(d["y"]), 0)).distance_to(tp))
+				if rig.blade_proxy != null:
+					for lp in rig.blade_proxy.sample_points():
+						mind = minf(mind, (eb2 * lp).distance_to(tp))
 			var axl := ""
 			if not thr2.is_empty() and bool(thr2.get("ok", false)):
 				var pr = _player.rig
@@ -92,8 +93,9 @@ func _test_parry() -> void:
 			var eb: Transform3D = _duelist.rig.weapon_xf
 			var ebp: Transform3D = _duelist.rig.weapon_prev_xf
 			var clash: Dictionary = Hit.blade_vs_blade_swept(pb, pb,
-				_player.rig.blade_discs, _player.rig.weapon_scale, _player.rig.blade_span(),
-				eb, eb, _duelist.rig.blade_discs, _duelist.rig.weapon_scale, _duelist.rig.blade_span())
+				_player.rig.blade_proxy,
+				eb, eb, _duelist.rig.blade_proxy, 0.03,
+				_player.rig.blade_span(), _duelist.rig.blade_span())
 			var pred: Transform3D = rig.predict_weapon_xf(rig.attack_elapsed)
 			var live: Transform3D = rig.weapon_spin.global_transform
 			var pred_err := (pred.origin - live.origin).length()

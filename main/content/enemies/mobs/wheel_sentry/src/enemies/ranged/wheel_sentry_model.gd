@@ -2,6 +2,7 @@ extends Node3D
 ## Model front is local -Z. Travel and aiming have separate pivots.
 
 const MeshKit = preload("res://src/vesper/mesh_kit.gd")
+const BodyColliders = preload("res://core/body_colliders.gd")
 const Materials = preload("res://src/vesper/materials.gd")
 const Casing = preload("res://src/geometry/armor_panel.gd")
 const Shell = preload("res://src/geometry/loft_shell.gd")
@@ -111,6 +112,39 @@ func replay_nodes() -> Array:
 	for support: Dictionary in _supports:
 		nodes.append_array([support["root"], support["arm"], support["rail"], support["shoe"]])
 	return nodes
+
+
+var _body_colliders: Dictionary = {}
+
+## 多圆柱体受击判定件（requirement #2）：沿 wheel/turret/液压支撑关节
+## 在关节局部空间拟合，并集完全包含机身网格顶点（verify_body_parts.gd 逐顶点验证）。
+## 每帧只做局部→世界变换。蓄力弹(_charge)是 FX 不参与。
+func body_colliders() -> Array:
+	if _body_colliders.is_empty():
+		_body_colliders = _build_body_colliders()
+	return BodyColliders.world_parts(_body_colliders)["parts"]
+
+
+func _build_body_colliders() -> Dictionary:
+	var anchors: Array = [self, wheel_frame, wheel, turret, _turret_column]
+	anchors.append_array(_shutters)
+	for support: Dictionary in _supports:
+		for k in ["root", "arm", "rail", "shoe"]:
+			if support.get(k) != null:
+				anchors.append(support[k])
+	return BodyColliders.build({
+		"root": self,
+		"anchors": anchors,
+		"k_max": 3,
+		"budget": 30,
+		"mesh_filter": func(mi: MeshInstance3D) -> bool:
+			var n: Node = mi
+			while n != null and n != self:
+				if n == _charge:      # 蓄力弹是发光 FX，不是机身
+					return false
+				n = n.get_parent()
+			return true,
+	})
 
 
 func armor_to_release(part: String, point: Vector3) -> Array[Node3D]:

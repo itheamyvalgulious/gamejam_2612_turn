@@ -1,5 +1,7 @@
 extends RefCounted
 class_name Intercept
+
+const ActiveParry = preload("res://core/active_parry.gd")
 ## 兵器拦截规划：读威胁的轨迹 → 决定「刀该压住哪个点、刀轴朝哪」。
 ##
 ## 两类威胁共用一套输出（全部世界坐标）：
@@ -26,25 +28,31 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	var prig = player.rig
 	if rig == null or prig == null or not rig.has_method("predict_weapon_xf") or not rig.is_attacking:
 		return {"ok": false}
-	if rig.blade_discs.is_empty():
+	if rig.blade_proxy == null or rig.blade_proxy.pieces.is_empty():
 		return {"ok": false}
 	var t_now: float = rig.attack_elapsed
 	var t_end: float = rig.attack_hit_to
 	if t_now > t_end:
 		return {"ok": false}
-	var cap: Dictionary = player.capsule()
-	var a: Vector3 = cap["a"]
-	var b: Vector3 = cap["b"]
-	var r: float = cap["r"]
+	# Multi-cilindro del jugador: el arco de amenaza se evalúa contra cada
+	# pieza real (requirement #2), no contra una sola capsulota.
+	var parts: Array = player.rig.hit_parts() if player.rig != null \
+		and player.rig.has_method("hit_parts") else []
 	# 在剩余判定窗口里往前扫：刀最早什么时候进到「身上 + margin」以内
 	var e0: float = maxf(t_now, rig.attack_hit_from)
 	var n := 8
 	var lo := -1.0
 	var hi := -1.0
 	var prev := e0
+	# 全程 6ms 墙钟：每次 nearest_on_blade 前查；超时按「已算出的最好」
+	# 早退（扫描中断=取已扫到的最近边界），防 margin 边沿 GJK 爆迭代。
+	var dl := Time.get_ticks_usec() + 6000
+	var pr_hit := margin + 0.6
 	for i in n + 1:
+		if Time.get_ticks_usec() > dl:
+			break
 		var e: float = lerpf(e0, t_end, float(i) / float(n))
-		var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e), rig, a, b, r)
+		var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e), rig, parts, pr_hit)
 		if float(near["gap"]) <= margin:
 			lo = prev
 			hi = e
@@ -54,8 +62,10 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 		return {"ok": false}          # 这一刀根本够不到我 → 不用架
 	# 二分细化「第一次进入 margin」的时刻：落点才不会在帧间跳来跳去
 	for i in 4:
+		if Time.get_ticks_usec() > dl:
+			break
 		var mid: float = (lo + hi) * 0.5
-		var nm: Dictionary = nearest_on_blade(rig.predict_weapon_xf(mid), rig, a, b, r)
+		var nm: Dictionary = nearest_on_blade(rig.predict_weapon_xf(mid), rig, parts, pr_hit)
 		if float(nm["gap"]) <= margin:
 			hi = mid
 		else:
@@ -68,15 +78,20 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	var lead_gap: float = clampf(0.85 + 0.30 * rig.weapon_scale, margin + 0.12, 1.8)
 	if lead_gap > margin + 0.02:
 		var lo2 := e0
+		var pr_lead := lead_gap + 0.6
 		for i2 in n + 1:
+			if Time.get_ticks_usec() > dl:
+				break
 			var e2: float = lerpf(e0, e_hit, float(i2) / float(n))
-			var nm2: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e2), rig, a, b, r)
+			var nm2: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e2), rig, parts, pr_lead)
 			if float(nm2["gap"]) <= lead_gap:
 				var l2 := lo2
 				var h2 := e2
 				for k in 4:
+					if Time.get_ticks_usec() > dl:
+						break
 					var m2: float = (l2 + h2) * 0.5
-					var n3: Dictionary = nearest_on_blade(rig.predict_weapon_xf(m2), rig, a, b, r)
+					var n3: Dictionary = nearest_on_blade(rig.predict_weapon_xf(m2), rig, parts, pr_lead)
 					if float(n3["gap"]) <= lead_gap:
 						h2 = m2
 					else:
@@ -84,7 +99,7 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 				e_meet = h2
 				break
 			lo2 = e2
-	var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e_meet), rig, a, b, r)
+	var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e_meet), rig, parts)
 	var blade_pt: Vector3 = near["blade_pt"]
 	var body_pt: Vector3 = near["body_pt"]
 	var y: float = near["y"]
@@ -109,74 +124,87 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	return _finish(ip, p1 - p0, out_dir, e_meet - t_now, "melee", enemy)
 
 
-## 远程：飞行物下一步会飞到哪 → 拦截点/刀轴
+## 远程：飞行物下一步会飞到哪 → 拦截点/刀轴（计入玩家 3D 速度）
 static func projectile_threat(player, it: Dictionary, reach: float, blade_speed: float,
 		arc_deg := 160.0) -> Dictionary:
 	if player == null or not player.alive:
 		return {"ok": false}
 	var pos: Vector3 = it["pos"]
 	var vel: Vector3 = it["vel"]
-	var sp := vel.length()
-	if sp < 0.2:
+	var v_p := Vector3.ZERO
+	if player.get("measured_velocity") is Vector3:
+		v_p = player.get("measured_velocity")
+	var v_rel: Vector3 = vel - v_p
+	var sp_rel := v_rel.length()
+	if sp_rel < 0.2:
 		return {"ok": false}
 	var chest: Vector3 = player.rig.global_position + Vector3(0, 2.2, 0)
-	var to := pos - chest
-	var dist := to.length()
-	if dist > reach or dist < 0.3:
+	var r0 := pos - chest
+	var dist := r0.length()
+	if dist < 0.2 or dist > maxf(reach, sp_rel * 0.45):
 		return {"ok": false}
-	var vdir := vel / sp
-	# arc_deg = 「冲着我来」的最大夹角：正对我飞来算 1.0，飞走的算负数
-	var closing := -vdir.dot(to.normalized())
+	var vdir := v_rel / sp_rel
+	var closing := -vdir.dot(r0.normalized())
 	if closing < cos(deg_to_rad(clampf(arc_deg, 30.0, 360.0)) * 0.5):
 		return {"ok": false}
-	# 落点：在飞行物自己的航路上，挑一个「离身体够近、但还没打到」的点
-	var d_target := clampf(dist - 1.2, 1.6, minf(reach, 2.6))
-	var bq := to.dot(vdir)                     # 航路投影（朝我飞来时 < 0）
+	var t_cpa := clampf(-r0.dot(v_rel) / (sp_rel * sp_rel), 0.0, 2.0)
+	var miss_cpa := (r0 + v_rel * t_cpa).length()
+	if miss_cpa > 2.4:
+		return {"ok": false}
+	var d_target := clampf(dist - 0.9, 1.35, minf(reach, 2.4))
+	var bq := r0.dot(vdir)
 	var cq := dist * dist - d_target * d_target
 	var disc := bq * bq - cq
 	var s := 0.0
-	if disc >= 0.0:
-		s = clampf(-bq - sqrt(disc), 0.0, dist)
+	if dist <= d_target:
+		s = t_cpa * sp_rel
+	elif disc >= 0.0:
+		s = maxf(-bq - sqrt(disc), 0.0)
 	else:
-		s = clampf(-bq, 0.0, dist)             # 擦身而过：取最近点
-	var ip := pos + vdir * s
-	var eta := s / sp
+		s = maxf(-bq, 0.0)
+	var t_hit := s / sp_rel
+	# 关键：plan_blade_intercept 立刻把 point 转成当前躯干局部坐标，而击中时玩家移动了 v_p * t_hit，
+	# 所以传入的目标点必须是 chest + r0 + v_rel * t_hit（等价于 pos + v_rel * t_hit）。
+	var ip := pos + v_rel * t_hit
 	var od := ip - chest
 	if od.length() > reach:
 		od = od.normalized() * reach
 		ip = chest + od
-		eta = maxf((ip - pos).dot(vdir) / sp, 0.0)
-	var out_dir: Vector3 = (ip - chest).normalized() if (ip - chest).length_squared() > 0.0001 else to.normalized()
-	return _finish(ip, vel, out_dir, eta, "shot", null)
+		t_hit = maxf((ip - pos).dot(vdir) / sp_rel, 0.0)
+	var out_dir: Vector3 = od.normalized() if od.length_squared() > 0.0001 else r0.normalized()
+	return _finish(ip, v_rel, out_dir, t_hit, "shot", null)
 
 
-## 机体胶囊（线段 a-b，半径 r）离敌人刀身最近的那一对点
-static func nearest_on_blade(xf: Transform3D, rig, a: Vector3, b: Vector3, cap_r: float) -> Dictionary:
-	var discs: Array = rig.blade_discs
-	var best := {"gap": 1e9, "blade_pt": xf.origin, "body_pt": a, "y": 1.2}
-	if discs.is_empty():
+## 机体多段胶囊（parts: [{a,b,r,...}]）离敌人刀身最近的那一对点（凸体代理版）
+## Blade geometry goes through BladeProxy; the defender body is the
+## multi-cylinder set from hit_parts() — never a single fat capsule.
+static func nearest_on_blade(xf: Transform3D, rig, parts: Array, prune := 1e9, shift := Vector3.ZERO) -> Dictionary:
+	var best := {"gap": 1e9, "blade_pt": xf.origin, "body_pt": xf.origin, "y": 1.2}
+	var proxy: BladeProxy = rig.blade_proxy
+	if proxy == null or proxy.pieces.is_empty():
 		return best
-	var scale: float = rig.weapon_scale
-	var stride := maxi(1, int(round(float(discs.size()) / 12.0)))
-	var i := 0
-	while i < discs.size():
-		var d: Dictionary = discs[i]
-		var y: float = float(d["y"])
-		if y < 0.2:                       # 跳过刀柄/配重，只测刀身
-			i += stride
-			continue
-		var p: Vector3 = xf * Vector3(0.0, y, 0.0)
-		var q: Vector3 = Hit.closest_on_segment(p, a, b)
-		var dir := p - q
-		var rr: float = float(d["r"]) * scale
-		var gap := dir.length() - rr - cap_r
+	var espan: Vector2 = rig.blade_span() if rig.has_method("blade_span") else proxy.span
+	var y_lo: float = maxf(espan.x, 0.2)
+	var y_hi: float = maxf(espan.y, y_lo + 0.1)
+	var s0: Vector3 = xf * Vector3(0.0, y_lo, 0.0)
+	var s1: Vector3 = xf * Vector3(0.0, y_hi, 0.0)
+	var ws: Variant = rig.get("weapon_scale")
+	var blade_r := 0.24 * (float(ws) if ws != null else 1.0)
+	for part: Dictionary in parts:
+		var pa: Vector3 = (part["a"] as Vector3) + shift
+		var pb: Vector3 = (part["b"] as Vector3) + shift
+		var pr: float = float(part["r"])
+		var r2 := ActiveParry._seg_seg(s0, s1, pa, pb)
+		var gap := float(r2["d"]) - pr - blade_r
 		if gap < float(best["gap"]):
-			var surf := q
-			if dir.length_squared() > 0.0001:
-				surf = q + dir.normalized() * cap_r
-			best = {"gap": gap, "blade_pt": p, "body_pt": surf, "y": y}
-		i += stride
+			var bp: Vector3 = r2["c0"]
+			var q: Vector3 = r2["c1"]
+			var dir := bp - q
+			var surf := q + (dir.normalized() * pr if dir.length_squared() > 0.0001 else Vector3.ZERO)
+			var y_val := lerpf(y_lo, y_hi, clampf((bp - s0).length() / maxf((s1 - s0).length(), 1e-4), 0.0, 1.0))
+			best = {"gap": gap, "blade_pt": bp, "body_pt": surf, "y": y_val}
 	return best
+
 
 
 ## 收尾：由威胁的运动方向 + 来向决定刀轴与刀面

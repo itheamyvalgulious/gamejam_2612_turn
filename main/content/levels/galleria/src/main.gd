@@ -227,7 +227,7 @@ func _process(delta: float) -> void:
 		level.prepare_player()
 		player.step(dt, level.arena, level.enemies)
 		level.constrain_player()
-		player.blade_terrain.advance_player(player.rig, dt, player.swing_serial, Snd, Fx)
+		player.blade_terrain.advance_player(player.rig, dt, player.swing_serial, Snd, Fx, level.get("geometry"))
 	level.step(dt, ctx)
 	var terrain_clear: Callable = level.terrain_blade_clear
 	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []), replay, dt)
@@ -250,7 +250,10 @@ func _process(delta: float) -> void:
 				_on_melee_parry(r)
 	replay.record(dt)
 	if not final_hit.is_empty():
-		if _finish.begin(final_hit, player, level, replay):
+		var df_script = load("res://core/death_field.gd")
+		if df_script != null and df_script.find(level) != null:
+			_on_combat_event(final_hit, false)
+		elif _finish.begin(final_hit, player, level, replay):
 			proj.clear_all()
 			hitstop = 0.0
 			_finish_hud_visible = hud.visible
@@ -259,7 +262,8 @@ func _process(delta: float) -> void:
 			player.rig.blade_trail.clear()
 			_advance_finishing_shot(0.0)
 			return
-		_on_combat_event(final_hit, false)
+		else:
+			_on_combat_event(final_hit, false)
 	if not is_instance_valid(level.finishing_enemy):
 		var proj_events := proj.step(dt, ctx)
 		for ev in proj_events:

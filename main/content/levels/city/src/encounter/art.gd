@@ -85,6 +85,10 @@ func light(pos: Vector3, color: Color, energy: float, reach: float, shadow := fa
 	lamp.light_size = 0.22
 	lamp.light_specular = 0.2
 	lamp.shadow_enabled = shadow
+	# 远距淡出：reach 内照明不变，2×reach 外贡献 <2% 直接剔除。
+	lamp.distance_fade_enabled = true
+	lamp.distance_fade_begin = reach * 2.0
+	lamp.distance_fade_length = reach
 
 func cabinet(pos: Vector3, size: Vector3, color := "teal") -> void:
 	block(color,size,pos+Vector3(0,size.y*0.5,0))
@@ -283,6 +287,9 @@ func downlight(pos: Vector3,color: Color,energy: float,reach: float) -> void:
 	lamp.spot_attenuation=1.4
 	lamp.light_size=0.4
 	lamp.light_specular=0.25
+	lamp.distance_fade_enabled=true
+	lamp.distance_fade_begin=reach*2.0
+	lamp.distance_fade_length=reach
 	# 阴影由主光负责；这里的聚光灯只做照明（range 24 的投影每帧重画全场）
 	lamp.shadow_enabled=false
 	root.add_child(lamp)

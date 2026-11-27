@@ -23,7 +23,7 @@ AUDIO_DESIGNS = {"duelist", "wheel", "fold"}
 PATHS = re.compile(r'''(?<=["'])res://([^"'\s]+)(?=["'])''')
 
 
-def dependencies(directory, roots):
+def dependencies(directory, roots, main=None):
     pending = list(roots)
     seen = set()
     while pending:
@@ -31,7 +31,12 @@ def dependencies(directory, roots):
         if item in seen:
             continue
         seen.add(item)
-        file = directory / item
+        # res://core/... is global project code, not package-local — it ships
+        # unchanged inside the design bundle so the reference keeps resolving.
+        if item.startswith("core/") and main is not None:
+            file = main / item
+        else:
+            file = directory / item
         if not file.exists():
             raise FileNotFoundError(file)
         if file.suffix in {".gd", ".tscn", ".tres", ".gdshader", ".gdshaderinc"}:
@@ -49,10 +54,10 @@ def design_path(design, relative):
     return Path("enemies") / ROOTS[design][0] / "design" / relative
 
 
-def pack_designs(enemies):
+def pack_designs(enemies, main=None):
     generated = {}
     for design, (directory, roots) in ROOTS.items():
-        for path, value in dependencies(enemies / directory, roots):
+        for path, value in dependencies(enemies / directory, roots, main):
             dest = design_path(design, path)
             if isinstance(value, str):
                 value = PATHS.sub(lambda m: "res://runtime/" + design_path(design, m[1]).as_posix(), value)

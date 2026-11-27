@@ -6,11 +6,13 @@ class_name LevelUnit
 ## 尺度：本文件里的硬编码距离 / 速度都是**世界单位**（1 u = 0.547 m，见 src/core/units.gd）；
 ## 玩家可见的数值一律走 P.getm()（真实米）。
 
-const PlayerBladeTerrain = preload("res://core/player_blade_terrain.gd")
+const LevelGeometry = preload("res://core/level_geometry.gd")
 const ArenaKit = preload("res://src/arena/arena.gd")
 const Fold = preload("res://src/game/enemy_phase_boss.gd")
 const WallShadow = preload("res://src/fx/wall_shadow.gd")
 const StaticBatch = preload("res://core/static_batch.gd")
+const NavField = preload("res://core/nav_field.gd")
+const LevelDeath = preload("res://core/death_field.gd")
 const FOLD_EYE_RISE := 0.33 # Matches the duelist arena's eye-height offset in world units.
 
 const PAL_MOB := {"tag": "mob", "accent": Color(0.30, 1.0, 0.72), "tint": Color(0.80, 0.92, 1.02),
@@ -25,6 +27,10 @@ const LEVELS := [{"kind": "chamber"}]
 var index := 0
 var arena: Dictionary = {}
 var arena_node: Node3D
+## 导航元信息（core/nav_field.gd）：区域+线+障碍棱柱，纯数据/解析。
+var nav: RefCounted
+## 刀的解析地形（core/level_geometry.gd）：arena 元信息生成的凸体。
+var geometry: RefCounted
 var enemies: Array = []
 var archers: Array = []
 var player: PlayerUnit
@@ -52,7 +58,8 @@ func start_level(idx: int) -> void:
 		_clear_arena()
 		_clear_enemies()
 		arena = ArenaKit.build(String(LEVELS[index]["kind"]), Vector3.ZERO)
-		PlayerBladeTerrain.install_arena_walls(arena)
+		nav = NavField.build(arena, ArenaKit.nav_spec(arena))
+		geometry = LevelGeometry.build(arena)
 		arena_node = arena["node"]
 		add_child(arena_node)
 		StaticBatch.apply(arena_node)
@@ -79,6 +86,7 @@ func start_level(idx: int) -> void:
 			projectiles.clear_all()
 	else:
 		_spawn_enemies()
+	LevelDeath.install(self)
 	total_enemies = enemies.size()
 	state = "intro"
 	state_t = 0.0
@@ -170,6 +178,42 @@ func alive_count() -> int:
 func context() -> Dictionary:
 	return {"player": player, "ray": player, "cam": cam, "arena": arena,
 		"enemies": enemies, "archers": archers, "projectiles": projectiles}
+
+
+# ------------------------------------------------------------------ 导航
+## 怪物移动/视线全部走 nav_field 的元信息（不再碰物理空间）。
+const NAV_SENTINEL_RADIUS := 1.20
+const NAV_SENTINEL_STEP := 0.38
+const NAV_SENTRY_RADIUS := 1.58
+const NAV_SENTRY_STEP := 0.37
+
+
+func melee_clear(a: Vector3, b: Vector3) -> bool:
+	return nav == null or nav.segment_clear(a, b)
+
+
+func sentinel_ground_move(from: Vector3, goal: Vector3) -> Vector3:
+	return nav.move_slide(from, goal, NAV_SENTINEL_RADIUS,
+		NAV_SENTINEL_STEP, NAV_SENTINEL_STEP)
+
+
+func sentinel_support_floor(at: Vector3) -> float:
+	var support: float = nav.rest_at(at, at.y + 0.04)
+	return support if support > -INF * 0.5 else 0.0
+
+
+func sentinel_waypoint(from: Vector3, goal: Vector3) -> Vector3:
+	return nav.next_waypoint(from, goal, NAV_SENTINEL_RADIUS, NAV_SENTINEL_STEP)
+
+
+func sentry_ground_move(from: Vector3, goal: Vector3) -> Vector3:
+	return nav.move_supported(from, goal, NAV_SENTRY_RADIUS,
+		NAV_SENTRY_STEP, NAV_SENTRY_STEP)
+
+
+func duelist_floor(at: Vector3, ceiling: float) -> float:
+	var support: float = nav.support_at(at, ceiling)
+	return support if support > -INF * 0.5 else 0.0
 
 
 func step(dt: float, ctx: Dictionary) -> void:

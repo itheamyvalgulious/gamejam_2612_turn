@@ -1,19 +1,21 @@
 extends RefCounted
 ## Sweep a held blade against level geometry, then yield at the grip.
 ## Pose and collision always use the same hilt and blade axis.
+##
+## 纯解析实现：地形判定走 LevelGeometry（arena 元信息生成的凸体 + GJK），
+## 本文件不再出现 PhysicsDirectSpaceState / ShapeQuery / 碰撞层。
 
-const TERRAIN_MASK := 1
+const LevelGeometry = preload("res://core/level_geometry.gd")
+
 const RECOVERY_TIME := 0.50
 const SKIN := 0.025
-const SWEEP_STEP := 0.12
+const CAPSULE_RADIUS := 0.085        # 无 blade_proxy 时的外接胶囊半径（旧行为）
 
 var impact: Dictionary = {}
 var recovering: bool:
 	get:
 		return _age < RECOVERY_TIME
 
-var _query := PhysicsShapeQueryParameters3D.new()
-var _shape := CapsuleShape3D.new()
 var _span := Vector2.ZERO
 var _previous := Transform3D.IDENTITY
 var _initialized := false
@@ -25,12 +27,6 @@ var _fold := Vector3.ZERO
 var _last_strike := -1
 
 
-func _init() -> void:
-	_query.shape = _shape
-	_query.collision_mask = TERRAIN_MASK
-	_query.margin = 0.012
-
-
 func reset() -> void:
 	_initialized = false
 	_age = RECOVERY_TIME
@@ -38,20 +34,32 @@ func reset() -> void:
 	impact.clear()
 
 
-func advance(space: PhysicsDirectSpaceState3D, authored: Transform3D, span: Vector2,
-		shoulder: Vector3, dt: float, strike := -1) -> Transform3D:
+## geometry: LevelGeometry（arena 元信息建的解析地形）。
+## proxy: 可选 BladeProxy；给定时按真实凸体块判定，缺省退回外接胶囊。
+func advance(geometry, authored: Transform3D, span: Vector2,
+		shoulder: Vector3, dt: float, strike := -1, proxy = null) -> Transform3D:
 	impact.clear()
 	var scale := authored.basis.get_scale()
 	_span = span * scale.y
-	_shape.radius = 0.085 * scale.x
-	_shape.height = _span.y - _span.x + 2.0 * _shape.radius
 	var desired := authored.orthonormalized()
+	if geometry == null:
+		_previous = desired
+		_initialized = true
+		_age = minf(_age + dt, RECOVERY_TIME)
+		desired.basis = desired.basis.scaled_local(scale)
+		return desired
+	var pieces := _scaled_pieces(proxy, span, scale)
+	var radius := 0.0
+	if pieces.is_empty():
+		# proxy 缺失或所有块都被 span 滤掉：退回旧胶囊，刀不能空判。
+		pieces = [{"v": _capsule_piece(span, scale)}]
+		radius = CAPSULE_RADIUS * scale.x
 	if not _initialized:
 		_previous = desired
 		_initialized = true
 	_age = minf(_age + dt, RECOVERY_TIME)
 	var target := _recovery(desired) if recovering else desired
-	var incoming := _sweep(space, _previous, target)
+	var incoming := _sweep(geometry, _previous, target, pieces, radius, desired.origin - _previous.origin)
 	var pose: Transform3D = incoming["pose"]
 	if incoming.has("point") and not recovering and strike >= 0 and strike != _last_strike:
 		_last_strike = strike
@@ -71,13 +79,13 @@ func advance(space: PhysicsDirectSpaceState3D, authored: Transform3D, span: Vect
 		impact = {"point": point, "normal": _normal, "incidence": incidence,
 			"strength": clampf(maxf(-travel.dot(_normal), tangent.length() * 0.2) / 6.0, 0.2, 1.0)}
 	elif incoming.has("point"):
-		if not _contact(space, pose).is_empty():
+		if not _contact(geometry, pose, pieces, radius).is_empty():
 			# A reset or a moving support can start inside a collider.
-			pose = _clear_overlap(space, pose, shoulder)
-		elif not recovering and not _contact(space, target).is_empty():
+			pose = _clear_overlap(geometry, pose, shoulder, pieces, radius)
+		elif not recovering and not _contact(geometry, target, pieces, radius).is_empty():
 			# If idle carry is obstructed, tuck the hilt while the actor keeps moving.
-			var tucked := _clear_overlap(space, target, shoulder)
-			pose = _sweep(space, pose, tucked)["pose"]
+			var tucked := _clear_overlap(geometry, target, shoulder, pieces, radius)
+			pose = _sweep(geometry, pose, tucked, pieces, radius, tucked.origin - pose.origin)["pose"]
 	_previous = pose
 	pose.basis = pose.basis.scaled_local(scale)
 	return pose
@@ -98,46 +106,62 @@ func _recovery(desired: Transform3D) -> Transform3D:
 	return pose
 
 
-func _sweep(space: PhysicsDirectSpaceState3D, from: Transform3D, to: Transform3D) -> Dictionary:
+## 把 blade_proxy 的 piece 顶点预乘缩放（authored 是带尺度的变换，
+## sweep/接触都用去尺度正交 pose，所以顶点要自己带缩放）。
+## 无 proxy 时退回旧胶囊：跨度 [span.x, span.y]、半径 CAPSULE_RADIUS。
+func _scaled_pieces(proxy, span: Vector2, scale: Vector3) -> Array:
+	if proxy == null or proxy.pieces.is_empty():
+		return []
+	var out: Array = []
+	for piece in proxy.pieces:
+		# 只取与刀身 span 重叠的块：柄件/护手在 span.x 之下，旧胶囊判定时
+		# 就不算刀身 —— 不然贴地收刀时护手会先撞地。
+		var ab: AABB = piece["aabb"]
+		if ab.position.y > span.y or ab.end.y < span.x:
+			continue
+		var v := PackedVector3Array()
+		for p: Vector3 in piece["v"]:
+			v.append(p * scale)
+		out.append({"v": v})
+	return out
+
+
+## 胶囊轴心段（两点凸包）+ CAPSULE_RADIUS → 等价旧 CapsuleShape3D 判定。
+static func _capsule_piece(span: Vector2, scale: Vector3) -> PackedVector3Array:
+	return PackedVector3Array([
+		Vector3(0.0, span.x, 0.0) * scale,
+		Vector3(0.0, span.y, 0.0) * scale])
+
+
+func _sweep(geometry, from: Transform3D, to: Transform3D, pieces: Array,
+		radius: float, hint: Vector3) -> Dictionary:
 	# Subdivide both rotation and translation so a sword rotating around a stationary
 	# hand can still hit a thin railing, even on a low frame rate.
-	var rotation := from.basis.get_rotation_quaternion().angle_to(to.basis.get_rotation_quaternion())
-	var travel := from.origin.distance_to(to.origin) + rotation * _span.y
-	var steps := clampi(ceili(travel / SWEEP_STEP), 1, 80)
-	var clear := from
-	for i in range(1, steps + 1):
-		var next := from.interpolate_with(to, float(i) / steps)
-		var hit := _contact(space, next)
-		if hit.is_empty():
-			clear = next
-			continue
-		for _refinement in 5:
-			var middle := clear.interpolate_with(next, 0.5)
-			if _contact(space, middle).is_empty():
-				clear = middle
-			else:
-				next = middle
-		return {"pose": clear, "normal": hit["normal"], "point": hit["point"]}
-	return {"pose": to}
+	var result: Dictionary = geometry.sweep_blade(from, to, pieces, radius, _span.y, hint)
+	var out := {"pose": result["pose"]}
+	if result.has("point"):
+		out["point"] = result["point"]
+		out["normal"] = result["normal"]
+	return out
 
 
-func _contact(space: PhysicsDirectSpaceState3D, pose: Transform3D) -> Dictionary:
-	_query.transform = Transform3D(pose.basis, pose * (Vector3.UP * (_span.x + _span.y) * 0.5))
-	return space.get_rest_info(_query)
+func _contact(geometry, pose: Transform3D, pieces: Array, radius: float) -> Dictionary:
+	return geometry.contact_at(LevelGeometry._world_pieces(pose, pieces), radius)
 
 
-func _clear_overlap(space: PhysicsDirectSpaceState3D, pose: Transform3D, shoulder: Vector3) -> Transform3D:
+func _clear_overlap(geometry, pose: Transform3D, shoulder: Vector3,
+		pieces: Array, radius: float) -> Transform3D:
 	var tuck := pose
 	tuck.origin = pose.origin.lerp(shoulder, 0.48)
 	var up := pose.basis.y.cross(Vector3.UP).normalized()
 	for turn: float in [0.0, 0.32, 0.64, 1.05, 1.57]:
 		tuck.basis = Basis(up, turn) * pose.basis if not up.is_zero_approx() else pose.basis
-		var hit := _contact(space, tuck)
+		var hit := _contact(geometry, tuck, pieces, radius)
 		if hit.is_empty():
 			return tuck
 		var normal: Vector3 = hit["normal"]
 		var clear := tuck
 		clear.origin += normal * (0.20 + SKIN)
-		if _contact(space, clear).is_empty():
+		if _contact(geometry, clear, pieces, radius).is_empty():
 			return clear
 	return pose

@@ -145,23 +145,8 @@ func counter_in_view(observer: Camera3D) -> bool:
 
 
 func hit_parts() -> Array:
-	var axle: Vector3 = rig.wheel.global_position
-	var wheel_axis: Vector3 = rig.wheel_frame.global_basis.z
-	var parts: Array = [
-		{"a": rig.turret.to_global(Vector3(0, 0.24, -0.83)),
-			"b": rig.turret.to_global(Vector3(0, 0.25, 0.75)), "r": 0.61, "label": "turret"},
-		{"a": axle - Vector3.UP * 0.67, "b": axle + Vector3.UP * 0.65, "r": 0.62, "label": "wheel"},
-		{"a": axle - wheel_axis * 0.70, "b": axle + wheel_axis * 0.70, "r": 0.61, "label": "wheel"},
-		{"a": rig.turret.to_global(Vector3(0, -0.07, -1.31)),
-			"b": rig.turret.to_global(Vector3(0, 0.40, -1.30)), "r": 0.29, "label": "optic"},
-	]
-	for support: Dictionary in rig._supports:
-		var shoe: Node3D = support["shoe"]
-		if shoe.position.y < -1.1:
-			parts.append({"a": shoe.to_global(Vector3(0, -0.09, -0.22)),
-				"b": shoe.to_global(Vector3(0, -0.09, 0.13)), "r": 0.21,
-				"label": "shoe_left" if support["side"] < 0.0 else "shoe_right"})
-	return parts
+	# 多圆柱体机身判定：按关节拟合、完全包含网格顶点（verify_body_parts.gd）。
+	return rig.body_colliders()
 
 
 func status_text() -> String:
@@ -494,20 +479,20 @@ func _fire_beam() -> void:
 	rig.set_attack_charge(1.0 - phase_age / BEAM_DURATION, true)
 	if _beam_hit or not player.alive or player.invuln > 0.0:
 		return
-	var cap := player.capsule()
 	var from: Vector3 = beam.start
 	var direction: Vector3 = beam.direction
 	var limit: float = beam.obstruction_distance
 	if limit <= 0.0:
 		return
 	var end_at: Vector3 = beam.end
+	var parts: Array = player.rig.hit_parts() if player.rig != null and player.rig.has_method("hit_parts") else []
 	if not is_finite(limit):
-		# Test far enough to cover the target capsule, even past the visual mesh.
-		var a: Vector3 = cap["a"]
-		var b: Vector3 = cap["b"]
-		var reach := maxf((a - from).dot(direction), (b - from).dot(direction))
-		end_at = from + direction * maxf(reach, 0.0)
-	var impact := Hit.sweep_sphere(from, end_at, beam.radius, cap["a"], cap["b"], cap["r"])
+		# Test far enough to cover the target body, even past the visual mesh.
+		var reach := 0.0
+		for p: Dictionary in parts:
+			reach = maxf(reach, maxf((p["a"] - from).dot(direction), (p["b"] - from).dot(direction)))
+		end_at = from + direction * reach
+	var impact := Hit.sweep_sphere_parts(from, end_at, beam.radius, parts)
 	if not impact.get("hit", false):
 		return
 	var contact: Vector3 = impact["point"]
@@ -604,7 +589,7 @@ func hurt_by_blade(amount: float, normal: Vector3, knock: float, travel: Vector3
 		var on_turret: Vector3 = rig.turret.to_local(point)
 		if part == "turret" and on_turret.z < -1.10 and absf(on_turret.x) < 0.40:
 			part = "optic"
-		_fatal_contact = {"point": point, "force": force, "part": part}
+		_fatal_contact = {"point": point, "force": force, "part": part, "travel": travel}
 	hurt(amount, normal, knock)
 
 
@@ -616,15 +601,22 @@ func die() -> void:
 	rig.set_attack_charge(0.0, false)
 	var point: Vector3 = _fatal_contact.get("point", center())
 	var force: Vector3 = _fatal_contact.get("force", Vector3.ZERO)
-	_knockdown = Knockdown.new()
-	var supports := smoothstep(0.0, 0.78, float(rig.deployment))
-	_knockdown.begin(rig, arena, point, force, _fatal_contact.get("part", ""), _wheel_speed, supports)
+	# 新物理死亡：DeathField 切割 ragdoll；旧 knockdown 路径保留做独立场景回退。
+	var field: Object = level.get_meta(&"death_field") if level != null else null
+	if field != null and not get_meta(&"death_done", false):
+		set_meta(&"death_done", true)
+		field.enemy_died(self, {"contact": point,
+			"travel": _fatal_contact.get("travel", force)})
+	else:
+		_knockdown = Knockdown.new()
+		var supports := smoothstep(0.0, 0.78, float(rig.deployment))
+		_knockdown.begin(rig, arena, point, force, _fatal_contact.get("part", ""), _wheel_speed, supports)
 	if level != null:
 		level.on_enemy_died(self)
 
 
 func advance_fatal_reaction(dt: float, rate: float) -> void:
-	if _knockdown == null or dt <= 0.0:
+	if _knockdown == null or dt <= 0.0 or not is_instance_valid(rig):
 		return
 	if is_zero_approx(_knockdown.age):
 		Fx.spark(_fatal_contact.get("point", center()), _knockdown.force, 1.72)
@@ -659,10 +651,12 @@ func _exit_tree() -> void:
 func hud_alert(target: PlayerUnit) -> bool:
 	if phase != Phase.CHARGE or phase_age < BEAM_CHARGE - 0.55 or not is_instance_valid(beam):
 		return false
-	var cap := target.capsule()
+	var parts: Array = target.rig.hit_parts() if target.rig != null and target.rig.has_method("hit_parts") else []
 	var stop: Vector3 = beam.end
 	if not is_finite(beam.obstruction_distance):
-		var edge: Vector3 = cap["b"]
-		stop = beam.start + beam.direction * (edge.distance_to(beam.start) + float(cap["r"]))
-	var hit := Hit.sweep_sphere(beam.start, stop, beam.radius, cap["a"], cap["b"], cap["r"])
+		var reach := 0.0
+		for p: Dictionary in parts:
+			reach = maxf(reach, (p["b"] - beam.start).length() + float(p["r"]))
+		stop = beam.start + beam.direction * reach
+	var hit := Hit.sweep_sphere_parts(beam.start, stop, beam.radius, parts)
 	return hit.get("hit", false)

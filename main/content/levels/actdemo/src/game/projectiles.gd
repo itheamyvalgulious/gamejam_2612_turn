@@ -131,8 +131,8 @@ func step(dt: float, ctx: Dictionary) -> Array:
 
 		# ---------------- 命中玩家
 		if String(it["owner"]) == "enemy" and not bool(it["spent"]) and player != null and player.alive:
-			var cap: Dictionary = player.capsule()
-			var res: Dictionary = Hit.sweep_sphere(prev, pos, float(it["radius"]), cap["a"], cap["b"], cap["r"])
+			var res: Dictionary = Hit.sweep_sphere_parts(prev, pos, float(it["radius"]),
+				player.rig.hit_parts() if player.rig != null and player.rig.has_method("hit_parts") else [])
 			if bool(res.get("hit", false)):
 				player.hurt(float(it["damage"]), res.get("normal", Vector3.UP),
 					"被箭射穿" if String(it["kind"]) == "arrow" else "被刀气切开")

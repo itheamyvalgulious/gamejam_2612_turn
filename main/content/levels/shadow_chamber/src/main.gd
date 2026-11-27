@@ -246,7 +246,7 @@ func _process(delta: float) -> void:
 	if fold != null and player.alive:
 		fold.block_player_motion(player, player.rig.global_position)
 	if player.alive:
-		player.blade_terrain.advance_player(player.rig, dt, player.swing_serial, Snd, Fx)
+		player.blade_terrain.advance_player(player.rig, dt, player.swing_serial, Snd, Fx, level.get("geometry"))
 	var p_events := Combat.player_swing(player, level.enemies, cam, level.arena.get("walls", []))
 	for ev in p_events:
 		_on_combat_event(ev)
