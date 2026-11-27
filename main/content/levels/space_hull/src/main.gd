@@ -186,8 +186,8 @@ func _unhandled_input(event: InputEvent) -> void:
 					st.set_online(next)
 				hud.show_banner("防空火力", "全部离线（初稿预览）" if not next else "全部上线", 1.2)
 			return
-		if event.keycode == KEY_F7:
-			# 初稿调试：按 F7 依次跳到下一个检查点，省得每次从实验室重走
+		if event.keycode == KEY_F10:
+			# 初稿调试：按 F10 依次跳到下一个检查点，省得每次从实验室重走
 			if not _cps.is_empty():
 				_cp = (_cp + 1) % _cps.size()
 				var cp: Dictionary = _cps[_cp]
