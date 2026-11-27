@@ -20,6 +20,34 @@ func _ready() -> void:
 		var bench := preload("res://tools/bench.gd").new()
 		bench.name = "BenchDriver"
 		get_tree().root.add_child.call_deferred(bench)
+	if "--play-bench" in OS.get_cmdline_user_args():
+		var play_bench := preload("res://tools/play_bench.gd").new()
+		play_bench.name = "PlayBenchDriver"
+		get_tree().root.add_child.call_deferred(play_bench)
+	if "--blade-terrain-check" in OS.get_cmdline_user_args():
+		var btc := preload("res://tools/blade_terrain_check.gd").new()
+		btc.name = "BladeTerrainCheckDriver"
+		get_tree().root.add_child.call_deferred(btc)
+	if "--repro" in OS.get_cmdline_user_args():
+		var repro = load("res://tools/repro.gd").new()
+		repro.name = "ReproDriver"
+		get_tree().root.add_child.call_deferred(repro)
+	if "--repro-stab" in OS.get_cmdline_user_args():
+		var repro_stab = load("res://tools/repro_stab.gd").new()
+		repro_stab.name = "ReproStab"
+		get_tree().root.add_child.call_deferred(repro_stab)
+	if "--repro3" in OS.get_cmdline_user_args():
+		var repro3 = load("res://tools/repro3.gd").new()
+		repro3.name = "Repro3"
+		get_tree().root.add_child.call_deferred(repro3)
+	if "--repro2" in OS.get_cmdline_user_args():
+		var repro2 = load("res://tools/repro2.gd").new()
+		repro2.name = "Repro2"
+		get_tree().root.add_child.call_deferred(repro2)
+	if "--verify-body" in OS.get_cmdline_user_args():
+		var verifier = load("res://tools/verify_body_parts.gd").new()
+		verifier.name = "VerifyBodyDriver"
+		get_tree().root.add_child.call_deferred(verifier)
 	theme = Style.theme()
 	ThemeDB.fallback_font = theme.default_font
 	_selected = TurnSession.selected_level_index
@@ -102,16 +130,21 @@ func _show_home() -> void:
 		checkpoint_label.position = Vector2(27, 73)
 		actions.add_child(checkpoint_label)
 	var settings := Style.button("设置", TurnSession.open_home_settings)
+	var minimize := Style.minimize_button(TurnSession.minimize_window)
 	var exit := Style.button("退出游戏", get_tree().quit)
 	var settings_box := Rect2(244, 117, 130, 49) if primary != level_select else Rect2(28, 105, 154, 49)
 	_place_action(actions, settings, settings_box)
-	_place_action(actions, exit, Rect2(56, 174, 155, 47))
+	_place_action(actions, minimize, Rect2(56, 174, 155, 47))
+	_place_action(actions, exit, Rect2(224, 182, 155, 47))
+	minimize.focus_neighbor_right = minimize.get_path_to(exit)
+	exit.focus_neighbor_left = exit.get_path_to(minimize)
+	settings.focus_neighbor_bottom = settings.get_path_to(minimize if primary == level_select else exit)
 	primary.focus_neighbor_bottom = primary.get_path_to(settings if primary == level_select else level_select)
 	if primary != level_select:
 		level_select.focus_neighbor_top = level_select.get_path_to(primary)
 		level_select.focus_neighbor_right = level_select.get_path_to(settings)
 		settings.focus_neighbor_left = settings.get_path_to(level_select)
-		level_select.focus_neighbor_bottom = level_select.get_path_to(exit)
+		level_select.focus_neighbor_bottom = level_select.get_path_to(minimize)
 	_add_status(column)
 	primary.grab_focus()
 
@@ -182,9 +215,13 @@ func _show_catalog() -> void:
 	preview.add_child(_description)
 	_enter = Style.button("进入关卡", _enter_level)
 	_enter.custom_minimum_size.x = 176
-	_enter.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_enter.add_theme_stylebox_override("normal", Style.primary_surface())
-	preview.add_child(_enter)
+	var actions := HBoxContainer.new()
+	actions.alignment = BoxContainer.ALIGNMENT_END
+	actions.add_theme_constant_override("separation", 12)
+	preview.add_child(actions)
+	actions.add_child(Style.minimize_button(TurnSession.minimize_window))
+	actions.add_child(_enter)
 	for row in _rows:
 		row.focus_neighbor_right = row.get_path_to(_enter)
 	_add_status(column)

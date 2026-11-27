@@ -18,6 +18,19 @@ const Gpu := preload("res://hangar/src/arena/hangar_gpu.gd")
 const U := 1.0 / 0.547
 const BALL := 1.2
 
+## 导航元信息：船坞 —— 地面矩形 + platforms 顶面（机翼/台架/轿厢等）；
+## 障碍 = cover 圆棱柱（机身/柱/柜/井道围护）+ 边界与内墙棱柱。
+## 活动电梯：nav 只登记其静止层平台，运动中不走 nav（本关无敌人）。
+static func nav_spec(_arena: Dictionary) -> Dictionary:
+	return {
+		"floor_margin": 0.4 * U,
+		"walls_obstacles": true,
+		"walls_sight": true,
+		"cover_obstacles": true,
+		"cover_shrink": BALL,
+		"platforms": true,
+	}
+
 # ---------------- 主厅 ----------------
 const HX := 38.0
 const HZ := 34.0
@@ -983,7 +996,7 @@ static func _lights(root: Node3D) -> void:
 	s1.spot_range = 42.0 * U
 	s1.spot_angle = 46.0
 	s1.rotation_degrees = Vector3(-90.0, 18.0, 0.0)
-	s1.shadow_enabled = true
+	s1.shadow_enabled = false   # 顶灯只做照明；阴影由主光提供（省 GPU）
 	root.add_child(s1)
 
 

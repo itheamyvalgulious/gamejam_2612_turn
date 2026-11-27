@@ -273,16 +273,19 @@ def services(prefix, autoloads):
         service_type = f"Turn{prefix}{key}Service"
         declarations.append(f"static var {field}: {service_type}")
         init.extend((f"\t{field} = {service_type}.new()", f"\troot.add_child({field})"))
-        dispose.extend((f"\t{field}.free()", f"\t{field} = null"))
-    disposal = [line for i in range(len(dispose) - 2, -1, -2) for line in dispose[i:i+2]]
+        # Detaching runs _exit_tree, allowing audio services to join their
+        # prewarm thread before Godot destroys the node.
+        dispose.append((f"\t{field}.get_parent().remove_child({field})",
+                        f"\t{field}.queue_free()", f"\t{field} = null"))
+    disposal = [line for block in reversed(dispose) for line in block]
     return "\n".join((f"class_name Turn{prefix}Services", "extends RefCounted", "",
                      *declarations, "", "", "static func start(root: Node) -> void:", *init,
                      "", "", "static func stop() -> void:", *disposal, ""))
 
 
 def build():
-    generated: dict[Path, bytes] = pack_designs(ENEMIES)
-    for relative, data in dependencies(VESPER, ["integration/campaign_rig.gd"]):
+    generated: dict[Path, bytes] = pack_designs(ENEMIES, MAIN)
+    for relative, data in dependencies(VESPER, ["integration/campaign_rig.gd"], MAIN):
         if isinstance(data, str):
             data = RESOURCE_PATH.sub(
                 lambda match: "res://runtime/" + (VESPER_RUNTIME / match[1]).as_posix(),

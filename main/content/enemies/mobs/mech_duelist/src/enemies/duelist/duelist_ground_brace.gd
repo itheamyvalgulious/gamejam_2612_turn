@@ -86,6 +86,9 @@ static func _pose_feet(model, body: Node3D, t: float, compression: float, blend:
 			target.origin = (foot.transform * TOE_CONTACT).lerp(planted, step) - target.basis * _toe_offset(compression)
 			target.origin.y += sin(PI * step) * 0.115
 			bend = Vector3(-0.14, 0, -1).lerp(Vector3(-0.23, -1, -0.02), compression)
+		if model.ground_sampler.is_valid():
+			var frame: Transform3D = model.global_transform
+			target = frame.affine_inverse() * (model.keep_sole_above_floor(frame * target) as Transform3D)
 		targets.append(target)
 		bends.append(bend_start.lerp(bend, blend))
 
@@ -126,6 +129,10 @@ static func _pose_support_arm(model, arm: Dictionary, t: float, palm_turn: float
 	var wrist_start := wrist.basis
 	var reach := smoothstep(0.23, 0.96, t)
 	var hand := wrist.position.lerp(SUPPORT_HAND, reach)
+	if model.ground_sampler.is_valid():
+		var contact: Vector3 = model.to_global(SUPPORT_HAND)
+		contact.y = model.floor_height(contact) + 0.038 * model.scale.y
+		hand += (model.to_local(contact) as Vector3 - SUPPORT_HAND) * palm_turn
 	var pole := _joint_pole(arm["shoulder"], arm["elbow"], wrist).lerp(Vector3(-0.78, 0.30, 0.35), reach)
 	var shoulder: Vector3 = model.shoulder_anchor(arm, hand)
 	IK.solve_chain(arm["shoulder"], arm["elbow"], wrist, shoulder, hand, pole, model.UPPER_ARM, model.FOREARM)

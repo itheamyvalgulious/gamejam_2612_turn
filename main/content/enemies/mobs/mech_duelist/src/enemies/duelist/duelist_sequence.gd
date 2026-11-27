@@ -19,12 +19,17 @@ const Units = preload("res://src/core/units.gd")
 const COMBO_PAUSE := 1.0
 const NORMAL_WINDUP_EXTENSION := 0.3
 const NORMAL_BREATHER := 0.82
+const STAIR_SPRINT_MIN := 5.85
+const STAIR_SWEEP_MIN := 3.72
+const STAIR_SPRINT_MAX := 9.4
+const STAIR_FLASH_CLEARANCE := 2.90
 const PURSUIT_SWEEP_COOLDOWN := 3.0
 const ATTACK_AT := Pace.DURATION + Brace.CONTACT_TIME + Charge.DURATION
 const RETURN_AT := ATTACK_AT + Lunge.DURATION
 const PATROL_AT := RETURN_AT + ReturnCut.HIT_END
 const END := RETURN_AT + ReturnCut.DURATION
 const ATTACK_RATE := 0.5
+const ROUTED_ENTRY_RATE := 1.30
 const SWING_RATE := 1.0
 const LINK_RATE := 2.0
 const SPRINT_FLASH_SECONDS := (Lunge.BURST_END - Lunge.BURST_START) / ATTACK_RATE
@@ -33,6 +38,8 @@ const LINK_END := Lunge.DURATION + ReturnCut.TRAIL_START
 const DASH_END_SECONDS := Lunge.BURST_END / ATTACK_RATE
 const LINK_START_SECONDS := DASH_END_SECONDS + (LINK_START - Lunge.BURST_END) / SWING_RATE
 const LINK_END_SECONDS := LINK_START_SECONDS + (LINK_END - LINK_START) / LINK_RATE
+const ROUTED_ENTRY_SECONDS := Lunge.BURST_END / ROUTED_ENTRY_RATE
+const ROUTED_ENTRY_SAVING := DASH_END_SECONDS - ROUTED_ENTRY_SECONDS
 
 var time := 0.0
 var dash: Dictionary = {}
@@ -50,6 +57,10 @@ var normal_time := 0.0
 var normal_serial := 0
 var normal_attack_rate := 1.0
 var normal_windup_extension := NORMAL_WINDUP_EXTENSION
+var climbing := false
+var seeking_level := false
+var stair_rush_ready := false
+var can_strike_from: Callable
 var _normal_cooldown := 0.0
 var _pursuit_sweep_cooldown := 0.0
 var _sweep_pending := false
@@ -70,6 +81,7 @@ var guarding: bool:
 	get:
 		return _guard_time < Guard.DURATION
 var _last_focus := Vector3.ZERO
+var _route_age := 0.0
 var _pace_elapsed := 0.0
 var _pace_reverse := false
 var _brace_from := Pace.DURATION
@@ -82,6 +94,7 @@ var _effects := AttackFX.new()
 var _afterimages := Afterimages.new()
 var _audio: AudioStreamPlayer3D
 var _sound_bus: Node
+var _recorded_audio: Node
 var _master_volume: Callable
 static var _charge_sound: AudioStreamWAV
 
@@ -89,12 +102,13 @@ static var _charge_sound: AudioStreamWAV
 func setup(actor: Node3D, pace_center: Vector3, cover: Array = [], bounds := AABB(),
 		sound_bus: Node = null, master_volume := Callable()) -> void:
 	_sound_bus = sound_bus if sound_bus != null else get_node_or_null("/root/Snd")
+	_recorded_audio = get_node_or_null("/root/TurnEnemyAudio")
 	_master_volume = master_volume
 	if not _master_volume.is_valid():
 		var params := get_node_or_null("/root/P")
 		if params != null:
 			_master_volume = params.getf.bind("audio.master")
-	patrol.audio = _sound_bus
+	patrol.footstep = play_sound
 	model = actor
 	center = pace_center
 	_cover = cover
@@ -116,9 +130,12 @@ func setup(actor: Node3D, pace_center: Vector3, cover: Array = [], bounds := AAB
 		_afterimages.setup(model)
 	if _audio == null:
 		_audio = AudioStreamPlayer3D.new()
-	if _charge_sound == null:
-		_charge_sound = Charge.make_sound()
-	_audio.stream = _charge_sound
+	var recording: AudioStream = _recorded_audio.stream("duelist", "charge") if _recorded_audio != null else null
+	if recording == null:
+		if _charge_sound == null:
+			_charge_sound = Charge.make_sound()
+		recording = _charge_sound
+	_audio.stream = recording
 	_audio.unit_size = 6.0
 	_audio.max_distance = 26.0
 	_audio.panning_strength = 0.82
@@ -130,6 +147,11 @@ func setup(actor: Node3D, pace_center: Vector3, cover: Array = [], bounds := AAB
 
 
 func seek(next_time: float, focus: Vector3) -> void:
+	if _recorded_audio != null:
+		_recorded_audio.stop_one_shots(self)
+	climbing = false
+	seeking_level = false
+	stair_rush_ready = false
 	_trail.clear()
 	_effects.clear_tip_sparks()
 	return_pose.clear()
@@ -181,6 +203,33 @@ func advance_pacing(dt: float, focus: Vector3, settle: bool) -> bool:
 	return true
 
 
+func begin_routed_opening() -> void:
+	# The finished low brace is the first frame of the run.
+	patrol.begin(model, 0.0, 0, model.sword_wrist_deviation())
+	patrol.route_burst = true
+	_route_age = 0.0
+	_afterimages.clear()
+
+
+func advance_routed_opening(dt: float, focus: Vector3, target: Vector3, clearance: float) -> void:
+	patrol.route_goal = target
+	patrol.route_clearance = clearance
+	patrol.advance(model, dt, focus, _cover, _bounds)
+	model.set_charge_state(Charge.DURATION, 0.45, 1.0)
+	_route_age += dt
+	_afterimages.route_pose(model, _route_age)
+
+
+func begin_routed_strike(focus: Vector3) -> void:
+	patrol.reset()
+	dash = Lunge.begin(model, focus, _cover)
+	dash["end"] = dash["origin"]
+	dash["route_cut"] = true
+	time = ATTACK_AT - 0.0001
+	_last_focus = focus
+	_afterimages.clear()
+
+
 func begin_guard() -> void:
 	if not guarding and sprint_windup < 0.0:
 		_guard_time = 0.0
@@ -198,17 +247,22 @@ func advance_guard(dt: float, focus: Vector3) -> void:
 	Guard.apply(model, _guard_time, focus, freedom)
 
 
-static func attack_seconds(clip_time: float) -> float:
+static func attack_seconds(clip_time: float, routed := false) -> float:
 	if clip_time <= Lunge.BURST_END:
-		return clip_time / ATTACK_RATE
+		return clip_time / (ROUTED_ENTRY_RATE if routed else ATTACK_RATE)
+	var saving := ROUTED_ENTRY_SAVING if routed else 0.0
 	if clip_time <= LINK_START:
-		return DASH_END_SECONDS + (clip_time - Lunge.BURST_END) / SWING_RATE
+		return DASH_END_SECONDS - saving + (clip_time - Lunge.BURST_END) / SWING_RATE
 	if clip_time <= LINK_END:
-		return LINK_START_SECONDS + (clip_time - LINK_START) / LINK_RATE
-	return LINK_END_SECONDS + (clip_time - LINK_END) / SWING_RATE
+		return LINK_START_SECONDS - saving + (clip_time - LINK_START) / LINK_RATE
+	return LINK_END_SECONDS - saving + (clip_time - LINK_END) / SWING_RATE
 
 
-static func _attack_clip_time(seconds: float) -> float:
+static func _attack_clip_time(seconds: float, routed := false) -> float:
+	if routed:
+		if seconds <= ROUTED_ENTRY_SECONDS:
+			return seconds * ROUTED_ENTRY_RATE
+		seconds += ROUTED_ENTRY_SAVING
 	if seconds <= DASH_END_SECONDS:
 		return seconds * ATTACK_RATE
 	if seconds <= LINK_START_SECONDS:
@@ -239,8 +293,9 @@ func advance(dt: float, focus: Vector3, rate := ATTACK_RATE) -> void:
 	var blade_before: Transform3D = model.weapon_spin.global_transform
 	var patrol_dt := 0.0
 	if attack_dt > 0.0:
-		var seconds := attack_seconds(maxf(before, 0.0)) + attack_dt * rate / ATTACK_RATE
-		var next_time := ATTACK_AT + _attack_clip_time(seconds)
+		var routed: bool = dash.get("route_cut", false)
+		var seconds := attack_seconds(maxf(before, 0.0), routed) + attack_dt * rate / ATTACK_RATE
+		var next_time := ATTACK_AT + _attack_clip_time(seconds, routed)
 		patrol_dt = maxf(0.0, next_time - maxf(time, PATROL_AT))
 		time = minf(next_time, END)
 	else:
@@ -251,14 +306,14 @@ func advance(dt: float, focus: Vector3, rate := ATTACK_RATE) -> void:
 	var t := time - ATTACK_AT
 	_update_slash_fx(before, t, blade_before)
 	if before < Lunge.FRONT_LAND and t >= Lunge.FRONT_LAND:
-		_play_sound("step", model.legs[0]["ankle"].global_position, {"gain": 0.75})
+		play_sound("step", model.legs[0]["ankle"].global_position, {"gain": 0.75})
 	if before < Lunge.TRAIL_START and t >= Lunge.TRAIL_START:
-		_play_sound("swing_heavy", model.weapon_spin.global_position, {"gain": 0.74})
+		play_sound("swing_heavy", model.weapon_spin.global_position, {"gain": 0.74})
 	var footfall := Lunge.DURATION + ReturnCut.RIGHT_LAND
 	if before < footfall and t >= footfall:
-		_play_sound("step", model.legs[1]["ankle"].global_position, {"gain": 0.65})
+		play_sound("step", model.legs[1]["ankle"].global_position, {"gain": 0.65})
 	if before < LINK_END and t >= LINK_END:
-		_play_sound("swing_light", model.weapon_spin.global_position, {"gain": 0.86})
+		play_sound("swing_light", model.weapon_spin.global_position, {"gain": 0.86})
 
 
 func _update_slash_fx(before: float, t: float, blade_before: Transform3D) -> void:
@@ -294,18 +349,33 @@ func _slash_ribbon(before: float, time_now: float, start: float, blade_before: T
 func _record_trail(dt: float, blade: Transform3D, tone: Color, reach: float) -> void:
 	var heel := blade * Vector3(-0.078, model.BLADE_START + 0.34, 0)
 	var crest := blade * Vector3(0.0, reach, 0.0)
+	if model.blade_effect_endpoint.is_valid():
+		if not model.blade_effect_endpoint.call(blade.origin, heel).is_equal_approx(heel):
+			_trail.tick(dt, false)
+			return
+		crest = model.blade_effect_endpoint.call(heel, crest)
 	_trail.record(dt, heel, crest, tone)
 
 
-func _play_sound(kind: String, at: Vector3, options: Dictionary) -> void:
-	if is_instance_valid(_sound_bus):
-		_sound_bus.play_at(kind, at, options)
+func break_terrain_trail() -> void:
+	_trail.clear()
+	_effects.clear_tip_sparks()
+
+
+func play_sound(kind: String, at: Vector3, options: Dictionary, cue := "") -> void:
+	if not is_instance_valid(_sound_bus):
+		return
+	var slot := kind if cue.is_empty() else cue
+	if _recorded_audio != null and _recorded_audio.play_at(self, "duelist", slot, kind, at, options, _sound_bus):
+		return
+	_sound_bus.play_at(kind, at, options)
 
 
 func sync_audio(paused: bool, rate := ATTACK_RATE) -> void:
 	var age := time - Pace.DURATION - Brace.CONTACT_TIME
 	var volume: float = _master_volume.call() if _master_volume.is_valid() else 1.0
-	if paused or age < 0.0 or age >= Charge.AUDIO_DURATION or volume <= 0.001:
+	var end := minf(Charge.AUDIO_DURATION, _audio.stream.get_length())
+	if paused or age < 0.0 or age >= end or volume <= 0.001:
 		if _audio.playing:
 			_audio.stop()
 		return
@@ -333,11 +403,12 @@ func _pose(focus: Vector3, before := -1.0, velocity := Vector3.ZERO, patrol_dt :
 			dash = Lunge.begin(model, focus, _cover)
 		var previous := model.position
 		var path_position := previous
-		if before < Lunge.BURST_END:
+		if before < Lunge.BURST_END and not dash.get("route_cut", false):
 			path_position = Lunge.track_target(dash, focus, velocity, previous, before, minf(attack_time, Lunge.BURST_END))
+			path_position = model.attack_step(previous, path_position)
 		if attack_time >= Lunge.DURATION:
 			if return_pose.is_empty():
-				Lunge.apply(model, dash, Lunge.DURATION)
+				Lunge.apply(model, dash, Lunge.DURATION, path_position)
 				return_pose = ReturnCut.begin(model, dash["watch"])
 			if time >= PATROL_AT:
 				if not patrol.active:
@@ -392,9 +463,21 @@ func _advance_patrol(dt: float, focus: Vector3) -> void:
 	_normal_cooldown = maxf(0.0, _normal_cooldown - dt)
 	var ready := not guarding and _normal_cooldown == 0.0 and patrol.moving
 	var sweep_ready := _pursuit_sweep_cooldown == 0.0
-	var close_ready := DoubleCut.can_start(model, focus)
-	var sweep_in_range := sweep_ready and PursuitSweep.can_start(model, focus, PursuitSweep.PREP_RANGE)
-	if not sweep_in_range or _retreat_time >= 0.15:
+	var close_ready := not seeking_level and DoubleCut.can_start(model, focus)
+	var sweep_in_range := not seeking_level and sweep_ready and PursuitSweep.can_start(model, focus, PursuitSweep.PREP_RANGE)
+	if climbing:
+		# Preserve the distance of the selected entry until the support foot is down.
+		var gap := ((focus - model.global_position) as Vector3).slide(Vector3.UP).length()
+		_sprint_pending = stair_rush_ready and gap > STAIR_SPRINT_MIN \
+			and SprintSlash.can_start(model, focus, STAIR_SPRINT_MAX)
+		_sweep_pending = sweep_in_range and gap >= STAIR_SWEEP_MIN
+		if _sprint_pending or _sweep_pending:
+			patrol.route_clearance = gap
+		patrol.press_range = 0.0
+	elif seeking_level:
+		_sprint_pending = false
+		_sweep_pending = false
+	elif not sweep_in_range or _retreat_time >= 0.15:
 		_sweep_pending = false
 	elif not close_ready:
 		_sweep_pending = true
@@ -406,13 +489,15 @@ func _advance_patrol(dt: float, focus: Vector3) -> void:
 	if normal_serial == 0:
 		var heat := 1.0 - smoothstep(0.0, Patrol.RECOVERY, patrol.recovery_age)
 		model.set_charge_state(Charge.DURATION + 0.86, heat, heat)
-	if not ready or not patrol.landed:
+	if not can_strike or not patrol.landed:
 		return
 	if not patrol.left_can_support(model):
 		patrol.advance(model, remainder, focus, _cover, _bounds)
 		return
 	if _sprint_pending:
 		var reach := SprintSlash.RETREAT_PREP_RANGE if _retreat_time >= 0.15 else SprintSlash.FIRST_CUT_RANGE
+		if climbing:
+			reach = STAIR_SPRINT_MAX
 		if SprintSlash.can_start(model, focus, reach):
 			_sprint_entry = SprintSlash.begin_ready(model, focus, _cover, _bounds)
 			sprint_windup = 0.0
@@ -424,7 +509,7 @@ func _advance_patrol(dt: float, focus: Vector3) -> void:
 	elif sweep_ready and PursuitSweep.can_start(model, focus) and (_sweep_pending
 			or not DoubleCut.can_start(model, focus) or (normal_serial > 0 and normal_move == DoubleCut)):
 		normal_move = PursuitSweep
-	elif patrol.motion != Patrol.Step.BRAKE and DoubleCut.can_start(model, focus):
+	elif not seeking_level and (climbing or patrol.motion != Patrol.Step.BRAKE) and DoubleCut.can_start(model, focus):
 		normal_move = DoubleCut
 	else:
 		patrol.advance(model, remainder, focus, _cover, _bounds)
@@ -455,9 +540,14 @@ func _advance_sprint_entry(dt: float, focus: Vector3) -> void:
 			return
 		dt -= spent
 		var root := model.global_transform
-		var path := Lunge.begin_path(root.origin, model.global_rotation.y, root.basis.get_scale().x, focus, _cover)
-		var landing := DoubleCut._inside(path["end"], _bounds)
+		var on_lane: bool = model.has_attack_lane(root.origin)
+		var clearance := STAIR_FLASH_CLEARANCE if on_lane else Lunge.TARGET_CLEARANCE
+		var path := Lunge.begin_path(root.origin, model.global_rotation.y, root.basis.get_scale().x,
+			focus, _cover, clearance)
+		var landing: Vector3 = model.attack_step(root.origin, DoubleCut._inside(path["end"], _bounds))
 		if landing.distance_squared_to(root.origin) < pow(SprintSlash.MIN_FLASH_DISTANCE, 2):
+			if _cancel_blocked_sprint(focus):
+				return
 			DoubleCut.place_steps(model, _sprint_entry, focus, _cover, _bounds)
 			_start_sprint_cut(SprintSlash.READY_CLIP, dt, focus)
 			return
@@ -474,10 +564,9 @@ func _advance_sprint_entry(dt: float, focus: Vector3) -> void:
 	_sprint_flash_age += elapsed
 	var clock := minf(Lunge.BURST_END, Lunge.BURST_START + _sprint_flash_age * ATTACK_RATE)
 	var previous: Vector3 = model.global_position
-	previous.y = (_sprint_flash["origin"] as Vector3).y
 	var velocity := (focus - (_sprint_flash["watch"] as Vector3)).slide(Vector3.UP) / dt
 	var next := Lunge.track_target(_sprint_flash, focus, velocity, previous, before, clock)
-	next = DoubleCut._inside(next, _bounds)
+	next = model.attack_step(previous, DoubleCut._inside(next, _bounds))
 	_sprint_entry["focus"] = focus
 	_pose_sprint_flash(clock, next)
 	_afterimages.capture(model, before, clock, previous, next, _pose_sprint_flash)
@@ -485,14 +574,28 @@ func _advance_sprint_entry(dt: float, focus: Vector3) -> void:
 	if _sprint_flash_age >= SPRINT_FLASH_SECONDS:
 		_sprint_ghost_age = 0.0
 		_sprint_flash.clear()
-		_start_sprint_cut(SprintSlash.FLASH_READY_CLIP, dt - elapsed, focus)
+		if not _cancel_blocked_sprint(focus):
+			_start_sprint_cut(SprintSlash.FLASH_READY_CLIP, dt - elapsed, focus)
+
+
+func _cancel_blocked_sprint(focus: Vector3) -> bool:
+	if not model.has_attack_lane(model.global_position) or not can_strike_from.is_valid() \
+			or can_strike_from.call(model.global_position):
+		return false
+	sprint_windup = -1.0
+	_sprint_entry.clear()
+	_sprint_pending = false
+	model.set_charge_state(-1.0)
+	_resume_patrol(0.0, focus)
+	return true
 
 
 func _pose_sprint_flash(clock: float, point: Vector3) -> void:
 	var progress := Lunge.burst_at(clock)
 	var yaw := lerp_angle(_sprint_flash["yaw"], _sprint_flash["aim"], progress)
 	var basis := Basis(Vector3.UP, yaw).scaled(_sprint_entry["flash_scale"])
-	point.y += 0.10 * sin(PI * progress)
+	if not model.attack_ground_move.is_valid():
+		point.y = (_sprint_flash["origin"] as Vector3).y + 0.10 * sin(PI * progress)
 	model.global_transform = Transform3D(basis, point)
 	# The burst supplies the translation while the lead foot and blade prepare the cut.
 	DoubleCut.place_steps(model, _sprint_entry, _sprint_entry["focus"], _cover, _bounds, false)
@@ -543,7 +646,7 @@ func _advance_normal(dt: float, focus: Vector3) -> void:
 	normal_move.apply(model, normal_pose, normal_time)
 	for footfall: Vector3 in normal_move.FOOTFALLS:
 		if before < footfall.x and normal_time >= footfall.x:
-			_play_sound("step", model.legs[int(footfall.y)]["ankle"].global_position, {"gain": footfall.z})
+			play_sound("step", model.legs[int(footfall.y)]["ankle"].global_position, {"gain": footfall.z})
 	var strikes: Array = normal_move.STRIKES
 	var active := 0
 	for i in range(1, strikes.size()):
@@ -554,7 +657,7 @@ func _advance_normal(dt: float, focus: Vector3) -> void:
 	var trail_start := strike.y
 	var hit_end := strike.w
 	if before < trail_start and normal_time >= trail_start:
-		_play_sound("swing_heavy" if active > 0 else "swing_light", model.weapon_spin.global_position, {"gain": 0.65})
+		play_sound("swing_heavy" if active > 0 else "swing_light", model.weapon_spin.global_position, {"gain": 0.65})
 	if not thrust and normal_time >= trail_start and normal_time < hit_end:
 		var blade: Transform3D = model.weapon_spin.global_transform
 		var tint := Color(0.88, 0.96, 1.0, 0.77) if active > 0 else Color(0.76, 0.88, 1.0, 0.54)

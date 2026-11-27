@@ -196,6 +196,8 @@ func step(dt: float, ctx: Dictionary) -> void:
 
 
 func _clamp_enemy(e) -> void:
+	if e.rig.get_parent() is RigidBody3D:
+		return
 	# 用世界坐标夹（rig 在敌人节点下会自己漂移，不能夹 local position）
 	var wp: Vector3 = e.rig.global_position
 	var want := clamp_enemy_position(wp, e.scale_factor)

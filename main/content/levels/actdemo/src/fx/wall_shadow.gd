@@ -38,7 +38,7 @@ const SHADER := preload("res://gfx/wall_shadow.gdshader")
 
 const SHADOW_LAYER := 2           # 影子网格所在层（主相机不会看到：见 clear_main_camera_bits）
 const OFFSET_M := 0.03            # 影子 quad 离墙面 3 cm（朝场内）
-const MASK_W_DEFAULT := 2048
+const MASK_W_DEFAULT := 512
 const MASK_MIN_H := 96
 const MASK_MAX_H := 720
 const SOFT_MAX_TEXELS := 3.0      # softness = 1 时的柔化半径（texel）
@@ -218,13 +218,16 @@ func refresh() -> void:
 	_sync_casters()
 	if _dirty:
 		_apply_params()
-	if mask_hz > 1 and _groups.size() > 1:
+	if mask_hz > 1:
+		# 多面墙时各组轮流（每组仍是 60/mask_hz Hz）；只有一组时直接降频。
+		# 遮罩是软轮廓，30Hz 与 60Hz 在画面上看不出差别，但省一半开销。
+		var many := _groups.size() > 1
 		var want := _tick % mask_hz
 		for gi in _groups.size():
 			var vp = _groups[gi].get("vp")
 			if not is_instance_valid(vp):
 				continue
-			var on := (gi % mask_hz) == want
+			var on := ((gi % mask_hz) == want) if many else (want == 0)
 			(vp as SubViewport).render_target_update_mode = \
 				SubViewport.UPDATE_ALWAYS if on else SubViewport.UPDATE_DISABLED
 	_last_usec = float(Time.get_ticks_usec() - t0)

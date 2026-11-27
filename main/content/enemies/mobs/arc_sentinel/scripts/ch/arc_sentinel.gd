@@ -209,6 +209,15 @@ func predict_blade_pose(time: float) -> Dictionary:
 	return {"tool": pivot * joints["tool"], "tip": pivot * joints["tip"]}
 
 
+## 不看当前播放的 clip，直接对指定 clip 的 t 秒做 FK：出招选择器用它在
+## 「还没决定挥哪一刀」时对比各候选轨迹会扫到哪里。
+func predict_blade_pose_for(clip: String, time: float) -> Dictionary:
+	var pose: Dictionary = anim.sample(clip, time)
+	var joints := kin.arm_fk(pose)
+	var pivot := kin.root_basis(pose)
+	return {"tool": pivot * joints["tool"], "tip": pivot * joints["tip"]}
+
+
 func set_anim_speed(v: float) -> void:
 	_speed = clampf(v, 0.02, 4.0)
 

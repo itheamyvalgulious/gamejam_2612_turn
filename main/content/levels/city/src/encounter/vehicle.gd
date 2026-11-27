@@ -67,7 +67,7 @@ func build(pos: Vector3) -> void:
 		headlamp.spot_range = 15
 		headlamp.spot_angle = 38
 		headlamp.spot_attenuation = 1.8
-		headlamp.shadow_enabled = true
+		headlamp.shadow_enabled = false   # 车灯投影太贵，落地感交给主光
 	# Sensor mast and protective antenna, attached to the closed roof.
 	kit.cyl("dark",0.46,0.42,0.22,24,pos+Vector3(0,4.43,-1.5))
 	kit.cyl("metal",0.32,0.32,0.18,24,pos+Vector3(0,4.65,-1.5))

@@ -48,17 +48,18 @@ static func begin(model, target: Vector3, cover: Array = []) -> Dictionary:
 	})
 
 
-static func begin_path(origin: Vector3, yaw: float, scale: float, target: Vector3, cover: Array) -> Dictionary:
+static func begin_path(origin: Vector3, yaw: float, scale: float, target: Vector3, cover: Array,
+		clearance := TARGET_CLEARANCE) -> Dictionary:
 	var direction := (target - origin).slide(Vector3.UP)
 	var distance := direction.length()
 	direction = direction / distance if distance > 0.001 else -Basis(Vector3.UP, yaw).z
 	var aim := atan2(-direction.x, -direction.z)
-	var reach := clampf(distance - TARGET_CLEARANCE, 0.0, MAX_TRAVEL)
+	var reach := clampf(distance - clearance, 0.0, MAX_TRAVEL)
 	var body_radius := 1.1 * scale
 	var travel := _clear_distance(origin, direction, reach, cover, body_radius)
 	return {
 		"origin": origin, "end": origin + direction * travel, "direction": direction,
-		"cover": cover, "body_radius": body_radius,
+		"cover": cover, "body_radius": body_radius, "clearance": clearance,
 		"yaw": yaw, "aim": aim, "watch": target,
 	}
 
@@ -89,8 +90,9 @@ static func track_target(state: Dictionary, target: Vector3, velocity: Vector3,
 	state["aim"] = aim
 	state["watch"] = target
 
+	var clearance: float = state["clearance"]
 	var lead := clampf(velocity.dot(direction) * TRACK_LEAD_TIME, 0.0, MAX_TRACK_LEAD)
-	var reach := clampf(to_target.dot(direction) + lead - TARGET_CLEARANCE, 0.0, MAX_TRAVEL)
+	var reach := clampf(to_target.dot(direction) + lead - clearance, 0.0, MAX_TRAVEL)
 	var cover: Array = state["cover"]
 	var body_radius: float = state["body_radius"]
 	var travel := _clear_distance(origin, direction, reach, cover, body_radius)
@@ -102,11 +104,11 @@ static func track_target(state: Dictionary, target: Vector3, velocity: Vector3,
 	var old_progress := burst_at(before)
 	var progress := burst_at(time)
 	var ratio := clampf(inverse_lerp(old_progress, 1.0, progress), 0.0, 1.0)
-	var motion := (landing - position_now) * ratio
+	var motion := (landing - position_now).slide(Vector3.UP) * ratio
 	var next := position_now
 	if motion.dot(direction) > 0.0:
 		var step_direction := motion.normalized()
-		var safe := maxf(0.0, (target - position_now).dot(step_direction) - TARGET_CLEARANCE)
+		var safe := maxf(0.0, (target - position_now).dot(step_direction) - clearance)
 		var step := _clear_distance(position_now, step_direction, minf(motion.length(), safe), cover, body_radius)
 		next += step_direction * step
 
@@ -136,7 +138,9 @@ static func apply(model, state: Dictionary, time: float, path_position := Vector
 	var advance := burst_at(time)
 	var hip_turn := smoothstep(HIP_TURN_START, 0.336, time)
 	var yaw := aim - 0.11 + 0.33 * hip_turn
-	model.position = path_position if path_position.is_finite() else (state["origin"] as Vector3).lerp(state["end"], advance)
+	var origin: Vector3 = state["origin"]
+	model.position = path_position if path_position.is_finite() else model.attack_step(origin,
+		origin.lerp(state["end"], advance))
 	model.rotation.y = lerp_angle(state["yaw"], yaw, smoothstep(0.020, 0.142, time))
 	var transfer := smoothstep(FRONT_LAND - 0.012, 0.340, time)
 	var drive := smoothstep(0.022, 0.163, time)
@@ -156,7 +160,8 @@ static func apply(model, state: Dictionary, time: float, path_position := Vector
 	_pose_support(model, state, time)
 	_pose_sword(model, state, time)
 	var palm_release := smoothstep(PALM_RELEASE, 0.219, time)
-	model.finish_pose(lerpf(0.45, 0.24, palm_release), 1.0, toes, lerpf(46.0, 0.0, palm_release))
+	model.finish_attack_pose(lerpf(0.45, 0.24, palm_release), toes,
+		lerpf(46.0, 0.0, palm_release), 0.0, 0.0, model.SWEEP_END)
 
 
 static func _pose_feet(model, state: Dictionary, time: float) -> Vector2:
@@ -194,7 +199,10 @@ static func _pose_feet(model, state: Dictionary, time: float) -> Vector2:
 			toe_angles[i] = lerpf(toe, 19.0, progress)
 			var pitched := _angles(-27, -17, 0)
 			step = Transform3D(pitched, Vector3(0.47, 0, 1.13) - pitched * _toe_contact(19.0))
-		var flight := start.interpolate_with(stance * step, progress)
+		var landing := stance * step
+		if state.get("route_cut", false):
+			landing.origin.y += model.floor_height(landing.origin) - origin.y
+		var flight := start.interpolate_with(landing, progress)
 		flight.origin += displacement
 		var target := to_local * flight
 		target.origin.y += lift

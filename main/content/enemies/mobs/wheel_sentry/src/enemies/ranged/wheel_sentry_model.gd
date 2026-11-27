@@ -2,6 +2,7 @@ extends Node3D
 ## Model front is local -Z. Travel and aiming have separate pivots.
 
 const MeshKit = preload("res://src/vesper/mesh_kit.gd")
+const BodyColliders = preload("res://core/body_colliders.gd")
 const Materials = preload("res://src/vesper/materials.gd")
 const Casing = preload("res://src/geometry/armor_panel.gd")
 const Shell = preload("res://src/geometry/loft_shell.gd")
@@ -9,6 +10,7 @@ const WHEEL_RADIUS := 1.32
 const AXLE_HEIGHT := WHEEL_RADIUS
 const UPPER_LINK := 1.00
 const LOWER_LINK := 1.04
+const BRACE_MOUNT_HEIGHT := 2.02
 
 var wheel_frame: Node3D
 var wheel: Node3D
@@ -16,11 +18,20 @@ var turret: Node3D
 var shot_origin: Marker3D
 var intercept_origin: Marker3D
 var is_attacking := false
+var deployment := 0.0
+var support_ground: Callable
 
 var _shutters: Array[Node3D] = []
 var _supports: Array[Dictionary] = []
 var _charge: Node3D
 var _launch_light: OmniLight3D
+var _drive_plates: Array[Node3D] = []
+var _wheel_lamps: Dictionary = {}
+var _side_covers: Array[Node3D] = []
+var _rear_covers: Array[Node3D] = []
+var _side_trim: Array[Node3D] = []
+var _optic_bezel: Node3D
+var _turret_column: Node3D
 var _armor: StandardMaterial3D
 var _edge: StandardMaterial3D
 var _inset: StandardMaterial3D
@@ -38,16 +49,23 @@ func _ready() -> void:
 	_inset.albedo_color = Color("3c454f")
 	_accent = Materials.paint().duplicate()
 	_accent.albedo_color = Color("482b65")
-	_purple = Materials.emissive(Color("9759f3"), 3.2)
-	_cyan = Materials.emissive(Color("6adafb"), 2.1)
+	# 发光材质会被 set_defeat_power 运行时调暗 —— Materials.emissive 是
+	# 静态缓存共享的，直接拿来用会「一台死全场暗」。每台 duplicate 成实例私有。
+	_purple = (Materials.emissive(Color("9759f3"), 3.2) as StandardMaterial3D).duplicate()
+	_cyan = (Materials.emissive(Color("6adafb"), 2.1) as StandardMaterial3D).duplicate()
 	_build_wheel()
 	_build_suspension()
 	_build_turret()
 	set_deployment(0.0)
+	# 同一枢轴下的静态零件合并成单网格：动画枢轴全部保留，视觉不变。
+	MeshKit.merge_child_meshes(self)
+	# 轮子整体绕 RollingWheel 旋转，轮内除可击飞装甲板外都是刚体，可整树合并。
+	MeshKit.merge_subtree_meshes(wheel, _drive_plates)
 
 
 func set_deployment(amount: float) -> void:
 	var pose := clampf(amount, 0.0, 1.0)
+	deployment = pose
 	var opening := smoothstep(0.27, 0.94, pose)
 	for shutter in _shutters:
 		var side: float = shutter.get_meta(&"side")
@@ -55,11 +73,25 @@ func set_deployment(amount: float) -> void:
 		shutter.rotation.y = side * opening * 0.23
 	for support in _supports:
 		_place_support(support, smoothstep(0.0, 0.78, pose))
-	turret.position.y = 2.88 - 0.14 * pose
+	_set_gun_elevation(turret.rotation.x)
 	_charge.visible = opening > 0.55
 	_charge.scale = Vector3.ONE * lerpf(0.48, 1.0, opening)
 	_launch_light.light_energy = opening * 0.72
 	_launch_light.light_color = Color("b17efa")
+
+
+func gun_height(pitch: float) -> float:
+	return 2.88 - 0.14 * deployment + absf(sin(pitch)) * 0.60
+
+
+func set_aim(yaw: float, pitch: float) -> void:
+	turret.rotation = Vector3(pitch, yaw, 0.0)
+	_set_gun_elevation(pitch)
+
+
+func _set_gun_elevation(pitch: float) -> void:
+	turret.position.y = gun_height(pitch)
+	_turret_column.scale.y = (turret.position.y - _turret_column.position.y) / 0.6
 
 
 func set_attack_charge(power: float, heavy: bool) -> void:
@@ -74,12 +106,82 @@ func in_hit_window() -> bool:
 
 
 func replay_nodes() -> Array:
-	var nodes: Array = [self, wheel_frame, wheel, turret]
+	var nodes: Array = [self, wheel_frame, wheel, turret, _turret_column]
 	for shutter in _shutters:
 		nodes.append(shutter)
 	for support: Dictionary in _supports:
-		nodes.append_array([support["arm"], support["rail"], support["shoe"]])
+		nodes.append_array([support["root"], support["arm"], support["rail"], support["shoe"]])
 	return nodes
+
+
+var _body_colliders: Dictionary = {}
+
+## 多圆柱体受击判定件（requirement #2）：沿 wheel/turret/液压支撑关节
+## 在关节局部空间拟合，并集完全包含机身网格顶点（verify_body_parts.gd 逐顶点验证）。
+## 每帧只做局部→世界变换。蓄力弹(_charge)是 FX 不参与。
+func body_colliders() -> Array:
+	if _body_colliders.is_empty():
+		_body_colliders = _build_body_colliders()
+	return BodyColliders.world_parts(_body_colliders)["parts"]
+
+
+func _build_body_colliders() -> Dictionary:
+	var anchors: Array = [self, wheel_frame, wheel, turret, _turret_column]
+	anchors.append_array(_shutters)
+	for support: Dictionary in _supports:
+		for k in ["root", "arm", "rail", "shoe"]:
+			if support.get(k) != null:
+				anchors.append(support[k])
+	return BodyColliders.build({
+		"root": self,
+		"anchors": anchors,
+		"k_max": 3,
+		"budget": 30,
+		"mesh_filter": func(mi: MeshInstance3D) -> bool:
+			var n: Node = mi
+			while n != null and n != self:
+				if n == _charge:      # 蓄力弹是发光 FX，不是机身
+					return false
+				n = n.get_parent()
+			return true,
+	})
+
+
+func armor_to_release(part: String, point: Vector3) -> Array[Node3D]:
+	var side := 0 if turret.to_local(point).x < 0.0 else 1
+	var released: Array[Node3D] = []
+	match part:
+		"wheel":
+			var plates := _drive_plates.duplicate()
+			plates.sort_custom(func(a: Node3D, b: Node3D) -> bool:
+				return a.global_position.distance_squared_to(point) < b.global_position.distance_squared_to(point))
+			released.assign(plates.slice(0, 2))
+		"optic":
+			released.append(_optic_bezel if turret.to_local(point).y > 0.22 else _shutters[side])
+		"shoe_left", "shoe_right":
+			var cover: Node3D = _supports[0 if part == "shoe_left" else 1]["cover"]
+			released.append(cover)
+		"turret":
+			if turret.to_local(point).z > 0.50:
+				released.append(_rear_covers[side])
+			else:
+				released.append_array([_side_covers[side], _side_trim[side]])
+	return released
+
+
+func set_defeat_power(time: float) -> void:
+	var head_power := 1.0 - smoothstep(0.018, 0.16, time)
+	var wheel_power := 1.0 - smoothstep(0.30, 0.62, time)
+	_purple.emission_energy_multiplier = 3.2 * head_power
+	_cyan.emission_energy_multiplier = 2.1 * head_power
+	for lamp: StandardMaterial3D in _wheel_lamps:
+		lamp.emission_energy_multiplier = _wheel_lamps[lamp] * wheel_power * (0.74 + 0.26 * cos(time * 64.0))
+
+
+func fold_failed_support(side: float, amount: float) -> void:
+	for support in _supports:
+		if support["side"] == side:
+			_place_support(support, amount)
 
 
 func _build_wheel() -> void:
@@ -174,8 +276,10 @@ func _build_drive_surface(tire: Node3D, shoulder: Material) -> void:
 	var panel_insert := ceramic.duplicate() as StandardMaterial3D
 	panel_insert.albedo_color = Color("151e31")
 	panel_insert.roughness = 0.35
-	var center_light := Materials.emissive(Color("68d5fa"), 2.5)
-	var outer_light := Materials.emissive(Color("9b5aff"), 2.65)
+	var center_light := (Materials.emissive(Color("68d5fa"), 2.5) as StandardMaterial3D).duplicate()
+	var outer_light := (Materials.emissive(Color("9b5aff"), 2.65) as StandardMaterial3D).duplicate()
+	_wheel_lamps[center_light] = center_light.emission_energy_multiplier
+	_wheel_lamps[outer_light] = outer_light.emission_energy_multiplier
 	_build_drive_channel(tire, 0.0, 1.273, 0.025, center_light)
 	for side: float in [-1.0, 1.0]:
 		_build_drive_channel(tire, side * 0.276, 1.265, 0.036, outer_light)
@@ -196,12 +300,15 @@ func _build_drive_surface(tire: Node3D, shoulder: Material) -> void:
 	var pitch := TAU / PLATE_COUNT
 	var seat_radius := WHEEL_RADIUS - 0.025
 	var ceramic_tab := MeshKit.slab(0.068, 0.053, 0.008, 0.003)
-	var tab_light := Materials.emissive(Color("a586ed"), 1.8)
+	var tab_light := (Materials.emissive(Color("a586ed"), 1.8) as StandardMaterial3D).duplicate()
+	_wheel_lamps[tab_light] = tab_light.emission_energy_multiplier
 	for i in PLATE_COUNT:
 		var angle := pitch * i
 		for side: float in [-1.0, 1.0]:
 			var offset := angle + side * pitch * 0.075
-			var sector := MeshKit.pivot(tire, _radial(offset, seat_radius))
+			var tag := "WheelTread%02d%s" % [i, "R" if side > 0.0 else "L"]
+			var sector := MeshKit.pivot(tire, _radial(offset, seat_radius), tag)
+			_drive_plates.append(sector)
 			sector.rotation.x = offset
 			Casing.panel(sector, _curved_drive_plate(contact, side, seat_radius), Vector3.UP,
 				0.044, ceramic, shoulder, panel_insert, 0.47)
@@ -236,8 +343,10 @@ func _build_drive_channel(tire: Node3D, axial: float, radius: float, width: floa
 func _build_wheel_face(side: float) -> void:
 	var axle := Vector3(0, 0, 90)
 	var outward := Vector3.RIGHT * side
-	var driver := Materials.emissive(Color("7250fc"), 1.9)
-	var status := Materials.emissive(Color("f59352"), 1.15)
+	var driver := (Materials.emissive(Color("7250fc"), 1.9) as StandardMaterial3D).duplicate()
+	var status := (Materials.emissive(Color("f59352"), 1.15) as StandardMaterial3D).duplicate()
+	_wheel_lamps[driver] = driver.emission_energy_multiplier
+	_wheel_lamps[status] = status.emission_energy_multiplier
 	var alloy := Materials.frame_light().duplicate() as StandardMaterial3D
 	alloy.albedo_color = Color("47576d")
 	alloy.metallic = 0.72
@@ -344,10 +453,11 @@ func _build_suspension() -> void:
 
 
 func _build_support(side: float, suffix: String) -> void:
-	var root := MeshKit.pivot(wheel_frame, Vector3(side * 0.69, 2.02, 0.38), "BraceMount" + suffix)
+	var root := MeshKit.pivot(wheel_frame, Vector3(side * 0.69, BRACE_MOUNT_HEIGHT, 0.38), "BraceMount" + suffix)
 	var arm := MeshKit.pivot(root, Vector3.ZERO, "BraceArm")
 	var rail := MeshKit.pivot(root, Vector3.ZERO, "BraceRail")
 	var shoe := MeshKit.pivot(root, Vector3.ZERO, "BraceShoe")
+	var shoe_cover := MeshKit.pivot(shoe, Vector3(0, -0.115, -0.06), "BraceShoeArmor")
 	_disk(root, Vector3(side * 0.03, 0, 0), 0.148, 0.165, Materials.frame(), Vector3(0, 0, 90), 12)
 	_disk(root, Vector3(side * 0.128, 0, 0), 0.105, 0.067, _edge, Vector3(0, 0, 90), 8)
 	_plate(arm, Vector3.UP * (UPPER_LINK * 0.48), 0.246, 0.286, UPPER_LINK * 0.95, _inset, 0.038)
@@ -364,10 +474,10 @@ func _build_support(side: float, suffix: String) -> void:
 		_plate(rail, Vector3(side * 0.075, 0.31 + level * 0.087, -0.018),
 			0.036, 0.115, 0.036, _inset)
 	_disk(shoe, Vector3.ZERO, 0.114, 0.223, _inset, Vector3(0, 0, 90), 12)
-	_plate(shoe, Vector3(0, -0.115, -0.06), 0.375, 0.54, 0.168, _armor, 0.035)
+	_plate(shoe_cover, Vector3.ZERO, 0.375, 0.54, 0.168, _armor, 0.035)
 	for offset: float in [-0.100, 0.100]:
 		_plate(shoe, Vector3(offset, -0.177, -0.16), 0.108, 0.56, 0.046, Materials.rubber())
-	_supports.append({"root": root, "arm": arm, "rail": rail, "shoe": shoe, "side": side})
+	_supports.append({"root": root, "arm": arm, "rail": rail, "shoe": shoe, "cover": shoe_cover, "side": side})
 
 
 func _place_support(support: Dictionary, amount: float) -> void:
@@ -377,6 +487,15 @@ func _place_support(support: Dictionary, amount: float) -> void:
 	var shoe: Node3D = support["shoe"]
 	var closed := Vector3(side * 0.219, -0.12, 0.70)
 	var open := Vector3(side * 0.786, -1.82, 0.17)
+	var mount: Node3D = support["root"]
+	mount.position.y = BRACE_MOUNT_HEIGHT
+	if support_ground.is_valid():
+		var world := mount.to_global(open)
+		var floor_y: float = support_ground.call(world, global_position.y + 0.44)
+		var height := clampf(floor_y - global_position.y, -0.34, 0.34)
+		var extension := minf(0.0, height) * 0.94
+		mount.position.y += extension * amount
+		open.y += height - extension
 	var end := closed.lerp(open, amount)
 	var span := end.length()
 	var axis := end / span
@@ -392,6 +511,9 @@ func _place_support(support: Dictionary, amount: float) -> void:
 
 
 func _build_turret() -> void:
+	_turret_column = MeshKit.pivot(self, Vector3(0, 2.62, 0), "AimingLift")
+	_disk(_turret_column, Vector3(0, 0.28, 0), 0.33, 0.62, _inset)
+	_disk(_turret_column, Vector3(0, 0.54, 0), 0.39, 0.10, _edge)
 	turret = MeshKit.pivot(self, Vector3(0, 2.88, 0), "AimingRing")
 	var hull := turret
 	_plate(hull, Vector3(0, 0.035, -0.16), 1.33, 2.03, 0.35, Materials.frame(), 0.072)
@@ -419,12 +541,20 @@ func _build_turret() -> void:
 
 func _build_body_side(hull: Node3D, side: float) -> void:
 	var outer := Vector3.RIGHT * side
-	_side_panel(hull, side, [
+	var suffix := "R" if side > 0.0 else "L"
+	var side_cover := MeshKit.pivot(hull, Vector3.ZERO, "TurretSideArmor" + suffix)
+	var rear_cover := MeshKit.pivot(hull, Vector3.ZERO, "TurretRearArmor" + suffix)
+	var trim_origin := Vector3(side * 0.61, 0.475, -0.56)
+	var side_trim := MeshKit.pivot(hull, trim_origin, "TurretSideTrim" + suffix)
+	_side_covers.append(side_cover)
+	_rear_covers.append(rear_cover)
+	_side_trim.append(side_trim)
+	_side_panel(side_cover, side, [
 		Vector3(0.54, 0.53, -0.67), Vector3(0.64, 0.54, -0.28),
 		Vector3(0.79, 0.48, 0.14), Vector3(0.74, 0.22, 0.50),
 		Vector3(0.69, 0.10, 0.13), Vector3(0.59, 0.11, -0.57), Vector3(0.48, 0.30, -0.90),
 	], 0.128, _armor, Materials.frame_light(), 0.40)
-	_side_panel(hull, side, [
+	_side_panel(rear_cover, side, [
 		Vector3(0.69, 0.49, 0.37), Vector3(0.65, 0.49, 0.79), Vector3(0.54, 0.36, 1.04),
 		Vector3(0.54, 0.17, 1.02), Vector3(0.70, 0.12, 0.77), Vector3(0.77, 0.19, 0.51),
 	], 0.09, _inset, _accent)
@@ -436,7 +566,8 @@ func _build_body_side(hull: Node3D, side: float) -> void:
 		var rib := Vector3(side * (0.682 + i * 0.015), 0.18 + i * 0.060, -0.178)
 		_rod(hull, rib - Vector3.BACK * 0.28, rib + Vector3.BACK * 0.32, 0.024,
 			Materials.copper() if i == 0 else Materials.frame())
-	_link(hull, Vector3(side * 0.566, 0.475, -0.70), Vector3(side * 0.655, 0.474, -0.42),
+	_link(side_trim, Vector3(side * 0.566, 0.475, -0.70) - trim_origin,
+		Vector3(side * 0.655, 0.474, -0.42) - trim_origin,
 		0.038, 0.044, _purple)
 	var heel := Vector3(side * 0.42, 0.10, 1.10)
 	_rod(hull, heel, heel + Vector3(side * 0.17, 0.035, -0.29), 0.035, Materials.copper())
@@ -450,7 +581,8 @@ func _build_face(hull: Node3D) -> void:
 	var eye := Vector3(0, 0.382, -1.095)
 	var front_axis := Vector3(90, 0, 0)
 	_disk(hull, eye, 0.338, 0.25, Materials.frame(), front_axis, 10)
-	_disk(hull, eye + Vector3.FORWARD * 0.143, 0.273, 0.107, _edge, front_axis, 12)
+	_optic_bezel = MeshKit.pivot(hull, eye + Vector3.FORWARD * 0.143, "OpticBezel")
+	_ring(_optic_bezel, Vector3.ZERO, 0.215, 0.273, _edge, front_axis)
 	_disk(hull, eye + Vector3.FORWARD * 0.204, 0.221, 0.087, _inset, front_axis, 16)
 	_ring(hull, eye + Vector3.FORWARD * 0.251, 0.180, 0.215, _purple, front_axis)
 	_disk(hull, eye + Vector3.FORWARD * 0.254, 0.180, 0.08, Materials.glass(), front_axis, 32)

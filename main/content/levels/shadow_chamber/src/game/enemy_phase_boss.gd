@@ -22,6 +22,8 @@ var controller: Controller
 var _arena: Dictionary = {}
 var _pending: Dictionary = {}
 var _death_time := 0.0
+var _blade_contact := Vector3.ZERO
+var _blade_travel := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -48,6 +50,10 @@ var spawn_xf := Transform3D.IDENTITY
 
 
 func respawn() -> void:
+	set_meta(&"death_done", false)
+	var recordings := get_node_or_null("/root/TurnEnemyAudio")
+	if recordings != null:
+		recordings.stop_one_shots(self)
 	alive = true
 	_death_time = 0.0
 	visible = true
@@ -66,14 +72,16 @@ func step(dt: float, ctx: Dictionary) -> void:
 	if level.state == "intro":
 		controller.advance_intro(dt)
 	elif player.alive and level.state == "fight":
-		controller.step(dt, player.rig.global_position, cam.camera, player.capsule())
+		controller.step(dt, player.rig.global_position, cam.camera, player.capsule(),
+			player.rig.hit_parts())
 
 
 func block_player_motion(player: PlayerUnit, from: Vector3) -> void:
 	if not alive:
 		return
 	var to: Vector3 = player.rig.global_position
-	var safe := Body.resolve(rig, from, to, player.capsule(), _arena)
+	# 身体阻挡也走多圆柱体部件，不再用单颗大胶囊判断（requirement #2）。
+	var safe := Body.resolve_parts(rig, from, to, player.rig.hit_parts(), _arena)
 	player.apply_body_collision(safe)
 
 
@@ -97,6 +105,13 @@ func is_fold_visible(camera: Camera3D) -> bool:
 	return camera != null and controller.aim_at_camera(camera)
 
 
+func hurt_by_blade(amount: float, normal: Vector3, knock: float,
+		travel: Vector3, contact: Dictionary) -> float:
+	_blade_contact = contact.get("point", contact.get("blade_point", center()))
+	_blade_travel = travel
+	return hurt(amount, normal, knock)
+
+
 func hurt(amount: float, _normal := Vector3.UP, _knock := 0.0) -> float:
 	if not alive:
 		return 0.0
@@ -105,8 +120,17 @@ func hurt(amount: float, _normal := Vector3.UP, _knock := 0.0) -> float:
 	if controller.hp <= 0.0:
 		alive = false
 		_death_time = 1.2
-		Snd.play_at("death", center(), {"gain": 1.2})
+		var recordings := get_node_or_null("/root/TurnEnemyAudio")
+		var at := center()
+		if recordings == null or not recordings.play_at(self, "fold", "death", "death", at, {"gain": 1.2}, Snd):
+			Snd.play_at("death", at, {"gain": 1.2})
 		Fx.death_burst(center())
+		# 新物理死亡：DeathField 在 level 上装好时走切割 ragdoll。
+		var field: Object = level.get_meta(&"death_field") if level != null else null
+		if field != null and not get_meta(&"death_done", false):
+			set_meta(&"death_done", true)
+			field.enemy_died(self, {"contact": _blade_contact,
+				"travel": _blade_travel})
 		level.on_enemy_died(self)
 	return damage
 
@@ -126,7 +150,7 @@ func status_text() -> String:
 
 
 func melee_threat(player: PlayerUnit, margin: float) -> Dictionary:
-	var threat := controller.melee_forecast(player.capsule(), margin, P.getf("parry.plan_lead"))
+	var threat := controller.melee_forecast(player.rig.hit_parts(), margin, P.getf("parry.plan_lead"))
 	if not threat.is_empty():
 		threat["enemy"] = self
 	return threat
@@ -157,7 +181,7 @@ func resolve_fold_attack(player: PlayerUnit) -> Dictionary:
 	if push.is_zero_approx():
 		push = -rig.global_basis.z.normalized()
 	var displacement: float = attack["displacement"]
-	if attack["blockable"] and P.getb("parry.melee_block") and player.is_guard_up():
+	if attack["blockable"] and P.getb("parry.melee_block"):  # 碰到刀即格挡
 		if Combat.blade_contacts_point(player.rig, source, controller.contact_radius() + 0.25):
 			player.launch_impact(push, displacement)
 			return {"hit": false, "parried": true, "melee": true, "pos": source, "normal": -push, "push": push}
@@ -212,4 +236,4 @@ func _trace_arena(start: Vector3, end: Vector3) -> Dictionary:
 
 
 func hud_alert(target: PlayerUnit) -> bool:
-	return not controller.melee_forecast(target.capsule(), 0.12, 0.42).is_empty()
+	return not controller.melee_forecast(target.rig.hit_parts(), 0.12, 0.42).is_empty()

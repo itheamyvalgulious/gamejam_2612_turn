@@ -12,6 +12,7 @@ class_name ArcRig3
 ## them, and each side integrates its own ground speed (differential steering).
 
 const MK := preload("res://scripts/kit/mesh_kit.gd")
+const BodyColliders := preload("res://core/body_colliders.gd")
 const SK := preload("res://scripts/kit/shape_kit.gd")
 const AM := preload("res://scripts/ch/arc_materials.gd")
 const KIN := preload("res://scripts/ch/arc_kin.gd")
@@ -53,6 +54,7 @@ var cam_r := 0.145
 var cam_shell_z := 0.302
 var cam_shell_r := 0.192
 var _leds: Array = []
+var _body_colliders: Dictionary = {}
 var track_x := 0.44
 var track_hw := 0.10
 var wheel_r := 0.142
@@ -70,6 +72,7 @@ func build(p: Dictionary) -> void:
 	J.clear()
 	_belts.clear()
 	_leds.clear()
+	_body_colliders = {}          # anchors regenerados → refit perezoso
 	_build_skeleton()
 	_build_chassis()
 	_build_track(1)
@@ -81,6 +84,8 @@ func build(p: Dictionary) -> void:
 	_build_lights()
 	apply_pose({})
 	_apply_tracks()
+	# 同一枢轴下的静态零件合并成单网格：动画枢轴全部保留，视觉不变。
+	MK.merge_child_meshes(self)
 
 
 func _dims() -> void:
@@ -1073,6 +1078,41 @@ func _build_lights() -> void:
 	under.shadow_enabled = false
 	under.position = Vector3(0, -0.22, 0.14)
 	J["body"].add_child(under)
+
+
+# ================================================================== hit parts
+
+## Multi-cylinder hit volumes (requirement #2): capsules fitted in joint
+## space over every body mesh vertex — union fully contains the body
+## (verify_body_parts.gd checks vertex by vertex). Blade FX is the weapon,
+## not the body, so it stays out.
+func body_colliders() -> Array:
+	if _body_colliders.is_empty():
+		_body_colliders = _build_body_colliders()
+	return BodyColliders.world_parts(_body_colliders)["parts"]
+
+
+func _build_body_colliders() -> Dictionary:
+	var anchors: Array = [J["root"], J["body"], J["optic_shell"], J["eye_aim"],
+		J["sh"], J["elb"], J["wr"], J["tool"], J["trackL"], J["trackR"]]
+	for nm in ["trackL", "trackR"]:
+		for i in 3:
+			var wn: Node3D = J["wheel_%s%d" % [nm, i]]
+			if wn != null:
+				anchors.append(wn)
+	return BodyColliders.build({
+		"root": self,
+		"anchors": anchors,
+		"k_max": 3,
+		"budget": 30,
+		"mesh_filter": func(mi: MeshInstance3D) -> bool:
+			var n: Node = mi
+			while n != null and n != self:
+				if n == blade_fx:
+					return false
+				n = n.get_parent()
+			return true,
+	})
 
 
 # ================================================================== apply

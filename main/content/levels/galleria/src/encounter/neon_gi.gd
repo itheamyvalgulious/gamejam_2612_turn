@@ -15,7 +15,7 @@ static func install(environment_root: Node3D, outside: bool) -> VoxelGI:
 	gi.position=Vector3(0,16,0) if outside else Vector3(0,12,0)
 	gi.subdiv=VoxelGI.SUBDIV_128
 	environment_root.add_child(gi)
-	var signature := "neon-gI-v1"
+	var signature := "neon-gI-v2"
 	for path in SOURCES:
 		if FileAccess.file_exists(path):
 			signature+=FileAccess.get_file_as_string(path)
@@ -48,7 +48,7 @@ static func install(environment_root: Node3D, outside: bool) -> VoxelGI:
 		gi.data.interior=not outside
 		gi.data.normal_bias=0.8
 		gi.data.bias=1.0
-		gi.data.use_two_bounces=true
+		gi.data.use_two_bounces=false
 		gi.data.set_meta("source_signature",signature)
 		ResourceSaver.save(gi.data,CACHE_PATH)
 	gi.set_meta("cache_hit",false)

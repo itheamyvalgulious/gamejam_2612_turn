@@ -80,7 +80,8 @@ static func place_steps(model, state: Dictionary, focus: Vector3, cover: Array, 
 	for obstacle: Dictionary in cover:
 		var radius := maxf(0.35, float(obstacle["r"]) - 1.2) + 1.1 * size
 		end = HitMath.slide_around_body(start.origin, end, obstacle["c"], radius)
-	var shift := start.affine_inverse() * _inside(end, bounds)
+	var grounded: Vector3 = model.attack_step(start.origin, _inside(end, bounds))
+	var shift := start.basis.inverse() * (grounded - start.origin).slide(Vector3.UP)
 	var right := Vector3(shift.x + 0.59, 0.0, shift.z - 0.60)
 	var rear := Vector3(shift.x - 0.60, 0.0, shift.z + 0.10)
 	state["root"] = start
@@ -100,7 +101,8 @@ static func apply(model, state: Dictionary, time: float) -> void:
 	var guard := smoothstep(HOLD_END, DURATION, time)
 	var follow := 1.0 - guard
 	var drift := shift * (0.69 * smoothstep(LEAD_STEP_START, LEAD_LAND, time) + 0.31 * smoothstep(LEAD_LAND, 0.82, time))
-	model.global_position = root * drift
+	model.global_position = model.attack_step(root.origin, root * drift)
+	drift = root.affine_inverse() * (model.global_position as Vector3)
 
 	var hip: Transform3D = state["hip"]
 	var body := model.body as Node3D
@@ -123,7 +125,7 @@ static func apply(model, state: Dictionary, time: float) -> void:
 	_pose_support(model, state, time, guard)
 	_pose_sword(model, state, time)
 	var toes: Vector2 = state["toes"]
-	model.finish_pose(0.29, 1.0, toes * (1.0 - wind), 0.0, 0.075 * wind * follow)
+	model.finish_attack_pose(0.29, toes * (1.0 - wind), 0.0, 0.075 * wind * follow)
 
 
 static func _pose_support(model, state: Dictionary, time: float, guard: float) -> void:
@@ -231,7 +233,7 @@ static func _foot_at(model, root: Transform3D, local: Vector3, yaw: float, cover
 	var point := root * local
 	var scale := root.basis.get_scale().x
 	point = _inside(HitMath.resolve_circles(point, 0.23 * scale, cover, point.y), bounds)
-	point.y = model.floor_height(point) + Pace.SOLE_HEIGHT * scale
+	point.y = model.floor_height(point, root.origin.y + 0.88) + Pace.SOLE_HEIGHT * scale
 	var basis := root.basis * Basis(Vector3.UP, deg_to_rad(yaw))
 	var foot: Transform3D = model.keep_sole_above_floor(Transform3D(basis, point))
 	return root.affine_inverse() * foot

@@ -300,6 +300,13 @@ static func samples(kind: String, variant: int) -> PackedFloat32Array:
 				{"osc": "sine", "f0": 750.0, "filt": "none", "env": hold, "gain": 0.10},
 				{"osc": "noise", "f0": 1100.0, "filt": "bp", "q": 2.5, "env": hold, "gain": 0.23},
 			], seed_i))
+		"sentry_break":
+			buf = render_layers(0.19, [
+				{"osc": "noise", "f0": 2700.0, "f1": 4150.0, "q": 0.90, "filt": "bp", "gain": 1.25,
+					"env": [[0.0, 0.0], [0.002, 1.0], [0.010, 0.22], [0.024, 0.56], [0.050, 0.0]]},
+				{"osc": "noise", "f0": 1180.0, "f1": 470.0, "q": 0.99, "filt": "bp", "gain": 0.60,
+					"env": _exp_env(0.13, 0.022)},
+			] + _metal_modes(1060.0, 0.26, 0.15) as Array, seed_i)
 		# ---------------- 激光：明亮锯齿上扫 + 噪声
 		"laser":
 			buf = render_layers(0.40, [

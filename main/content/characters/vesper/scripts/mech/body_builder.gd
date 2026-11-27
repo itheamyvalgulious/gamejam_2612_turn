@@ -16,7 +16,7 @@ const P := {
 	# Arm cross-section scale: refined slender profile (~26% slimmer than old 0.62 build).
 	"arm_w": 0.74,
 	"shoulder": Vector3(0.295, 0.38, -0.02),
-	"blade_y0": 0.28, "blade_len": 1.28,
+	"blade_y0": 0.28, "blade_len": 1.60,
 	"leg_az": [45.0, 135.0, 225.0, 315.0],
 }
 

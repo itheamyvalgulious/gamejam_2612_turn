@@ -10,6 +10,9 @@ var _anchors: Array[Node3D] = []
 var _ghosts: Array[Node3D] = []
 var _materials: Array[ShaderMaterial] = []
 var _captured: Array[bool] = []
+var _route_births: Array[float] = []
+var _route_slot := 0
+var _route_last_sample := -INF
 var _last_position := Vector3.ZERO
 
 
@@ -48,6 +51,7 @@ func setup(actor: Node3D) -> void:
 		_ghosts.append(ghost)
 		_materials.append(material)
 		_captured.append(false)
+		_route_births.append(-INF)
 
 
 func capture(actor: Node3D, before: float, time: float, previous: Vector3, current: Vector3, pose: Callable) -> void:
@@ -91,8 +95,31 @@ func apply(time: float) -> void:
 			_materials[i].set_shader_parameter("opacity", opacity)
 
 
+func route_pose(actor: Node3D, time: float) -> void:
+	if not _last_position.is_finite():
+		_last_position = actor.global_position
+	if time - _route_last_sample >= 0.040 and actor.global_position.distance_squared_to(_last_position) > 3.06:
+		var skeleton := actor.get_node("DuelistSkeleton") as Skeleton3D
+		skeleton.force_update_all_bone_transforms()
+		for j in _anchors.size():
+			var piece := _ghosts[_route_slot].get_child(j) as Node3D
+			piece.transform = _anchors[j].global_transform
+		_route_births[_route_slot] = time
+		_route_last_sample = time
+		_route_slot = (_route_slot + 1) % _ghosts.size()
+		_last_position = actor.global_position
+	for i in _ghosts.size():
+		var age := time - _route_births[i]
+		_ghosts[i].visible = age < 0.145
+		if _ghosts[i].visible:
+			_materials[i].set_shader_parameter("opacity", 0.33 * (1.0 - smoothstep(0.0, 0.145, age)))
+
+
 func clear() -> void:
 	_captured.fill(false)
+	_route_births.fill(-INF)
+	_route_slot = 0
+	_route_last_sample = -INF
 	_last_position = Vector3.INF
 	for ghost in _ghosts:
 		ghost.hide()
