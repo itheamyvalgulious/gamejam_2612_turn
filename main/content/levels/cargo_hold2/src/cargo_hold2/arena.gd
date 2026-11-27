@@ -86,6 +86,12 @@ static func _materials(kit: CargoMeshKit) -> void:
 	kit.material("wall", _shader("wall", {"base_col": Color("65647a"), "trim_col": Color("323047"), "style": 4, "grime": 0.32}))
 	for pair in [["metal", "9fabc2"], ["metal_dark", "28263a"], ["orion_frame", "4e465f"], ["track", "7e6888"]]:
 		kit.material(pair[0], _shader("metal", {"tint": Color(pair[1]), "rough_base": 0.62, "rust_amount": 0.07, "oil_grime": 0.13}))
+	kit.material("bare_steel", _shader("metal", {"tint": Color("a9afbc"), "rough_base": 0.39,
+		"rust_amount": 0.06, "oil_grime": 0.19}))
+	kit.material("safety_yellow", _shader("metal", {"tint": Color("b78143"), "rough_base": 0.54,
+		"metal_amount": 0.31, "pattern": 1}))
+	kit.material("tread", _shader("plate", {"base_col": Color("454659"), "grate": 1.0,
+		"tile_m": 1.4, "rough_bias": 0.02}))
 	var normal := NormalMap.texture()
 	for i in 3:
 		kit.material("container_" + str(i), _shader("container", {
@@ -155,6 +161,37 @@ func _recovery_container() -> void:
 	_kit.box_bevel("metal_dark", Vector3(2.6, 0.20, 5.8), Vector3(x, 6.37, 37.1), 0.08)
 	_kit.box("violet", Vector3(0.19, 0.045, 4.75), Vector3(x, 6.24, 37.1))
 	_panel("C-02", Vector3(x, 6.04, 28.72), 0.14, PI)
+	_recovery_rack(x)
+
+
+func _recovery_rack(x: float) -> void:
+	var station_z := 33.6
+	for side in [-1.0, 1.0]:
+		var upright := Vector3(x + side * 3.78, 2.25, station_z)
+		_box("metal_dark", upright, Vector3(0.76, 4.50, 1.62), true)
+		_kit.box_bevel("orion_frame", Vector3(0.60, 4.23, 0.25), upright + Vector3(0, 0, 0.83), 0.075)
+		_kit.box_bevel("bare_steel", Vector3(0.073, 3.32, 0.32),
+			upright + Vector3(-side * 0.39, 0.15, 0.27), 0.027)
+		for y in [1.42, 3.28]:
+			var hinge := Vector3(upright.x - side * 0.46, y, station_z + 0.43)
+			_kit.tube("safety_yellow", [hinge + Vector3(side * 0.12, 0, 0), hinge,
+				hinge + Vector3(-side * 0.17, 0.20, 0.51),
+				hinge + Vector3(-side * 0.17, 0.44, 0.77)], 0.105, 8)
+			_kit.box_bevel("metal_dark", Vector3(0.25, 0.26, 0.22),
+				hinge + Vector3(-side * 0.17, 0.49, 0.77), 0.05)
+		# The open clamps are inside this side channel, outside the aisle.
+		_obstacle(upright + Vector3(-side * 0.49, 0.38, 0.4), Vector3(0.62, 2.80, 1.45), true)
+		_kit.box("cyan", Vector3(0.22, 0.10, 0.045), upright + Vector3(0, 1.82, 0.98))
+		_kit.box("safety_yellow", Vector3(0.15, 0.013, 7.0), Vector3(x + side * 2.1, 0.078, 36.4))
+	_box("orion_frame", Vector3(x, 5.14, station_z), Vector3(8.22, 0.43, 1.28), true, false)
+	_kit.box_bevel("metal_dark", Vector3(2.84, 0.28, 0.80), Vector3(x, 4.83, station_z + 0.03), 0.075)
+	_kit.box("white", Vector3(1.88, 0.036, 0.18), Vector3(x, 4.68, station_z + 0.35))
+	_panel("RELEASED", Vector3(x, 4.79, station_z + 0.45), 0.052)
+	_kit.tube("track", [Vector3(x - 3.96, 4.48, 36.8), Vector3(x - 3.76, 4.03, 36.4),
+		Vector3(x - 3.48, 3.58, 35.66), Vector3(x - 3.28, 3.61, 35.06),
+		Vector3(x - 3.30, 3.78, 34.92)], 0.098, 9)
+	_kit.box_bevel("safety_yellow", Vector3(0.20, 0.23, 0.32), Vector3(x - 3.30, 3.76, 34.85), 0.044)
+	_kit.box("tread", Vector3(4.02, 0.026, 1.50), Vector3(x, 0.097, station_z + 0.16))
 
 
 func _work_bay() -> void:
@@ -180,14 +217,7 @@ func _work_bay() -> void:
 	_kit.box_bevel("metal_dark", Vector3(2.6, 0.12, 5.25), Vector3(-27.8, 0.05, 15.5), 0.08)
 	for index in 7:
 		_kit.box("paint", Vector3(0.28, 0.025, 0.12), Vector3(-27.8, 0.125, 13.55 + index * 0.53))
-	# Low stand has physical collision; the replaceable upper plate is a sword practice target.
-	_box("metal_dark", TARGET * Vector3(1, 0, 1) + Vector3.UP * 0.35, Vector3(1.85, 0.7, 1.35), true)
-	_kit.box_bevel("metal", Vector3(0.42, 2.1, 0.58), TARGET - Vector3.UP * 1.0, 0.09)
-	_kit.box_bevel("orion_frame", Vector3(2.26, 1.62, 0.36), TARGET, 0.15)
-	_kit.box("amber", Vector3(1.51, 0.11, 0.04), TARGET + Vector3(0, 0.41, 0.21))
-	_kit.box("metal_dark", Vector3(1.59, 0.58, 0.04), TARGET + Vector3(0, -0.04, 0.21))
-	_kit.box("metal_dark", Vector3(1.42, 0.32, 0.11), TARGET + Vector3(0, 0.94, 0.19))
-	_panel("ARM CHECK", TARGET + Vector3(0, 0.94, 0.255), 0.041)
+	_practice_fixture()
 	for x in [-4.4, 6.4]:
 		for z in [8.0, 11.0, 14.0, 17.0, 20.0, 23.0]:
 			_kit.box("paint", Vector3(0.15, 0.022, 1.35), Vector3(x, 0.024, z))
@@ -206,6 +236,33 @@ func _work_bay() -> void:
 		_kit.box_bevel("orion_frame", Vector3(2.49, 2.62, 0.13), place + Vector3(0, 1.48, 0.77), 0.08)
 		_kit.box("metal", Vector3(0.07, 0.55, 0.16), place + Vector3(0.92, 1.47, 0.87))
 		_kit.box("cyan", Vector3(0.61, 0.065, 0.07), place + Vector3(-0.64, 2.32, 0.89))
+
+
+func _practice_fixture() -> void:
+	# Keep the replaceable plate centered on TARGET for the tutorial's blade sweep.
+	_box("metal_dark", Vector3(TARGET.x, 0.35, TARGET.z), Vector3(1.85, 0.7, 1.35), true)
+	_kit.box_bevel("orion_frame", Vector3(1.58, 0.24, 1.04), Vector3(TARGET.x, 0.61, TARGET.z), 0.07)
+	for side in [-1.0, 1.0]:
+		_kit.tube("track", [TARGET + Vector3(side * 0.63, -1.96, -0.26),
+			TARGET + Vector3(side * 0.44, -0.78, -0.27),
+			TARGET + Vector3(side * 0.44, 0.55, -0.27)], 0.16, 8)
+		for y in [-0.62, 0.62]:
+			var pin := TARGET + Vector3(side * 0.94, y, 0.09)
+			_kit.box_bevel("safety_yellow", Vector3(0.35, 0.28, 0.45), pin, 0.055)
+			_kit.box_bevel("metal_dark", Vector3(0.16, 0.15, 0.12), pin + Vector3.BACK * 0.26, 0.025)
+	_kit.box_bevel("metal_dark", Vector3(2.21, 1.62, 0.28), TARGET - Vector3.BACK * 0.06, 0.13)
+	_kit.prism("bare_steel", [Vector2(-0.83, -0.64), Vector2(0.83, -0.64),
+		Vector2(1.0, -0.47), Vector2(1.0, 0.47), Vector2(0.83, 0.64), Vector2(-0.83, 0.64),
+		Vector2(-1.0, 0.47), Vector2(-1.0, -0.47)], 0.19, TARGET + Vector3.BACK * 0.14)
+	for cut in [[-0.85, -0.13, -0.21, 0.01], [-0.24, -0.30, 0.63, 0.10], [0.02, 0.04, 0.81, 0.34]]:
+		var start := TARGET + Vector3(cut[0], cut[1], 0.238)
+		var end := TARGET + Vector3(cut[2], cut[3], 0.238)
+		var deep := start.lerp(end, 0.38) + Vector3.UP * 0.021
+		_kit.poly("metal_dark", [start, deep, end], Vector3.BACK)
+		_kit.poly("track", [start, end, deep - Vector3.UP * 0.036], Vector3.BACK)
+	_kit.box_bevel("orion_frame", Vector3(1.44, 0.28, 0.18), TARGET + Vector3(0, 0.96, 0.01), 0.04)
+	_kit.box("amber", Vector3(0.20, 0.055, 0.035), TARGET + Vector3(-0.5, 0.96, 0.12))
+	_panel("ARM CHECK", TARGET + Vector3(0.11, 0.96, 0.12), 0.041)
 
 
 func _threshold() -> void:
@@ -258,9 +315,7 @@ func _loading_deck() -> void:
 		for z in [-26.0, -13.0, 0.0, 13.0, 23.0]:
 			_kit.box("orion_frame", Vector3(0.36, 3.7, 0.32), Vector3(x, 16.55, z))
 	_kit.box_bevel("orion_frame", Vector3(38.7, 0.95, 1.8), Vector3(0.25, 14.08, -4), 0.10)
-	_kit.box_bevel("metal_dark", Vector3(4.9, 1.18, 2.9), Vector3(-7, 13.85, -4), 0.12)
-	_kit.tube("metal", [Vector3(-7.52, 13.32, -4), Vector3(-7.52, 10.4, -4),
-		Vector3(-7, 9.95, -4), Vector3(-6.55, 10.22, -4)], 0.12, 8)
+	_cargo_spreader(crates)
 	for x in [-17.0, 17.0]:
 		_kit.box("violet", Vector3(2.9, 0.07, 0.12), Vector3(x, 13.55, -3.04))
 	_box("wall", Vector3(0, 5.0, -27.5), Vector3(14, 10, 1.05), true)
@@ -269,6 +324,14 @@ func _loading_deck() -> void:
 		_kit.box("orion_frame", Vector3(9.1, 0.35, 0.09), Vector3(0, 1.0 + j * 0.62, -26.42))
 	for side in [-1.0, 1.0]:
 		_kit.box("cyan", Vector3(0.12, 5.6, 0.09), Vector3(side * 4.9, 4.2, -26.41))
+		_kit.box_bevel("orion_frame", Vector3(0.95, 6.44, 0.20), Vector3(side * 6.34, 3.58, -26.89), 0.12)
+		_kit.box_bevel("metal_dark", Vector3(0.64, 1.34, 0.17), Vector3(side * 6.34, 3.36, -26.75), 0.09)
+		_kit.box("amber", Vector3(0.31, 0.078, 0.04), Vector3(side * 6.34, 3.70, -26.64))
+		_kit.tube("bare_steel", [Vector3(side * 6.34, 5.45, -26.70),
+			Vector3(side * 6.34, 7.54, -26.70), Vector3(side * 5.85, 8.05, -26.71),
+			Vector3(side * 5.21, 8.05, -26.73)], 0.087, 8)
+	_kit.box_bevel("metal_dark", Vector3(7.9, 0.47, 0.50), Vector3(0, 7.93, -26.65), 0.08)
+	_kit.box("white", Vector3(6.7, 0.055, 0.18), Vector3(0, 7.68, -26.55))
 	_panel("SECURITY / D-03", Vector3(0, 8.94, -26.85), 0.16)
 	_elevated_service_gallery()
 	for group in [Vector3(-20, 0, -31), Vector3(-31, 0, -30), Vector3(17.1, 0, -31)]:
@@ -278,6 +341,37 @@ func _loading_deck() -> void:
 			_kit.box("paint", Vector3(0.15, 0.018, 3.03), group + Vector3(2.23 * side, 0.065, 0))
 	_pallet(Vector3(34, 0, 15))
 	_terminal(Vector3(34.5, 0, 9.5))
+
+
+func _cargo_spreader(crates: CargoContainer) -> void:
+	var trolley := Vector3(-9.4, 13.85, -4.0)
+	_box("metal_dark", trolley, Vector3(5.0, 1.18, 3.0), true, false)
+	for side in [-1.0, 1.0]:
+		_kit.box_bevel("safety_yellow", Vector3(4.54, 0.92, 0.24),
+			trolley + Vector3(0, -0.04, side * 1.52), 0.09)
+		for mark in [-1.75, 1.75]:
+			_kit.box("metal_dark", Vector3(0.22, 0.76, 0.035),
+				trolley + Vector3(mark, -0.03, side * 1.66))
+		_kit.box("amber", Vector3(0.67, 0.10, 0.046),
+			trolley + Vector3(0, -0.19, side * 1.66))
+		for x in [-2.06, 2.06]:
+			_kit.tube("track", [trolley + Vector3(x * 0.67, -0.60, side * 0.81),
+				Vector3(trolley.x + x, 11.93, trolley.z + side * 1.01)], 0.088, 8)
+	var spreader := Vector3(trolley.x, 11.80, trolley.z)
+	_box("orion_frame", spreader, Vector3(5.2, 0.32, 2.45), true, false)
+	for x in [-2.20, 2.20]:
+		for z in [-1.04, 1.04]:
+			var lock := spreader + Vector3(x, -0.21, z)
+			_kit.box_bevel("safety_yellow", Vector3(0.54, 0.46, 0.44), lock, 0.06)
+			_kit.box_bevel("bare_steel", Vector3(0.26, 0.25, 0.24), lock - Vector3.UP * 0.22, 0.036)
+	var crate := Vector3(trolley.x, 9.19, trolley.z)
+	var size := Vector3(4.92, 2.25, 2.31)
+	crates.container(crate, "container_2", 0.0, size)
+	_obstacle(crate + Vector3.UP * size.y * 0.5, size + Vector3(0.48, 0.04, 0.30), false)
+	_panel("H02 / LIFT 01", crate + Vector3(0, 1.09, 1.35), 0.077)
+	for side in [-1.0, 1.0]:
+		_kit.box_bevel("metal_dark", Vector3(2.1, 0.23, 0.81), spreader + Vector3(0, -0.11, side * 0.61), 0.06)
+		_kit.box("white", Vector3(1.49, 0.05, 0.16), spreader + Vector3(0, -0.23, side * 0.61))
 
 
 func _elevated_service_gallery() -> void:
@@ -334,6 +428,7 @@ func _airlock() -> Dictionary:
 	_kit.box("cyan", Vector3(6.24, 0.075, 0.08), Vector3(EXIT_X, 1.02, -45.20))
 	_panel("DECK 02", Vector3(EXIT_X, 5.6, -45.21), 0.104)
 	_panel("CENTRAL GALLERIA", Vector3(EXIT_X, 4.94, -45.21), 0.083)
+	_pressure_hatch_detail()
 	_plate(Vector3(EXIT_X, 0.03, EXIT_DOOR_Z + 0.5), 9.7)
 	for z in [-35.9, -41.0]:
 		_kit.box("white", Vector3(7.4, 0.04, 0.36), Vector3(EXIT_X, 8.44, z))
@@ -360,6 +455,33 @@ func _airlock() -> Dictionary:
 	var size := Vector3(9.96, 7.7, 0.68)
 	var collider := _body(at, size)
 	return {"panel": frame, "collider": collider, "box": AABB(at - size * 0.5, size)}
+
+
+func _pressure_hatch_detail() -> void:
+	var rear_z := -44.83
+	for side in [-1.0, 1.0]:
+		var jamb_x: float = EXIT_X + side * 4.91
+		_box("orion_frame", Vector3(jamb_x, 3.89, rear_z), Vector3(0.40, 7.78, 0.85), true)
+		_kit.box_bevel("bare_steel", Vector3(0.13, 6.68, 0.18), Vector3(jamb_x - side * 0.12, 3.83, rear_z + 0.46), 0.032)
+		_kit.box("cyan", Vector3(0.072, 3.32, 0.11), Vector3(jamb_x - side * 0.23, 4.02, rear_z + 0.25))
+		for y in [1.39, 3.49, 5.59]:
+			var socket := Vector3(jamb_x, y, rear_z + 0.36)
+			_kit.box_bevel("metal_dark", Vector3(0.70, 0.47, 0.43), socket, 0.086)
+			_kit.box_bevel("bare_steel", Vector3(0.38, 0.25, 0.24),
+				socket + Vector3(-side * 0.14, 0, 0.27), 0.046)
+			_kit.box("amber", Vector3(0.14, 0.054, 0.055), socket + Vector3(side * 0.18, 0, 0.25))
+		var runner_x: float = EXIT_X + side * 3.95
+		_kit.box("bare_steel", Vector3(0.16, 0.016, 11.0), Vector3(runner_x, 0.025, -38.63))
+		_kit.box("metal_dark", Vector3(0.14, 0.019, 11.0), Vector3(runner_x + side * 0.17, 0.024, -38.63))
+		for y in [2.18, 6.2]:
+			_kit.tube("track", [Vector3(jamb_x, y, -44.35), Vector3(jamb_x, y, -41.35),
+				Vector3(jamb_x + side * 0.27, y + 0.45, -40.92)], 0.087, 8)
+	_box("orion_frame", Vector3(EXIT_X, 7.62, rear_z), Vector3(10.46, 0.54, 0.85), true, false)
+	_kit.box("white", Vector3(6.12, 0.057, 0.25), Vector3(EXIT_X, 7.32, rear_z + 0.16))
+	_kit.box("tread", Vector3(9.25, 0.042, 1.45), Vector3(EXIT_X, 0.036, -43.82))
+	for z in [-43.15, -44.43]:
+		_kit.box("bare_steel", Vector3(9.18, 0.025, 0.13), Vector3(EXIT_X, 0.06, z))
+	_kit.box_bevel("orion_frame", Vector3(0.12, 5.92, 0.11), Vector3(EXIT_X, 3.36, -45.17), 0.026)
 
 
 func _guide() -> Node3D:
@@ -455,9 +577,11 @@ func _lighting() -> void:
 			var color := Color("d8deff") if x != -27.0 else Color("d0b4ee")
 			_light(Vector3(x, 9.5 if x != 0.0 else 11.0, z), color, 3.8, 26.0)
 	_light(Vector3(27, 6.6, -38), Color("b6e3fa"), 2.8, 16.0)
-	_work_light(Vector3(-15, 7.65, 24), Vector3(-22, 0, 20), Color("ffe2cb"), 2.3, 14.0)
-	_work_light(Vector3(3, 13.1, -8), Vector3(-5, 0, -13), Color("f0e2ff"), 3.6, 24.0)
-	for at in [Vector3(-9, 6.65, 11.9), Vector3(7.9, 7.0, -26.1), Vector3(26.8, 7.55, -31.2)]:
+	_light(Vector3(-18, 4.85, 34.7), Color("ffd7ad"), 1.48, 9.1)
+	_work_light(Vector3(-16.8, 7.65, 25.3), TARGET, Color("ffe2cb"), 3.45, 13.5)
+	_work_light(Vector3(5.6, 11.8, -11.5), BASIC_SPAWN + Vector3.UP, Color("f3dfd3"), 4.15, 21.0)
+	for at in [Vector3(-9, 6.65, 11.9), Vector3(7.9, 7.0, -26.1), Vector3(26.8, 7.55, -31.2),
+		Vector3(EXIT_X, 6.85, -43.8)]:
 		var lamp := _light(at, Color("ff3159"), 0.0, 19.0)
 		_beacons.append(lamp)
 
@@ -477,7 +601,8 @@ func _work_light(at: Vector3, target: Vector3, tint: Color, power: float, reach:
 func _build_alarm_fixtures() -> void:
 	_beacon_material = _glow(Color("ff3458"), 0.16)
 	_kit.material("alarm", _beacon_material)
-	for origin in [Vector3(-9, 7.39, 11.89), Vector3(7.9, 7.95, -26.6), Vector3(26.8, 9.48, -31.1)]:
+	for origin in [Vector3(-9, 7.39, 11.89), Vector3(7.9, 7.95, -26.6), Vector3(26.8, 9.48, -31.1),
+		Vector3(EXIT_X, 6.74, -45.07)]:
 		_kit.box_bevel("metal_dark", Vector3(1.58, 0.41, 0.32), origin, 0.09)
 		_kit.box_bevel("alarm", Vector3(1.29, 0.23, 0.15), origin + Vector3(0, 0, 0.17), 0.05)
 		for x in [-0.77, 0.77]:

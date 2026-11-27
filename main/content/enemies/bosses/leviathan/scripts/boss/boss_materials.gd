@@ -6,7 +6,7 @@ extends RefCounted
 ## its own role glow, charge and length uniforms.
 
 const METAL := preload("res://shaders/boss_metal.gdshader")
-const LENS := preload("res://shaders/boss_lens.gdshader")
+const LENS := preload("res://materials/maxwell_eye.tres")
 const ORB := preload("res://shaders/boss_orb.gdshader")
 const CORE := preload("res://shaders/boss_core.gdshader")
 const GLASS := preload("res://shaders/boss_glass.gdshader")
@@ -178,20 +178,7 @@ static func signal_red() -> StandardMaterial3D:
 static func lens() -> ShaderMaterial:
 	if _c.has("lens"):
 		return _c["lens"]
-	var m := ShaderMaterial.new()
-	m.shader = LENS
-	m.set_shader_parameter("glass_color", Color(0.006, 0.006, 0.009))
-	m.set_shader_parameter("iris_color", RED)
-	m.set_shader_parameter("core_color", Color(1.0, 0.30, 0.08))
-	m.set_shader_parameter("intensity", 4.2)
-	m.set_shader_parameter("pupil_radius", 0.31)
-	m.set_shader_parameter("blade_count", 9.0)
-	m.set_shader_parameter("ring_frequency", 62.0)
-	m.set_shader_parameter("scan_speed", 0.55)
-	m.set_shader_parameter("seed", 0.3)
-	m.set_shader_parameter("aperture", 0.55)
-	m.set_shader_parameter("alert", 0.35)
-	m.resource_name = "boss_lens"
+	var m := LENS.duplicate() as ShaderMaterial
 	return _keep("lens", m)
 
 

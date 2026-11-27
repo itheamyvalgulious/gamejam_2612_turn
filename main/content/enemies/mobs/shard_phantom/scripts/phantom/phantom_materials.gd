@@ -11,7 +11,7 @@ const PLUME_SHADER := preload("res://shaders/micro_thruster.gdshader")
 const RING_SHADER := preload("res://shaders/assembly_ring.gdshader")
 const GROUND_SHADER := preload("res://shaders/ground_glow.gdshader")
 const SHADOW_SHADER := preload("res://shaders/soft_shadow.gdshader")
-const LENS_SHADER := preload("res://shaders/lens.gdshader")
+const MaxwellEye := preload("res://content/enemies/bosses/leviathan/materials/maxwell_eye.tres")
 const EMITTER_SHADER := preload("res://shaders/palm_emitter.gdshader")
 const VENT_SHADER := preload("res://shaders/vent_plume.gdshader")
 const MK := preload("res://scripts/kit/mesh_kit.gd")
@@ -132,16 +132,7 @@ static func emissive(color: Color, energy := 4.0) -> StandardMaterial3D:
 
 
 static func head_optic() -> ShaderMaterial:
-	var m := ShaderMaterial.new()
-	m.shader = LENS_SHADER
-	m.set_shader_parameter("glass_color", Color(0.006, 0.006, 0.009))
-	m.set_shader_parameter("iris_color", Color(1.0, 0.15, 0.03))
-	m.set_shader_parameter("intensity", 3.2)
-	m.set_shader_parameter("pupil_radius", 0.24)
-	m.set_shader_parameter("iris_radius", 0.72)
-	m.set_shader_parameter("ring_frequency", 46.0)
-	m.set_shader_parameter("scan_speed", 0.72)
-	m.set_shader_parameter("seed", 0.37)
+	var m := MaxwellEye.duplicate() as ShaderMaterial
 	m.set_shader_parameter("alert", 0.0)
 	return m
 

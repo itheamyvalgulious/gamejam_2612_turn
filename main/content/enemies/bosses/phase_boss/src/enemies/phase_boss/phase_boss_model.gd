@@ -6,6 +6,8 @@ const Palette = preload("res://scripts/mech/materials.gd")
 const Loft = preload("res://src/geometry/loft_shell.gd")
 const Armor = preload("res://src/geometry/armor_panel.gd")
 const Cannon = preload("res://src/enemies/phase_boss/phase_boss_cannon.gd")
+const OpticMesh = preload("res://content/enemies/bosses/leviathan/scripts/kit/mesh_kit.gd")
+const MaxwellEye = preload("res://content/enemies/bosses/leviathan/materials/maxwell_eye.tres")
 
 enum LightZone { TAIL_TIP, TAIL_ROOT, HIPS, BACK, REAR_RIBS, FRONT_RIBS, SHOULDERS, EYES }
 
@@ -30,6 +32,7 @@ var _glass: Material
 var _motion_lamps: Array[StandardMaterial3D] = []
 var _amber: StandardMaterial3D
 var _charge_lights: Array[StandardMaterial3D] = []
+var _red_eye := MaxwellEye.duplicate() as ShaderMaterial
 
 
 func _ready() -> void:
@@ -173,6 +176,7 @@ func _build_head() -> void:
 		_swept_scale(neck, side, Vector3(0.77, 0.93, -0.84), 1.07)
 	head = Kit.pivot(neck, Vector3(0, -0.70, -1.68), "Head")
 	_build_skull()
+	_build_red_eye()
 	_build_jaw()
 
 
@@ -222,6 +226,14 @@ func _build_skull() -> void:
 		Vector3(0, 0.12, -2.27), Vector3(0.48, 0.08, -2.14),
 		Vector3(0.36, -0.13, -2.14), Vector3(0, -0.27, -2.27),
 	]), Vector3.FORWARD, 0.14, _joint, _steel)
+
+
+func _build_red_eye() -> void:
+	var eye := Kit.pivot(head, Vector3(0, 0.54, -1.69), "MaxwellEye")
+	eye.quaternion = Quaternion(Vector3.UP, Vector3(0, 0.49, -0.87).normalized())
+	Kit.add(eye, Kit.prism(8, 0.405, 0.322, 0.24, PI / 8.0), _joint, Vector3.DOWN * 0.08)
+	Kit.add(eye, OpticMesh.ring(0.255, 0.316, 0.065, 16, 0.012), _steel, Vector3.UP * 0.060)
+	Kit.add(eye, OpticMesh.dome(0.256, 0.074, 48, 12), _red_eye, Vector3.UP * 0.040)
 
 
 func _build_jaw() -> void:
@@ -487,6 +499,9 @@ func replay_nodes() -> Array:
 
 func set_motion_lights(charge: float, flash: float, burst: float, cannon_heat := 0.0,
 		phase := 0.0, lamp_power := 1.0) -> void:
+	var eye_power := smoothstep(0.30, 0.82, lamp_power) * lerpf(1.0, 0.28, phase)
+	_red_eye.set_shader_parameter("intensity", lerpf(4.2, 6.0, flash) * eye_power)
+	_red_eye.set_shader_parameter("alert", lerpf(0.35, 0.62, flash) * eye_power)
 	var heating := clampf(charge, 0.0, 1.0)
 	var white := Color("f1faff")
 	var dormant := Color("101820")

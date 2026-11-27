@@ -6,6 +6,8 @@ const BodyColliders = preload("res://core/body_colliders.gd")
 const Materials = preload("res://src/vesper/materials.gd")
 const Casing = preload("res://src/geometry/armor_panel.gd")
 const Shell = preload("res://src/geometry/loft_shell.gd")
+const OpticMesh = preload("res://content/enemies/bosses/leviathan/scripts/kit/mesh_kit.gd")
+const MaxwellEye = preload("res://content/enemies/bosses/leviathan/materials/maxwell_eye.tres")
 const WHEEL_RADIUS := 1.32
 const AXLE_HEIGHT := WHEEL_RADIUS
 const UPPER_LINK := 1.00
@@ -38,6 +40,7 @@ var _inset: StandardMaterial3D
 var _accent: StandardMaterial3D
 var _purple: StandardMaterial3D
 var _cyan: StandardMaterial3D
+var _red_eye: ShaderMaterial
 
 
 func _ready() -> void:
@@ -53,6 +56,7 @@ func _ready() -> void:
 	# 静态缓存共享的，直接拿来用会「一台死全场暗」。每台 duplicate 成实例私有。
 	_purple = (Materials.emissive(Color("9759f3"), 3.2) as StandardMaterial3D).duplicate()
 	_cyan = (Materials.emissive(Color("6adafb"), 2.1) as StandardMaterial3D).duplicate()
+	_red_eye = MaxwellEye.duplicate() as ShaderMaterial
 	_build_wheel()
 	_build_suspension()
 	_build_turret()
@@ -174,6 +178,8 @@ func set_defeat_power(time: float) -> void:
 	var wheel_power := 1.0 - smoothstep(0.30, 0.62, time)
 	_purple.emission_energy_multiplier = 3.2 * head_power
 	_cyan.emission_energy_multiplier = 2.1 * head_power
+	_red_eye.set_shader_parameter("intensity", float(MaxwellEye.get_shader_parameter("intensity")) * head_power)
+	_red_eye.set_shader_parameter("alert", float(MaxwellEye.get_shader_parameter("alert")) * head_power)
 	for lamp: StandardMaterial3D in _wheel_lamps:
 		lamp.emission_energy_multiplier = _wheel_lamps[lamp] * wheel_power * (0.74 + 0.26 * cos(time * 64.0))
 
@@ -577,22 +583,26 @@ func _build_body_side(hull: Node3D, side: float) -> void:
 		_disk(hull, Vector3(side * mark.x, mark.y, mark.z), 0.034, 0.06, _edge, Vector3(0, 0, 90), 6)
 
 
-func _build_face(hull: Node3D) -> void:
-	var eye := Vector3(0, 0.382, -1.095)
+func _build_red_eye(hull: Node3D) -> void:
+	# The scanner occupies the upper socket. The launch chamber sits below it.
+	var eye := Vector3(0, 0.422, -1.095)
 	var front_axis := Vector3(90, 0, 0)
-	_disk(hull, eye, 0.338, 0.25, Materials.frame(), front_axis, 10)
-	_optic_bezel = MeshKit.pivot(hull, eye + Vector3.FORWARD * 0.143, "OpticBezel")
-	_ring(_optic_bezel, Vector3.ZERO, 0.215, 0.273, _edge, front_axis)
-	_disk(hull, eye + Vector3.FORWARD * 0.204, 0.221, 0.087, _inset, front_axis, 16)
-	_ring(hull, eye + Vector3.FORWARD * 0.251, 0.180, 0.215, _purple, front_axis)
-	_disk(hull, eye + Vector3.FORWARD * 0.254, 0.180, 0.08, Materials.glass(), front_axis, 32)
-	_disk(hull, eye + Vector3.FORWARD * 0.298, 0.099, 0.019, _accent, front_axis, 16)
-	_ring(hull, eye + Vector3.FORWARD * 0.311, 0.059, 0.072, _cyan, front_axis)
-	_disk(hull, eye + Vector3.FORWARD * 0.318, 0.039, 0.013, _purple, front_axis, 12)
+	_disk(hull, eye, 0.349, 0.25, Materials.frame(), front_axis, 10)
+	_optic_bezel = MeshKit.pivot(hull, eye + Vector3.FORWARD * 0.193, "OpticBezel")
+	_ring(_optic_bezel, Vector3.ZERO, 0.244, 0.300, _edge, front_axis)
+	_ring(_optic_bezel, Vector3.FORWARD * 0.050, 0.225, 0.257, _inset, front_axis)
 	for i in 6:
-		var angle := TAU * float(i) / 6.0
-		_disk(hull, eye + Vector3(cos(angle) * 0.245, sin(angle) * 0.245, -0.21),
-			0.021, 0.021, _inset, front_axis, 6)
+		var angle := TAU * (float(i) + 0.5) / 6.0
+		_disk(_optic_bezel, Vector3(cos(angle) * 0.270, sin(angle) * 0.270, -0.026),
+			0.016, 0.016, Materials.frame(), front_axis, 6)
+	var scanner := MeshKit.pivot(hull, eye + Vector3.FORWARD * 0.253, "MaxwellEye")
+	_disk(scanner, Vector3.BACK * 0.034, 0.235, 0.093, _inset, front_axis, 20)
+	MeshKit.add(scanner, OpticMesh.dome(0.226, 0.082, 48, 12), _red_eye, Vector3.ZERO, -front_axis)
+
+
+func _build_face(hull: Node3D) -> void:
+	var front_axis := Vector3(90, 0, 0)
+	_build_red_eye(hull)
 	Casing.panel(hull, PackedVector3Array([
 		Vector3(-0.57, 0.635, -0.89), Vector3(-0.395, 0.722, -1.19), Vector3(0.395, 0.722, -1.19),
 		Vector3(0.57, 0.635, -0.89), Vector3(0.51, 0.671, -0.53), Vector3(-0.51, 0.671, -0.53),

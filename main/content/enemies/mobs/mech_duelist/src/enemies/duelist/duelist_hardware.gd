@@ -4,6 +4,7 @@ extends RefCounted
 const MeshKit = preload("res://src/vesper/mesh_kit.gd")
 const Casing = preload("res://src/enemies/duelist/duelist_casing.gd")
 const Parts = preload("res://src/enemies/duelist/duelist_parts.gd")
+const OpticMesh = preload("res://content/enemies/bosses/leviathan/scripts/kit/mesh_kit.gd")
 
 
 static func build_chest(torso: Node3D, mat: Dictionary) -> void:
@@ -38,7 +39,11 @@ static func build_chest(torso: Node3D, mat: Dictionary) -> void:
 	var collar := MeshKit.add(torso, MeshKit.prism(6, 0.150, 0.125, 0.074, PI / 6.0),
 		mat["steel"], Vector3(0, 0.727, -0.375))
 	collar.quaternion = Quaternion(Vector3.UP, Vector3.FORWARD)
-	_reactor(torso, Vector3(0, 0.727, -0.392), Vector3.FORWARD, 0.104, mat, mat["core"])
+	var eye := MeshKit.pivot(torso, Vector3(0, 0.727, -0.392), "ChestEye")
+	eye.quaternion = Quaternion(Vector3.UP, Vector3.FORWARD)
+	Parts.axle(eye, Vector3.ZERO, 0.122, 0.050, mat["frame"], Vector3.UP)
+	MeshKit.add(eye, OpticMesh.ring(0.085, 0.103, 0.029, 24, 0.004), mat["steel"], Vector3.UP * 0.034)
+	MeshKit.add(eye, OpticMesh.dome(0.086, 0.024, 48, 12), mat["core"], Vector3.UP * 0.031)
 	_reactor(torso, Vector3(0, 0.761, 0.392), Vector3.BACK, 0.087, mat, mat["status"])
 
 

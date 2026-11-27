@@ -16,6 +16,7 @@ const BodyColliders := preload("res://core/body_colliders.gd")
 const SK := preload("res://scripts/kit/shape_kit.gd")
 const AM := preload("res://scripts/ch/arc_materials.gd")
 const KIN := preload("res://scripts/ch/arc_kin.gd")
+const MaxwellEye := preload("res://content/enemies/bosses/leviathan/materials/maxwell_eye.tres")
 const D2R := PI / 180.0
 const TAU := PI * 2.0
 ## Hard ground-speed cap for one track (m/s). The 1.56 m chassis only needs
@@ -37,6 +38,7 @@ var marker_base: Node3D
 var blade_fx: Node3D
 var blade_light: OmniLight3D
 var eye_light: OmniLight3D
+var _eye_lens: ShaderMaterial
 
 var _belts: Dictionary = {}
 
@@ -930,14 +932,12 @@ func _build_optic() -> void:
 		Vector3(0, 0, cam_shell_z - 0.004), Vector3(90, 0, 0))
 	_bake(shell, sp)
 
-	# rotating inner ball
+	# The gimbal keeps the iris tracking with the rotating inner ball.
 	var ep: Array = []
-	_p(ep, MK.sphere(cam_r, 32, 22, true), AM.eye_ball())
-	# pupil cap + iris band on the aim axis (+Z)
-	_p(ep, MK.arc_shell(cam_r * 1.012, 0.002, 0.0, 0.40, 0.0, TAU, 3, 24, true, false),
-		AM.emissive(Color(1.0, 0.42, 0.24), 0.32), Vector3.ZERO, Vector3(90, 0, 0))
-	_p(ep, MK.arc_shell(cam_r * 1.012, 0.002, 0.46, 0.60, 0.0, TAU, 3, 24, true, false),
-		AM.emissive(AM.ORANGE, 0.42), Vector3.ZERO, Vector3(90, 0, 0))
+	_p(ep, MK.sphere(cam_r * 0.98, 32, 22, true), joint)
+	_eye_lens = MaxwellEye.duplicate() as ShaderMaterial
+	_p(ep, MK.dome(cam_r * 0.72, cam_r * 0.30, 44, 12, true),
+		_eye_lens, Vector3(0, 0, cam_r * 0.74), Vector3(90, 0, 0))
 	# machined gimbal band across the ball
 	_p(ep, MK.arc_shell(cam_r * 1.004, 0.004, 1.36, 1.52, 0.0, TAU, 3, 30, false, false),
 		steel_d, Vector3.ZERO, Vector3(0, 0, 0))
@@ -1270,8 +1270,7 @@ func set_blade_params(intensity: float, _speed: float, _charge: float) -> void:
 
 
 func set_lens_params(intensity: float, _x: float) -> void:
-	var m := AM.eye_ball()
-	m.set_shader_parameter("intensity", intensity)
+	_eye_lens.set_shader_parameter("intensity", intensity)
 
 
 ## Blink the status LED row. `t` is the character clock.

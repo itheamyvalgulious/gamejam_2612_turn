@@ -1,7 +1,7 @@
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
 
-// ARC SENTINEL — chest optic.
+// Maxwell's Eye optic, shared by Leviathan and the security machines.
 // Coated optical glass: near-black substrate, controlled specular, an aperture
 // iris with blade shadowing, a scan wedge and a hot inner core. UV radial.
 

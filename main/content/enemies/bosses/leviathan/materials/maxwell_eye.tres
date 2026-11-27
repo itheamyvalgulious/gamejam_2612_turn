@@ -1,0 +1,18 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[ext_resource type="Shader" path="../shaders/boss_lens.gdshader" id="1_lens"]
+
+[resource]
+resource_name = "boss_lens"
+shader = ExtResource("1_lens")
+shader_parameter/glass_color = Color(0.006, 0.006, 0.009, 1)
+shader_parameter/iris_color = Color(1, 0.075, 0.012, 1)
+shader_parameter/core_color = Color(1, 0.30, 0.08, 1)
+shader_parameter/intensity = 4.2
+shader_parameter/pupil_radius = 0.31
+shader_parameter/blade_count = 9.0
+shader_parameter/ring_frequency = 62.0
+shader_parameter/scan_speed = 0.55
+shader_parameter/seed = 0.3
+shader_parameter/alert = 0.35
+shader_parameter/aperture = 0.55

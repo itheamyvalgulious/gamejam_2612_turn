@@ -79,7 +79,7 @@ const DEFAULTS := {
 	"block_threat": 0.0, "block_elev": 0.0,
 	"block_lead": 1.00, "block_hold": 1.00, "block_follow": 1.00,
 	"blade_intensity": 0.72, "arc_speed": 1.0, "trail_life": 0.05,
-	"lens_intensity": 0.55, "lens_track": 1.0,
+	"lens_intensity": 4.2, "lens_track": 1.0,
 	"env_energy": 1.25, "env_exposure": 1.15,
 }
 

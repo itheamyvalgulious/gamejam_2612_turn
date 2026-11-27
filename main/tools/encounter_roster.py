@@ -21,6 +21,7 @@ ROOTS = {
 AUDIO_EXTENSIONS = {".wav", ".ogg", ".mp3"}
 AUDIO_DESIGNS = {"duelist", "wheel", "fold"}
 PATHS = re.compile(r'''(?<=["'])res://([^"'\s]+)(?=["'])''')
+CAMPAIGN_ASSET_ROOT = "content/enemies/"
 
 
 def dependencies(directory, roots, main=None):
@@ -31,6 +32,11 @@ def dependencies(directory, roots, main=None):
         if item in seen:
             continue
         seen.add(item)
+        if item.startswith(CAMPAIGN_ASSET_ROOT) and main is not None:
+            shared = main / item
+            if not shared.is_file():
+                raise FileNotFoundError(shared)
+            continue
         # res://core/... is global project code, not package-local — it ships
         # unchanged inside the design bundle so the reference keeps resolving.
         if item.startswith("core/") and main is not None:
@@ -54,13 +60,19 @@ def design_path(design, relative):
     return Path("enemies") / ROOTS[design][0] / "design" / relative
 
 
+def design_reference(design, path):
+    if path.startswith(CAMPAIGN_ASSET_ROOT):
+        return "res://" + path
+    return "res://runtime/" + design_path(design, path).as_posix()
+
+
 def pack_designs(enemies, main=None):
     generated = {}
     for design, (directory, roots) in ROOTS.items():
         for path, value in dependencies(enemies / directory, roots, main):
             dest = design_path(design, path)
             if isinstance(value, str):
-                value = PATHS.sub(lambda m: "res://runtime/" + design_path(design, m[1]).as_posix(), value)
+                value = PATHS.sub(lambda m: design_reference(design, m[1]), value)
                 if design == "duelist" and dest.suffix == ".gd":
                     value = re.sub(r"(?m)^class_name \w+\n", "", value)
                 if dest.suffix in {".tscn", ".tres"}:

@@ -14,6 +14,7 @@ const Hardware = preload("res://src/enemies/duelist/duelist_hardware.gd")
 const Charge = preload("res://src/enemies/duelist/duelist_charge.gd")
 const COMPOSITE = preload("res://gfx/duelist_composite.gdshader")
 const CHARGE_INLAY = preload("res://gfx/duelist_charge_inlay.gdshader")
+const MaxwellEye = preload("res://content/enemies/bosses/leviathan/materials/maxwell_eye.tres")
 const DisplayPose = preload("res://src/enemies/duelist/duelist_display_pose.gd")
 const Pace = preload("res://src/enemies/duelist/duelist_pace.gd")
 const BLADE_START := 0.22
@@ -27,7 +28,6 @@ const THIGH := 1.19
 const SHIN := 1.25
 const UPPER_ARM := 0.89
 const FOREARM := 0.87
-const CORE_TINT := Color("6dffe5")
 const OPTIC_TINT := Color("8cffe1")
 const SIGNAL_TINT := Color("ff2417")
 const STATUS_TINT := Color("4ce1c2")
@@ -79,7 +79,7 @@ var _sensor := StandardMaterial3D.new()
 var _optic := StandardMaterial3D.new()
 var _temple := StandardMaterial3D.new()
 var _status := StandardMaterial3D.new()
-var _core := StandardMaterial3D.new()
+var _core := MaxwellEye.duplicate() as ShaderMaterial
 var _arm_power := StandardMaterial3D.new()
 var _shoulder_power := StandardMaterial3D.new()
 var _exhaust_glow := StandardMaterial3D.new()
@@ -109,7 +109,6 @@ func _ready() -> void:
 	_emissive(_optic, OPTIC_TINT, 3.8)
 	_emissive(_temple, OPTIC_TINT, 2.0)
 	_emissive(_status, STATUS_TINT, 2.15)
-	_emissive(_core, CORE_TINT, 3.75)
 	_emissive(_arm_power, ARM_TINT, 2.3)
 	_emissive(_shoulder_power, SHOULDER_TINT, 2.15)
 	_emissive(_exhaust_glow, EXHAUST_TINT, 2.9)
@@ -240,7 +239,8 @@ func _build_core() -> void:
 	], Vector3.ZERO, _dark)
 	Fuselage.thorax(torso, _casing_materials())
 	Hardware.build_chest(torso, _casing_materials())
-	_core_spill = _light(torso, "ReactorSpill", Vector3(0, 0.73, -0.62), Color("68efdb"), 0.65, 2.05)
+	_core_spill = _light(torso, "ReactorSpill", Vector3(0, 0.73, -0.62),
+		MaxwellEye.get_shader_parameter("iris_color"), 0.65, 2.05)
 	for i in 4:
 		var y := -0.035 + 0.086 * i
 		var size := 0.208 + 0.015 * i
@@ -827,7 +827,6 @@ func set_charge_state(age: float, blade_discharge := 0.0, attack_glow := 0.0) ->
 	var front := smoothstep(0.465, Charge.BLADE_FILLED_AT, age)
 	var core_pulse := 0.25 * sin(TAU * (3.6 * age + 1.44 * age * age)) * feed * (1.0 - smoothstep(1.74, Charge.QUIET_AT, age))
 
-	_tint_lamp(_core, CORE_TINT, signal_mix)
 	_tint_lamp(_optic, OPTIC_TINT, signal_mix)
 	_tint_lamp(_temple, OPTIC_TINT.lerp(Color("ad211a"), red_heat), signal_mix)
 	_tint_lamp(_shoulder_power, SHOULDER_TINT, attack_glow)
@@ -835,12 +834,13 @@ func set_charge_state(age: float, blade_discharge := 0.0, attack_glow := 0.0) ->
 	_tint_lamp(_status, STATUS_TINT, attack_glow)
 	_tint_lamp(_exhaust_glow, EXHAUST_TINT, attack_glow)
 	var core_idle := 3.75 - dip * 3.15 + feed * 2.2 + core_pulse
-	_core.emission_energy_multiplier = lerpf(lerpf(core_idle, 7.3, attack_glow), 12.0, flash)
+	var core_intensity := lerpf(lerpf(core_idle, 6.2, attack_glow), 8.0, flash)
+	_core.set_shader_parameter("intensity", core_intensity)
+	_core.set_shader_parameter("alert", 0.35 * smoothstep(0.0, 3.75, core_intensity))
 	_shoulder_power.emission_energy_multiplier = lerpf(2.15, 4.6, maxf(shoulder, attack_glow))
 	_arm_power.emission_energy_multiplier = lerpf(2.3, 6.0, maxf(arm, attack_glow))
 	_temple.emission_energy_multiplier = lerpf(lerpf(2.0, 4.7, maxf(red_heat * 0.43, attack_glow)), 8.0, flash)
 	_optic.emission_energy_multiplier = lerpf(lerpf(3.8, 6.1, attack_glow), 12.0, flash)
-	_core_spill.light_color = _core.emission
 	_core_spill.light_energy = lerpf(lerpf(0.65 - dip * 0.50 + feed * 0.45, 1.7, attack_glow), 3.15, flash)
 	_visor_spill.light_color = _optic.emission
 	_visor_spill.light_energy = lerpf(lerpf(0.22, 1.25, attack_glow), 2.65, flash)
@@ -860,11 +860,13 @@ func set_charge_state(age: float, blade_discharge := 0.0, attack_glow := 0.0) ->
 func set_knockdown_power(power: float) -> void:
 	set_effects(0.0, 0.0)
 	set_charge_state(-1.0)
-	for lamp in [_core, _optic, _temple, _status, _arm_power, _shoulder_power, _exhaust_glow]:
+	for lamp in [_optic, _temple, _status, _arm_power, _shoulder_power, _exhaust_glow]:
 		lamp.emission_energy_multiplier *= power
 		if armor_breached:
 			lamp.albedo_color = Color("242c31").lerp(lamp.albedo_color, power)
 	_core_spill.light_energy *= power
+	_core.set_shader_parameter("intensity", 3.75 * power)
+	_core.set_shader_parameter("alert", 0.35 * power)
 	_visor_spill.light_energy *= power
 	_blade_spill.light_energy *= power
 	_blade_inlay.set_shader_parameter("baseline", 3.2 * power)
@@ -879,7 +881,6 @@ func restore_power() -> void:
 	_emissive(_optic, OPTIC_TINT, 3.8)
 	_emissive(_temple, OPTIC_TINT, 2.0)
 	_emissive(_status, STATUS_TINT, 2.15)
-	_emissive(_core, CORE_TINT, 3.75)
 	_emissive(_arm_power, ARM_TINT, 2.3)
 	_emissive(_shoulder_power, SHOULDER_TINT, 2.15)
 	_emissive(_exhaust_glow, EXHAUST_TINT, 2.9)
