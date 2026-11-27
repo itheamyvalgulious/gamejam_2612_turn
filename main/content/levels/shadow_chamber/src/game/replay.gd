@@ -320,6 +320,8 @@ func _apply(i: int) -> void:
 				# 只写「位置 + 旋转」会把机体压成细柱子。
 				nd.global_transform = Transform3D(Basis(quat.normalized()).scaled(sc), pos)
 				q += NODE_FLOATS
+			if rigs[a].has_method("sync_replay_pose"):
+				rigs[a].sync_replay_pose()
 		else:
 			p += 1 + NODES_PER_ACTOR * NODE_FLOATS
 			continue

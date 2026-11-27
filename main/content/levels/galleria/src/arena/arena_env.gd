@@ -78,7 +78,7 @@ static func atmosphere(pal: Dictionary) -> WorldEnvironment:
 
 	# SSR：湿沥青 / 水洼镜像霓虹
 	env.ssr_enabled = true
-	env.ssr_max_steps = 40
+	env.ssr_max_steps = 20
 	env.ssr_fade_in = 0.12
 	env.ssr_fade_out = 1.8
 	env.ssr_depth_tolerance = 0.32

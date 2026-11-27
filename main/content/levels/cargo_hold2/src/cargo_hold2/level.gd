@@ -2,6 +2,7 @@ extends LevelUnit
 const CargoArena = preload("res://src/cargo_hold2/arena.gd")
 const Sentinel = preload("res://src/game/arc_encounter.gd")
 const Phase = preload("res://src/game/shard_encounter.gd")
+const LevelDeathField = preload("res://core/death_field.gd")
 const ACTOR_RADIUS := 1.75
 var rng := RandomNumberGenerator.new()
 var player_previous := Vector3.ZERO
@@ -10,6 +11,8 @@ func start_level(_idx: int) -> void:
 	index = 0
 	if arena_node == null:
 		arena = CargoArena.build()
+		nav = NavField.build(arena, CargoArena.nav_spec(arena))
+		geometry = LevelGeometry.build(arena)
 		arena_node = arena["node"]
 		add_child(arena_node)
 		_spawn_encounters()
@@ -27,6 +30,7 @@ func start_level(_idx: int) -> void:
 	cam.pitch = -0.12
 	cam.snap(arena)
 	rng.randomize()
+	LevelDeathField.install(self)
 	total_enemies = enemies.size()
 	state = "fight"
 	state_t = 0
@@ -49,6 +53,7 @@ func _spawn_encounters() -> void:
 	var basic = Sentinel.new()
 	add_child(basic)
 	basic.level = self
+	basic.use_ground_routes(sentinel_ground_move, sentinel_support_floor, sentinel_waypoint)
 	basic.global_position = CargoArena.BASIC_SPAWN
 	basic.spawn_xf = basic.global_transform
 	if basic.rig != null:
@@ -59,10 +64,7 @@ func step(dt: float, ctx: Dictionary) -> void:
 	state_t += dt
 	if state == "fight":
 		for enemy in enemies:
-			var old: Vector3 = enemy.rig.global_position
 			enemy.step(dt, ctx)
-			if enemy.kind == "mob":
-				enemy.rig.global_position = resolve_motion(old, enemy.rig.global_position)
 	elif state == "clear":
 		# Finish this independent room; never load the demo's next arena.
 		for enemy in enemies:
@@ -150,12 +152,6 @@ func choose_phase_point(enemy) -> int:
 
 
 
-
-func melee_clear(a: Vector3, b: Vector3) -> bool:
-	for box: AABB in arena["solids"]:
-		if box.intersects_segment(a, b) != null:
-			return false
-	return true
 
 func combat_targets() -> Array:
 	var targets: Array = []

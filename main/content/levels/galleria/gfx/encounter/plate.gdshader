@@ -51,13 +51,13 @@ void fragment() {
 	float grate_rib = (1.0 - hole) * grate_mask;
 
 	// scuffs: directional smears, polished traffic lanes
-	float scuff = m_turb2(uv * vec2(0.7, 2.4) + s, 3) * mix(0.5, 1.0, detail);
+	float scuff = m_turb2(uv * vec2(0.7, 2.4) + s, 2) * mix(0.5, 1.0, detail);
 	float lane = m_noise2(vec2(uv.x * 0.20, uv.y * 0.045) + s) ;
 	lane = smoothstep(0.55, 0.8, lane) * wear_amount;
 
 	// grime in seams and corners
 	float wear = clamp(vwear, 0.0, 1.6);
-	float grime = m_sat(m_fbm2(uv * 0.33 + s * 1.7, 4) * 1.2 - 0.25) * (0.5 + 0.6 * wear);
+	float grime = m_sat(m_fbm2(uv * 0.33 + s * 1.7, 3) * 1.2 - 0.25) * (0.5 + 0.6 * wear);
 	grime = m_sat(grime * 0.7 + seam * 0.55 + seam2 * 0.3);
 
 	vec3 col = base_col * (1.0 + (rnd - 0.5) * 0.16);

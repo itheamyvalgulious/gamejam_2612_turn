@@ -1,6 +1,6 @@
 # 灯墙之厅
 
-TURN 的第三个战斗关。用统一工程 `main/project.godot` 启动后，在选关中选择「灯墙之厅」。
+折相的 Boss 战关卡。用统一工程 `main/project.godot` 启动后，在选关中选择「灯墙之厅」。
 
 - `main.tscn`、`src/main.gd` 和 `src/game/level.gd` 负责场景入口、玩家出生、开场和通关。
 - `src/arena/` 和 `gfx/` 保存地图、墙面投影和关卡着色器。

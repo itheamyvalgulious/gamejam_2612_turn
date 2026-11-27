@@ -15,8 +15,7 @@ extends Node
 ##   node / object / memory counters before and after N level restarts
 ##   wall-time of the restart call itself (arena + enemies rebuilt synchronously)
 
-const LEVEL_NAMES := ["霓虹窄巷", "雨夜广场", "灯墙之厅", "货舱02", "霓虹街区",
-	"坠击中庭", "仓库", "回廊实验舱", "病房夜班", "坠击中庭高低差"]
+const Catalog = preload("res://core/level_catalog.gd")
 
 var _args := {}
 var _report := {}
@@ -289,7 +288,7 @@ func _run_all() -> void:
 	var soak := float(_args.get("soak", "0"))
 
 	for index in indices:
-		print("[bench] level %d %s: loading" % [index, LEVEL_NAMES[index]])
+		print("[bench] level %d %s: loading" % [index, Catalog.get_entry(index)[0]])
 		var t0 := Time.get_ticks_msec()
 		TurnSession.open_level(index)
 		# wait until the level scene is current and its level node exists
@@ -377,12 +376,12 @@ func _run_all() -> void:
 				rest.append({"restart_ms": rt, "counts_before": c0, "counts_after": c1})
 		entry["restarts"] = rest
 		entry["counts_final"] = _counts()
-		_report[LEVEL_NAMES[index]] = entry
+		_report[Catalog.get_entry(index)[0]] = entry
 		print("[bench] level %d done: avg=%.2fms p99=%.2fms max=%.1fms" %
 			[index, entry["measure"].get("avg_ms", 0), entry["measure"].get("p99_ms", 0),
 			entry["measure"].get("max_ms", 0)])
 
-	# optional soak on level 4 (city — most enemies) or last index
+	# Optional soak on the last loaded level.
 	if soak > 0.0:
 		var idx: int = indices[-1]
 		_frames.clear()
@@ -400,7 +399,7 @@ func _run_all() -> void:
 				marks.append({"t": ts, "counts": _counts(),
 					"recent_avg_ms": _recent_avg(300)})
 		_measuring = false
-		_report["_soak"] = {"level": LEVEL_NAMES[idx], "stats": _stats(_frames), "marks": marks}
+		_report["_soak"] = {"level": Catalog.get_entry(idx)[0], "stats": _stats(_frames), "marks": marks}
 
 	var path := String(_args.get("report", "/tmp/opencode/turn_bench.json"))
 	var f := FileAccess.open(path, FileAccess.WRITE)

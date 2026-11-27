@@ -49,4 +49,4 @@ static func apply(model, state: Dictionary, time: float) -> void:
 		lerp_angle(blocked_angles.y, ready_angles.y, recover),
 		lerpf(state["deviation"], state["ready_deviation"], recover),
 		lerpf(state["wrist_flexion"], state["ready_flexion"], recover), grip_cant)
-	model.finish_pose(0.29, 1.0, state["toes"], 0.0, 0.0, grip_cant)
+	model.finish_attack_pose(0.29, state["toes"], 0.0, 0.0, grip_cant)

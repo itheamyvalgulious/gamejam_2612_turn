@@ -9,6 +9,25 @@ const Kit := preload("res://src/arena/kit.gd")
 
 const U := 1.0 / 0.547
 const BALL := 1.2
+
+## 导航元信息：病房 —— 地面矩形 + 床/柜/隔墙 platforms 顶面；
+## 障碍 = cover 圆棱柱 + 边界/内墙棱柱（隔墙 prism 已含在 cover/blade_boxes 同高区内，
+## 这里用一条手写棱柱补隔墙体）。
+static func nav_spec(_arena: Dictionary) -> Dictionary:
+	return {
+		"floor_margin": 0.4 * U,
+		"walls_obstacles": true,
+		"walls_sight": true,
+		"cover_obstacles": true,
+		"cover_shrink": BALL,
+		"platforms": true,
+		"obstacles": [{
+			"aabb": AABB(Vector3(-DIV_HALF_WIDTH, 0.0, -DIV_HALF_DEPTH) * U,
+				Vector3(DIV_HALF_WIDTH * 2.0, DIV_TOP, DIV_HALF_DEPTH * 2.0) * U),
+			"pad": "actor", "sight": true,
+		}],
+	}
+
 const HALF_X := 20.0
 const HALF_Z := 11.0
 const H := 6.5
@@ -17,6 +36,8 @@ const BED_TOP := 0.59
 const TABLE_TOP := 0.75
 const CAB_TOP := 1.30
 const DIV_TOP := 1.30
+const DIV_HALF_WIDTH := 11.10
+const DIV_HALF_DEPTH := 0.09
 const BED_LEN := 2.05
 const BED_HALF_W := 0.475
 
@@ -70,7 +91,7 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 		_platform(platforms, cover, Vector3(x + 1.75, 0.0, z_head + dir * 0.36), 0.22, 0.22, TABLE_TOP)
 
 	# 中央岛两排之间的实体隔墙（1.30 m，可以跳上去走）
-	platforms.append({"c": Vector3.ZERO, "hx": 11.10 * U, "hz": 0.09 * U, "h": DIV_TOP * U})
+	platforms.append({"c": Vector3.ZERO, "hx": DIV_HALF_WIDTH * U, "hz": DIV_HALF_DEPTH * U, "h": DIV_TOP * U})
 	# 圆柱掩体太粗会把人推得跳不上墙，这里沿墙布一排细圆柱
 	var wstep := 0.9
 	var wn := int(22.2 / wstep)
@@ -100,6 +121,8 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 		"floor_y": 0.0,
 		"bounds": bounds,
 		"walls": walls,
+		"blade_boxes": [AABB(Vector3(-DIV_HALF_WIDTH, 0.0, -DIV_HALF_DEPTH) * U,
+			Vector3(DIV_HALF_WIDTH * 2.0, DIV_TOP, DIV_HALF_DEPTH * 2.0) * U)],
 		"cover": cover,
 		"platforms": platforms,
 		"camera_open": false,

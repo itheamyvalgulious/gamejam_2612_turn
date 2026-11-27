@@ -44,6 +44,18 @@ const CHAMBER := "chamber"
 
 const BALL := 1.2   # 玩家/相机避让球半径
 
+## 导航元信息：窄巷 / 雨夜广场都是平地 —— 地面 bounds 矩形，
+## 障碍来自 walls（立面/矮墙棱柱）与 cover 圆（物理半径还原后按怪物半径再膨胀）。
+static func nav_spec(_arena: Dictionary) -> Dictionary:
+	return {
+		"floor_margin": 1.2,
+		"walls_obstacles": true,
+		"walls_sight": true,
+		"cover_obstacles": true,
+		"cover_shrink": BALL,
+		"platforms": true,
+	}
+
 
 static func build(kind: String, origin := Vector3.ZERO) -> Dictionary:
 	Mats.build()

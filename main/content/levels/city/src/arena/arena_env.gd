@@ -145,6 +145,9 @@ static func omni(parent: Node3D, pos: Vector3, col: Color, range_m: float,
 	l.light_energy = energy
 	l.shadow_enabled = false
 	l.light_bake_mode = Light3D.BAKE_DISABLED
+	# 远距淡出：range 内照明不变，2×range 外光照贡献 <2% 直接剔除
+	# （装饰灯密度高、视角移动快，人眼分辨不出远端灭灯）。
+	_set_fade(l, range_m * 2.0)
 	parent.add_child(l)
 	return l
 
@@ -161,8 +164,15 @@ static func spot(parent: Node3D, xf: Transform3D, col: Color, range_m: float,
 	l.light_energy = energy
 	l.shadow_enabled = false
 	l.light_bake_mode = Light3D.BAKE_DISABLED
+	_set_fade(l, range_m * 2.0)
 	parent.add_child(l)
 	return l
+
+
+static func _set_fade(l: Light3D, dist: float) -> void:
+	l.distance_fade_enabled = true
+	l.distance_fade_begin = dist
+	l.distance_fade_length = dist * 0.5
 
 
 ## 加性光晕（朝向相机的圆盘）：灯具的“强光晕”。size 为直径（米）。

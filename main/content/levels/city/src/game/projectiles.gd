@@ -130,14 +130,14 @@ func step(dt: float, ctx: Dictionary) -> Array:
 			continue
 
 		if String(it["owner"]) == "enemy" and not bool(it["spent"]) and player != null and player.alive:
-			if player.is_guard_up() and Combat.blade_blocks(player.rig, prev, pos, float(it["radius"])):
+			if Combat.blade_blocks(player.rig, prev, pos, float(it["radius"])):  # 碰到刀即格挡
 				_reflect(it, player, events)
 				continue
 
 		# ---------------- 命中玩家
 		if String(it["owner"]) == "enemy" and not bool(it["spent"]) and player != null and player.alive:
-			var cap: Dictionary = player.capsule()
-			var res: Dictionary = Hit.sweep_sphere(prev, pos, float(it["radius"]), cap["a"], cap["b"], cap["r"])
+			var res: Dictionary = Hit.sweep_sphere_parts(prev, pos, float(it["radius"]),
+				player.rig.hit_parts() if player.rig != null and player.rig.has_method("hit_parts") else [])
 			if bool(res.get("hit", false)):
 				player.hurt(float(it["damage"]), res.get("normal", Vector3.UP),
 					"被箭射穿" if String(it["kind"]) == "arrow" else "被刀气切开")

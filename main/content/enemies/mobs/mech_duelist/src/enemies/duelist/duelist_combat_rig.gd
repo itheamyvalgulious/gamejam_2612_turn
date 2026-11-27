@@ -2,6 +2,7 @@ extends "res://src/enemies/duelist/duelist_model.gd"
 ## Adapts the humanoid sword and articulated model to the shared combat and parry code.
 
 const Sight = preload("res://src/core/vision.gd")
+const BodyColliders = preload("res://core/body_colliders.gd")
 const Lunge = preload("res://src/enemies/duelist/duelist_lunge.gd")
 const Sequence = preload("res://src/enemies/duelist/duelist_sequence.gd")
 const ReturnCut = preload("res://src/enemies/duelist/duelist_return_cut.gd")
@@ -29,7 +30,10 @@ var _normal_windup_end := 0.0
 var _normal_windup_extension := Sequence.NORMAL_WINDUP_EXTENSION
 var _opening_discs: Array = []
 var _metal_discs: Array = []
+var _opening_proxy: BladeProxy
+var _metal_proxy: BladeProxy
 var _body_geometry: Array[Dictionary] = []
+var _terrain_window := Vector2(0.0, 1.0)
 
 
 func _ready() -> void:
@@ -43,6 +47,42 @@ func _ready() -> void:
 		var radius := lerpf(Blade.TIP_OFFSET, 0.045, progress)
 		blade_discs.append({"y": lerpf(metal_end, SWEEP_END, progress), "r": radius})
 	_opening_discs = blade_discs
+	_build_blade_proxies(metal_end)
+
+
+## 少顶点凸体拟合：金属段由 ResonatingBlade 网格拟合，扫掠延伸段用
+## 16 棱柱 loft（上口内接 TIP_OFFSET，下口收成 0.045 的能量尾流）。
+func _build_blade_proxies(metal_end: float) -> void:
+	var groups: Array = []
+	for child in _blade_mount.get_children():
+		if child is not MeshInstance3D or child.name in [&"BladeInlay", &"EnergizedEdge"]:
+			continue
+		var part := child as MeshInstance3D
+		if part.mesh.get_surface_count() < 2:
+			continue    # 装饰条（channels）只有单面：刃体网格才有 body+edge 双 surface
+		var points := PackedVector3Array()
+		var tris := PackedInt32Array()
+		for surface in part.mesh.get_surface_count():
+			var arrays := part.mesh.surface_get_arrays(surface)
+			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] if arrays[Mesh.ARRAY_INDEX] is PackedInt32Array else PackedInt32Array()
+			var base := points.size()
+			for v in verts:
+				points.append(part.transform * v)
+			if idx.is_empty():
+				for i in verts.size():
+					tris.append(base + i)
+			else:
+				for i in idx:
+					tris.append(base + i)
+		groups.append({"points": points, "tris": tris})
+	_metal_proxy = BladeProxy.fit_groups(groups, 9)   # 3D 凸包段：≈0.5% 富余、0 漏判
+	var sweep := BladeProxy.loft(
+		BladeProxy.regular_ring(16, Blade.TIP_OFFSET),
+		BladeProxy.regular_ring(16, 0.045),
+		metal_end, SWEEP_END)
+	_opening_proxy = BladeProxy.new(_metal_proxy.pieces + [sweep])
+	blade_proxy = _opening_proxy
 
 
 func _cache_body_geometry() -> void:
@@ -78,7 +118,11 @@ func body_in_view(camera: Camera3D) -> bool:
 	return false
 
 
+var _routed_opening := false
+
+
 func start_strike(dash: Dictionary, time: float) -> void:
+	_routed_opening = dash.get("route_cut", false)
 	var live_position := position
 	_prepare_strike(0.0, HIT_START, HIT_END,
 		func(sample: float) -> void: Lunge.apply(self, dash, sample))
@@ -110,6 +154,7 @@ func cancel_strike() -> void:
 func _prepare_strike(start: float, from: float, to: float, sample_pose: Callable, opening := true) -> void:
 	_opening_clock = opening
 	blade_discs = _opening_discs if opening else _metal_discs
+	blade_proxy = _opening_proxy if opening else _metal_proxy
 	_strike_start = start
 	_hit_start = start + from
 	_hit_end = start + to
@@ -117,26 +162,47 @@ func _prepare_strike(start: float, from: float, to: float, sample_pose: Callable
 	attack_hit_to = _strike_seconds(_hit_end)
 	_prediction.clear()
 	weapon_scale = global_basis.get_scale().x
+	sampling_attack = true
 	for i in range(PREDICTION_STEPS + 1):
 		sample_pose.call(lerpf(from, to, float(i) / PREDICTION_STEPS))
 		_prediction.append(weapon_spin.global_transform)
+	sampling_attack = false
 
 
 
 func _strike_seconds(time: float) -> float:
 	if _opening_clock:
-		return Sequence.attack_seconds(time)
+		return Sequence.attack_seconds(time, _routed_opening)
 	return Sequence.normal_seconds(time, _normal_windup_end, _normal_rate, _normal_windup_extension)
 
 
-func update_strike(t0: float, t1: float, dt: float) -> void:
+func update_strike(t0: float, t1: float, dt: float, live_previous := Transform3D.IDENTITY) -> void:
 	last_dt = dt
 	attack_elapsed = _strike_seconds(t1)
 	is_attacking = t1 >= _strike_start and t0 < _hit_end and not _prediction.is_empty()
 	_hit_window = is_attacking and t1 >= _hit_start and t0 < t1
 	if _hit_window:
+		_terrain_window = Vector2(clampf(inverse_lerp(t0, t1, _hit_start), 0.0, 1.0),
+			clampf(inverse_lerp(t0, t1, _hit_end), 0.0, 1.0))
 		weapon_prev_xf = predict_weapon_xf(_strike_seconds(t0))
 		weapon_xf = predict_weapon_xf(attack_elapsed)
+		if has_attack_lane(global_position):
+			# The predicted sweep guides a parry, while damage follows the actual
+			# stair-adjusted blade between the first and last active frames.
+			if t0 >= _hit_start:
+				weapon_prev_xf = live_previous
+			if t1 <= _hit_end:
+				weapon_xf = weapon_spin.global_transform
+
+
+func use_terrain_sweep(previous: Transform3D, interrupted: bool) -> void:
+	if interrupted:
+		is_attacking = false
+		_hit_window = false
+	elif _hit_window:
+		var actual := weapon_spin.global_transform
+		weapon_prev_xf = previous.interpolate_with(actual, _terrain_window.x)
+		weapon_xf = previous.interpolate_with(actual, _terrain_window.y)
 
 
 func in_hit_window() -> bool:
@@ -155,33 +221,79 @@ func predict_weapon_xf(elapsed: float) -> Transform3D:
 	return _prediction[index].interpolate_with(_prediction[index + 1], sample - index)
 
 
+var _body_colliders: Dictionary = {}
+
+## Multi-cylinder hit volumes (requirement #2): one anchor per articulated
+## pose target / BoneAttachment, capsules fitted in anchor-local space — the
+## union fully contains every body mesh vertex (verify_body_parts.gd checks
+## vertex by vertex). The Blade attachment is the weapon, not the body.
 func hit_parts() -> Array:
-	var factor := global_basis.get_scale().x
-	var parts := [
-		_part(body.global_position, torso.to_global(Vector3(0, 0.31, 0)), 0.38 * factor, "pelvis"),
-		_part(torso.to_global(Vector3(0, 0.31, 0)), torso.to_global(Vector3(0, 0.78, 0)), 0.52 * factor, "chest"),
-		_part(head.to_global(Vector3(0, 0.13, 0)), head.to_global(Vector3(0, 0.40, 0)), 0.235 * factor, "head"),
-	]
-	for leg in legs:
-		var side: float = leg["side"]
-		var hip: Vector3 = leg["hip"].global_position
-		var knee: Vector3 = leg["knee"].global_position
-		var ankle: Vector3 = leg["ankle"].global_position
-		parts.append(_part(hip, knee, 0.20 * factor, "thigh", side))
-		parts.append(_part(knee, ankle, 0.18 * factor, "shin", side))
-		parts.append(_part(ankle, leg["ankle"].to_global(Vector3(0, -0.08, -0.36)), 0.13 * factor, "foot", side))
-	for arm in arms:
-		var side: float = arm["side"]
-		var shoulder: Vector3 = arm["shoulder"].global_position
-		var elbow: Vector3 = arm["elbow"].global_position
-		var hand: Vector3 = arm["wrist"].global_position
-		parts.append(_part(shoulder, elbow, 0.17 * factor, "upper_arm", side))
-		parts.append(_part(elbow, hand, 0.13 * factor, "forearm", side))
-	return parts
+	if _body_colliders.is_empty():
+		_body_colliders = _build_body_colliders()
+	return BodyColliders.world_parts(_body_colliders)["parts"]
 
 
-func _part(from: Vector3, to: Vector3, radius: float, label: String, side := 0.0) -> Dictionary:
-	return {"a": from, "b": to, "r": radius, "label": label, "side": side}
+const _FINGER_BONES := ["Index_", "Middle_", "Ring_", "Little_", "Thumb_"]
+
+## Articulaciones pequeñas que comparten cápsula con el joint padre que las
+## mueve: sin este mapa cada BoneAttachment emitiría su propia pieza (~70).
+const _MERGE_BONES := {
+	"Patella_L": "Shin_L", "Patella_R": "Shin_R",
+	"Forefoot_L": "Ankle_L", "Forefoot_R": "Ankle_R",
+	"Scapula_L": "Clavicle_L", "Scapula_R": "Clavicle_R",
+	"Pauldron_L": "UpperArm_L", "Pauldron_R": "UpperArm_R",
+	"ForearmRoll_L": "Elbow_L", "ForearmRoll_R": "Elbow_R",
+	"Palm_L": "Wrist_L", "Palm_R": "Wrist_R",
+	"Lumbar_1": "Pelvis", "Lumbar_2": "Pelvis",
+}
+
+func _build_body_colliders() -> Dictionary:
+	var by_bone := {}
+	var anchors: Array = []
+	for attachment: BoneAttachment3D in _skeleton.get_children():
+		by_bone[String(attachment.bone_name)] = attachment
+		if attachment.bone_name == &"Blade":
+			continue
+		anchors.append(attachment)
+	# Merges semánticos: dedos → wrist del mismo lado (cadena vía Palm),
+	# piezas pequeñas (rótula, escápula, hombrera, twist, palma, lumbares)
+	# → la articulación funcional que las transporta.
+	var anchor_map := {}
+	for bone: String in by_bone:
+		var target := ""
+		for pref in _FINGER_BONES:
+			if bone.begins_with(pref):
+				target = "Palm" + bone.right(2)
+		if _MERGE_BONES.has(bone):
+			target = _MERGE_BONES[bone]
+		if target != "" and by_bone.has(target):
+			anchor_map[by_bone[bone]] = by_bone[target]
+	# Los pose targets NO son hijos del skeleton: sus meshes sueltos (lámparas,
+	# pivotes decorativos) suben por la jerarquía hasta el root. Para que caigan
+	# en el cluster del joint que los mueve, se añaden como anchors y se mapean
+	# a su BoneAttachment (mismo transform → misma cápsula, sin duplicar pieza).
+	for i in _skeleton.get_bone_count():
+		var bone := String(_skeleton.get_bone_name(i))
+		var t: Node3D = _skeleton.pose_target(i)
+		if t != null and bone != "Blade":
+			anchors.append(t)
+			if by_bone.has(bone):
+				anchor_map[t] = by_bone[bone]
+	return BodyColliders.build({
+		"root": self,
+		"anchors": anchors,
+		"anchor_map": anchor_map,
+		"k_max": 3,
+		"b_max": 1,          # 22 clusters × 1 cápsula: tope hard por pieza (spec ≤30)
+		"budget": 30,
+		"mesh_filter": func(mi: MeshInstance3D) -> bool:
+			var n: Node = mi
+			while n != null and n != self:
+				if n == weapon_spin or n == weapon_root:
+					return false
+				n = n.get_parent()
+			return true,
+	})
 
 
 func sync_replay_pose() -> void:

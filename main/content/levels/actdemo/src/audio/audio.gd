@@ -141,11 +141,34 @@ var _prewarm_kinds: Array = ["step", "swing_light", "swing_heavy", "arrow_whistl
 
 
 func _start_prewarm() -> void:
+	var sess := get_node_or_null("/root/TurnSession")
+	if sess != null and sess.has_meta(&"snd_wave_cache"):
+		var shared: Variant = sess.get_meta(&"snd_wave_cache")
+		if shared is Dictionary and (shared as Dictionary).size() >= 60:
+			_cache = shared as Dictionary
+			return
 	# 先同步合成最常用声部的一档，保证第一帧就有声（~30ms，可接受）
 	for k in ["step", "swing_light", "hit", "clang"]:
 		_wave(k, 0)
 	_prewarm_thread = Thread.new()
 	_prewarm_thread.start(_prewarm_worker)
+
+
+func is_prewarming() -> bool:
+	return _prewarm_thread != null and _prewarm_thread.is_alive()
+
+
+func finish_prewarm() -> void:
+	if _prewarm_thread != null:
+		_prewarm_thread.wait_to_finish()
+		_prewarm_thread = null
+		for key in _prewarm_result:
+			_cache[key] = _prewarm_result[key]
+		_prewarm_result.clear()
+		var sess := get_node_or_null("/root/TurnSession")
+		if sess != null:
+			sess.set_meta(&"snd_wave_cache", _cache)
+		print("[snd] prewarm done: %d waves cached" % _cache.size())
 
 
 func _prewarm_worker() -> void:
@@ -158,12 +181,7 @@ func _prewarm_worker() -> void:
 
 func _collect_prewarm() -> void:
 	if _prewarm_thread != null and not _prewarm_thread.is_alive():
-		_prewarm_thread.wait_to_finish()
-		_prewarm_thread = null
-		for key in _prewarm_result:
-			_cache[key] = _prewarm_result[key]
-		_prewarm_result.clear()
-		print("[snd] prewarm done: %d waves cached" % _cache.size())
+		finish_prewarm()
 
 
 func _exit_tree() -> void:

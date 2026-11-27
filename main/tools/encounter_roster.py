@@ -12,12 +12,18 @@ ROOTS = {
         "src/enemies/duelist/duelist_wreckage.gd",
     ]),
     "shard": ("mobs/shard_phantom", ["scripts/character.gd", "scripts/phantom/energy_shuriken.gd"]),
-    "wheel": ("mobs/wheel_sentry", ["scenes/ranged/wheel_sentry_model.tscn", "src/enemies/ranged/wheel_sentry_beam.gd"]),
+    "wheel": ("mobs/wheel_sentry", [
+        "scenes/ranged/wheel_sentry_model.tscn",
+        "src/enemies/ranged/wheel_sentry_beam.gd",
+        "src/enemies/ranged/wheel_sentry_knockdown.gd",
+    ]),
 }
+AUDIO_EXTENSIONS = {".wav", ".ogg", ".mp3"}
+AUDIO_DESIGNS = {"duelist", "wheel", "fold"}
 PATHS = re.compile(r'''(?<=["'])res://([^"'\s]+)(?=["'])''')
 
 
-def dependencies(directory, roots):
+def dependencies(directory, roots, main=None):
     pending = list(roots)
     seen = set()
     while pending:
@@ -25,7 +31,12 @@ def dependencies(directory, roots):
         if item in seen:
             continue
         seen.add(item)
-        file = directory / item
+        # res://core/... is global project code, not package-local — it ships
+        # unchanged inside the design bundle so the reference keeps resolving.
+        if item.startswith("core/") and main is not None:
+            file = main / item
+        else:
+            file = directory / item
         if not file.exists():
             raise FileNotFoundError(file)
         if file.suffix in {".gd", ".tscn", ".tres", ".gdshader", ".gdshaderinc"}:
@@ -43,10 +54,10 @@ def design_path(design, relative):
     return Path("enemies") / ROOTS[design][0] / "design" / relative
 
 
-def pack_designs(enemies):
+def pack_designs(enemies, main=None):
     generated = {}
     for design, (directory, roots) in ROOTS.items():
-        for path, value in dependencies(enemies / directory, roots):
+        for path, value in dependencies(enemies / directory, roots, main):
             dest = design_path(design, path)
             if isinstance(value, str):
                 value = PATHS.sub(lambda m: "res://runtime/" + design_path(design, m[1]).as_posix(), value)
@@ -56,6 +67,11 @@ def pack_designs(enemies):
                     value = re.sub(r'\s+uid="uid://[^"]+"', "", value)
                 value = value.encode("utf-8")
             generated[dest] = value
+        if design in AUDIO_DESIGNS:
+            folder = enemies / directory
+            for clip in sorted((folder / "assets" / "audio").glob("*")):
+                if clip.is_file() and clip.suffix.lower() in AUDIO_EXTENSIONS:
+                    generated[design_path(design, clip.relative_to(folder))] = clip.read_bytes()
     return generated
 
 
@@ -77,7 +93,7 @@ def adapters(episode, enemies):
 
 def adapt_wheel(text):
     text = text.replace("extends EnemyUnit", 'extends "res://src/game/encounter_unit.gd"')
-    for path in ("scenes/ranged/wheel_sentry_model.tscn", "src/enemies/ranged/wheel_sentry_beam.gd"):
+    for path in ROOTS["wheel"][1]:
         text = text.replace("res://" + path, "res://team/wheel/" + path)
     text = text.replace('kind = "archer"', 'kind = "archer"\n\tenemy_id = "wheel_sentry"')
     return text
@@ -129,6 +145,9 @@ func spawn_shard(pos: Vector3, direction: Vector3, speed: float, damage: float) 
         begin = source.index('\t\t"sentry_charge":')
         end = source.index('\t\t"laser":', begin)
         text = text.replace('\t\t"laser":', source[begin:end] + '\t\t"laser":', 1)
+    if relative == "src/audio/audio.gd":
+        text = text.replace('"qi_loop", "sentry_charge",', '"qi_loop", "sentry_charge", "sentry_break",', 1)
+        text = text.replace('"swing_light", "hit", "clang"', '"swing_light", "hit", "clang", "sentry_break"', 1)
     if relative == "src/core/params.gd":
         source = (wheel / relative).read_text(encoding="utf-8-sig")
         specs = [line for line in source.splitlines() if re.match(r'\s*_f\("sentry\.', line)]

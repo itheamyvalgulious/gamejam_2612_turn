@@ -19,6 +19,7 @@ extends Node3D
 ## 玩家可见的数值一律走 P.getm()（真实米）。
 
 const MK = preload("res://src/vesper/mesh_kit.gd")
+const BodyColliders = preload("res://core/body_colliders.gd")
 const MAT = preload("res://src/vesper/materials.gd")
 const PAL = preload("res://src/vesper/material_palette.gd")
 const Trail = preload("res://src/vesper/blade_trail.gd")
@@ -121,7 +122,8 @@ var attack_hit_from := 0.0            # 判定窗口（warp 到 clip 时间轴�
 var attack_hit_to := 0.0
 var vfx_enabled := true
 var weapon_meshes: Array = []         # 刀的 MeshInstance3D（真实碰撞剖面用）
-var blade_discs: Array = []           # [{y, r}] 由剑的网格顶点算出的圆盘剖面
+var blade_discs: Array = []           # [{y, r}] 圆盘剖面（仅调试可视化；命中走 blade_proxy）
+var blade_proxy: BladeProxy           # 少顶点凸体近似（GJK 最短距离）
 var weapon_xf: Transform3D = Transform3D.IDENTITY
 var weapon_prev_xf: Transform3D = Transform3D.IDENTITY
 var weapon_scale := 1.0
@@ -260,6 +262,7 @@ func _ready() -> void:
 			if c is MeshInstance3D:
 				weapon_meshes.append(c)
 		blade_discs = build_blade_discs()
+		blade_proxy = build_blade_proxy()
 	for mi in weapon_meshes:
 		var mm = mi.material_override
 		if mm is ShaderMaterial:
@@ -1668,64 +1671,55 @@ func blade_span() -> Vector2:
 ## 所以把机体拆成：骨盆 / 胸口 / 背包 / 头 / 肩甲×2 / 四条腿(股骨+胫骨+足) /
 ## 双臂(上臂+前臂+拳)。返回 [{a, b, r, label}]，世界坐标，r 已含机体缩放。
 ## 只做粗粒度包围，不追求网格级精确；每段都是关节到关节的胶囊。
+var _body_colliders: Dictionary = {}
+
+## 多圆柱体受击判定件（requirement #2）：BodyColliders 按关节局部空间拟合，
+## 并集完全包含机身网格顶点；每帧只做局部→世界变换，不重拟合。
 func hit_parts() -> Array:
-	var parts: Array = []
-	if body == null:
-		return parts
-	var s := global_transform.basis.get_scale().x
-	if s < 0.001:
-		s = 1.0
-	# 骨盆（腰环以下，四条腿的挂点都在这圈上）
-	parts.append({"a": body.global_position - Vector3(0, 0.18 * s, 0),
-		"b": body.global_position + Vector3(0, 0.20 * s, 0), "r": 0.56 * s, "label": "pelvis"})
-	# 胸口 / 头 / 背包 / 肩甲：跟着腰环转
-	if torso != null:
-		parts.append({"a": torso.global_transform * Vector3(0, 0.12, 0),
-			"b": torso.global_transform * Vector3(0, 0.60, 0), "r": 0.44 * s, "label": "chest"})
-		parts.append({"a": torso.global_transform * Vector3(0, 0.30, 0.14),
-			"b": torso.global_transform * Vector3(0, 0.34, 0.46), "r": 0.42 * s, "label": "pack"})
-	if head != null:
-		var hc: Vector3 = head.global_position
-		var hs := head.global_transform.basis.get_scale().x
-		parts.append({"a": hc, "b": hc + Vector3(0, 0.18 * hs, 0), "r": 0.22 * hs, "label": "head"})
-	for p in pauldrons:
-		if not is_instance_valid(p):
-			continue
-		var ps: float = p.global_transform.basis.get_scale().x
-		parts.append({"a": p.global_position, "b": p.global_position + Vector3(0, 0.10 * ps, 0),
-			"r": 0.30 * ps, "label": "pauldron"})
-	# 四条腿：关节到关节（腿骨在世界里是斜着撑开的，所以必须跟着关节走）
+	if _body_colliders.is_empty():
+		_body_colliders = _build_body_colliders()
+	return BodyColliders.world_parts(_body_colliders)["parts"]
+
+
+func hit_broadphase() -> AABB:
+	if _body_colliders.is_empty():
+		_body_colliders = _build_body_colliders()
+	return BodyColliders.world_parts(_body_colliders)["broadphase"]
+
+
+func _build_body_colliders() -> Dictionary:
+	var anchors: Array = []
+	for n in [body, torso, head]:
+		if n != null:
+			anchors.append(n)
+	anchors.append_array(pauldrons)
 	for leg in legs:
-		var hip = leg.get("hip")
-		var knee = leg.get("knee")
-		var ankle = leg.get("ankle")
-		if hip == null or knee == null or ankle == null:
-			continue
-		if not (is_instance_valid(hip) and is_instance_valid(knee) and is_instance_valid(ankle)):
-			continue
-		parts.append({"a": hip.global_position, "b": knee.global_position,
-			"r": 0.30 * s, "label": "leg"})
-		parts.append({"a": knee.global_position, "b": ankle.global_position,
-			"r": 0.25 * s, "label": "leg"})
-		var toe: Vector3 = ankle.global_position \
-			+ ankle.global_transform.basis.x.normalized() * 0.34 * s
-		parts.append({"a": ankle.global_position, "b": toe, "r": 0.24 * s, "label": "foot"})
-	# 双臂：肩→肘→腕，最后给拳头一个球
+		for k in ["yaw", "hip", "knee", "ankle"]:
+			if leg.get(k) != null:
+				anchors.append(leg[k])
 	for arm in arms:
-		var sh = arm.get("shoulder")
-		var el = arm.get("elbow")
-		var wr = arm.get("wrist")
-		if sh == null or el == null or wr == null:
-			continue
-		if not (is_instance_valid(sh) and is_instance_valid(el) and is_instance_valid(wr)):
-			continue
-		parts.append({"a": sh.global_position, "b": el.global_position,
-			"r": 0.24 * s, "label": "arm"})
-		parts.append({"a": el.global_position, "b": wr.global_position,
-			"r": 0.21 * s, "label": "arm"})
-		parts.append({"a": wr.global_position, "b": wr.global_position,
-			"r": 0.20 * s, "label": "hand"})
-	return parts
+		for k in ["shoulder", "elbow", "wrist"]:
+			if arm.get(k) != null:
+				anchors.append(arm[k])
+	return BodyColliders.build({
+		"root": self,
+		"anchors": anchors,
+		"k_max": 3,
+		"budget": 40,
+		"mesh_filter": _body_mesh_filter,
+	})
+
+
+## 剑刃/投影/喷焰属表现件，不参与「身体」判定。
+func _body_mesh_filter(mi: MeshInstance3D) -> bool:
+	if String(mi.name).begins_with("flame"):
+		return false
+	var n: Node = mi
+	while n != null and n != self:
+		if n == weapon_spin or n == weapon_root or n == contact_shadow:
+			return false
+		n = n.get_parent()
+	return true
 
 
 func body_world() -> Transform3D:
@@ -1952,6 +1946,33 @@ func face_target(pos: Vector3) -> void:
 
 func set_timings(d: Dictionary) -> void:
 	timing = d
+
+
+## 少顶点凸体拟合：weapon_meshes 每个网格一组，分别按轴分段取凸包（命中/格挡用）
+func build_blade_proxy(segments := 4) -> BladeProxy:
+	var groups: Array = []
+	for mi in weapon_meshes:
+		var mesh: Mesh = mi.mesh
+		if mesh == null or mesh.get_surface_count() == 0:
+			continue
+		var xf: Transform3D = mi.transform
+		var points := PackedVector3Array()
+		var tris := PackedInt32Array()
+		for surface in mesh.get_surface_count():
+			var arrays := mesh.surface_get_arrays(surface)
+			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] if arrays[Mesh.ARRAY_INDEX] is PackedInt32Array else PackedInt32Array()
+			var base := points.size()
+			for v in verts:
+				points.append(xf * v)
+			if idx.is_empty():
+				for i in verts.size():
+					tris.append(base + i)
+			else:
+				for i in idx:
+					tris.append(base + i)
+		groups.append({"points": points, "tris": tris})
+	return BladeProxy.fit_groups(groups, segments)
 
 
 # ==================================================== [ACT PATCH] 刀的网格剖面

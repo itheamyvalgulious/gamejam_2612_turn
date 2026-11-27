@@ -83,10 +83,10 @@ func _process(dt: float) -> void:
 				player.rig.vertical_velocity = minf(player.rig.vertical_velocity, 0.0)
 		player.rig.position = p
 
-	_dbg += dt
-	if _dbg > 0.25:
-		_dbg = 0.0
-		print("[lift] car=%.2f inside=%s p=(%.2f, %.2f, %.2f)" % [car_y, inside, p.x * 0.547, p.y * 0.547, p.z * 0.547])
+	#_dbg += dt
+	#if _dbg > 0.25:
+	#	_dbg = 0.0
+	#	print("[lift] car=%.2f inside=%s p=(%.2f, %.2f, %.2f)" % [car_y, inside, p.x * 0.547, p.y * 0.547, p.z * 0.547])
 
 	var moving := absf(car_y - target_y) > 0.0005
 	if moving != _moving:

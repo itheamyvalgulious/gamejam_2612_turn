@@ -679,3 +679,64 @@ static func arc_points(a: Vector3, b: Vector3, segments: int, amplitude: float,
 			+ up * rng.randf_range(-amplitude, amplitude) * envelope
 		pts.append(a.lerp(b, t) + off)
 	return pts
+
+## 合并同一父节点下、同材质的叶子 MeshInstance3D。
+## 只合并「直接子节点」，并跳过 top_level / 多 surface / 带骨架的网格，
+## 所以所有被动画驱动的 pivot 都保持原样；顶点烘焙到父节点局部空间，
+## 渲染结果、阴影和材质完全不变，只是 draw call 大幅减少。
+static func merge_child_meshes(root: Node) -> void:
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		if node is Node3D and (node as Node3D).top_level:
+			continue
+		var groups := {}
+		for raw in node.get_children():
+			if not (raw is MeshInstance3D):
+				continue
+			var mi: MeshInstance3D = raw
+			if mi.mesh == null or mi.mesh.get_surface_count() != 1 or mi.top_level:
+				continue
+			if mi.skin != null or not mi.skeleton.is_empty():
+				continue
+			var mat: Material = mi.material_override
+			if mat == null:
+				mat = mi.mesh.surface_get_material(0)
+			if mat == null:
+				continue
+			var key := [mat, mi.cast_shadow, mi.gi_mode, mi.layers, mi.visible]
+			if not groups.has(key):
+				groups[key] = []
+			(groups[key] as Array).append(mi)
+		for key in groups:
+			var list: Array = groups[key]
+			if list.size() < 2:
+				continue
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			var ok := true
+			for item: MeshInstance3D in list:
+				st.append_from(item.mesh, 0, item.transform)
+			var merged := st.commit() as ArrayMesh
+			if merged == null:
+				ok = false
+			if not ok:
+				continue
+			var first: MeshInstance3D = list[0]
+			var out := MeshInstance3D.new()
+			out.name = "Merged"
+			out.mesh = merged
+			out.material_override = first.material_override
+			if out.material_override == null:
+				merged.surface_set_material(0, first.mesh.surface_get_material(0))
+			out.cast_shadow = first.cast_shadow
+			out.gi_mode = first.gi_mode
+			out.layers = first.layers
+			out.visible = first.visible
+			node.add_child(out)
+			for item: MeshInstance3D in list:
+				node.remove_child(item)
+				item.queue_free()
+		for child in node.get_children():
+			if child is Node3D and not (child is MeshInstance3D):
+				stack.append(child)

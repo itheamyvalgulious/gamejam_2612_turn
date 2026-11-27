@@ -85,6 +85,10 @@ func light(pos: Vector3, color: Color, energy: float, reach: float, shadow := fa
 	lamp.light_size = 0.22
 	lamp.light_specular = 0.2
 	lamp.shadow_enabled = shadow
+	# 远距淡出：reach 内照明不变，2×reach 外贡献 <2% 直接剔除。
+	lamp.distance_fade_enabled = true
+	lamp.distance_fade_begin = reach * 2.0
+	lamp.distance_fade_length = reach
 
 func cabinet(pos: Vector3, size: Vector3, color := "teal") -> void:
 	block(color,size,pos+Vector3(0,size.y*0.5,0))
@@ -126,12 +130,15 @@ func environment(outside := false) -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color("879bb4")
 	env.ambient_light_energy = 0.22 if outside else 0.26
-	env.ssr_enabled = true
+	# SSR / SSAO 在中低端 GPU（如 GTX 1650）上每帧 ~3ms，是掉帧来源；
+	# 做成「后期特效」设置项，嫌卡的玩家可自行关闭。
+	var post_fx: bool = bool(TurnSession.get_option("display.post_fx", true))
+	env.ssr_enabled = post_fx
 	env.ssr_max_steps = 48
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.glow_enabled = true
 	env.glow_intensity = 0.35
-	env.ssao_enabled = true
+	env.ssao_enabled = post_fx
 	env.ssao_radius = 1.0
 	env.ssao_intensity = 1.2
 	env.fog_enabled = true
@@ -280,5 +287,9 @@ func downlight(pos: Vector3,color: Color,energy: float,reach: float) -> void:
 	lamp.spot_attenuation=1.4
 	lamp.light_size=0.4
 	lamp.light_specular=0.25
-	lamp.shadow_enabled=true
+	lamp.distance_fade_enabled=true
+	lamp.distance_fade_begin=reach*2.0
+	lamp.distance_fade_length=reach
+	# 阴影由主光负责；这里的聚光灯只做照明（range 24 的投影每帧重画全场）
+	lamp.shadow_enabled=false
 	root.add_child(lamp)
