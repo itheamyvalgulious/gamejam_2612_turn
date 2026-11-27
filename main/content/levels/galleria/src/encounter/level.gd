@@ -63,7 +63,10 @@ func start_level(_idx: int) -> void:
 	drop_start_height = player.rig.global_position.y
 	if nav == null:
 		nav = NavField.build(arena, SceneArena.nav_spec(arena))
-		if arena["height_test"]:
+		# 刀客（1.75 半径 + 上半身圆柱）的图只有高低差关用得上：普通中庭只有
+		# 哨兵/单轮，预建这棵树在进关时白吃 ~76ms。按实际阵容决定。非高低差时
+		# 另按哨兵半径预建一张（上游在哨兵楼梯穿模修复里引入）。
+		if bool(arena.get("height_test", false)):
 			nav.prewarm_graph(ACTOR_RADIUS, DUELIST_STEP_HEIGHT, DUELIST_UPPER)
 		else:
 			nav.prewarm_graph(GALLERIA_SENTINEL_RADIUS, NAV_SENTINEL_STEP)

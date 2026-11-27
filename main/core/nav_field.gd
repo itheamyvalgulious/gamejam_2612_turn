@@ -27,6 +27,32 @@ var _obstacle_grid := {}          # Vector2i -> Array[int]
 var _adj := {}                    # region index -> Array[{to:int, link:String, line:int}]
 var _adjacent_step := ADJACENT_STEP
 
+## 热路径扁平表（_index() 里一次建好，避免逐次 Dictionary 取值 / String 转换）。
+var _ob_y0 := PackedFloat64Array()
+var _ob_y1 := PackedFloat64Array()
+var _ob_actor := PackedByteArray()
+var _ob_rect: Array = []
+var _ob_poly: Array = []
+var _ob_isrect := PackedByteArray()
+var _ob_seen := PackedInt32Array()
+var _ob_stamp := 0
+var _ob_pt_grid := {}
+var _line_y0 := PackedFloat64Array()
+var _line_y1 := PackedFloat64Array()
+var _line_len := PackedFloat64Array()
+var _line_half := PackedFloat64Array()
+var _line_a := PackedVector2Array()
+var _line_dir := PackedVector2Array()
+var _line_perp := PackedVector2Array()
+var _region_y0 := PackedFloat64Array()
+var _region_poly: Array = []
+var _region_n: Array = []
+## 点查询细网格：1u 格 × 2u 障碍膨胀（保证半径 ≤2u 的查询候选超集）。
+const PT_CELL := 1.0
+const PT_PAD := 2.0
+const _EMPTY: Array = []
+var _EMPTY_I := PackedInt32Array()
+
 ## --nav-profile：打点累加器 {name:{"us","n","max"}}。未启用时每次查询一次
 ## cmdline（惰性一次），启用后每调用两次字典查找 —— 平时零开销。
 var _prof := {}
@@ -324,6 +350,110 @@ static func _v2(p: Variant) -> Vector2:
 func _index() -> void:
 	_region_grid = _grid_index(regions, func(r: Dictionary) -> Rect2: return r["aabb"])
 	_obstacle_grid = _grid_index(obstacles, func(o: Dictionary) -> Rect2: return o["aabb"])
+	# 热路径用的扁平障碍表：避免逐次 Dictionary 取值 / String() 转换。
+	_ob_y0 = PackedFloat64Array()
+	_ob_y1 = PackedFloat64Array()
+	_ob_actor = PackedByteArray()
+	_ob_rect = []
+	_ob_poly = []
+	for o: Dictionary in obstacles:
+		_ob_y0.append(float(o["y0"]))
+		_ob_y1.append(float(o["y1"]))
+		_ob_actor.append(1 if String(o["pad"]) == "actor" else 0)
+		_ob_rect.append(o["aabb"])
+		_ob_poly.append(o["poly"])
+	_ob_isrect = PackedByteArray()
+	for i in obstacles.size():
+		_ob_isrect.append(1 if _is_rect_poly(_ob_poly[i], _ob_rect[i]) else 0)
+	# 点查询用的细网格：每格列出 AABB 距该格 ≤ PT_PAD 的障碍（候选超集，
+	# 逐个精确判定，结果与 4u 粗网格 + grow 查询完全一致，只是少了合并/去重）。
+	_ob_pt_grid = {}
+	for i in obstacles.size():
+		var r: Rect2 = (_ob_rect[i] as Rect2).grow(PT_PAD + 0.01)
+		for gx in range(int(floor(r.position.x / PT_CELL)), int(floor(r.end.x / PT_CELL)) + 1):
+			for gz in range(int(floor(r.position.y / PT_CELL)), int(floor(r.end.y / PT_CELL)) + 1):
+				var key := Vector2i(gx, gz)
+				var cell = _ob_pt_grid.get(key)
+				if cell == null:
+					cell = PackedInt32Array()
+				cell.append(i)
+				_ob_pt_grid[key] = cell
+	_ob_seen = PackedInt32Array()
+	_ob_seen.resize(obstacles.size())
+	_ob_seen.fill(0)
+	_ob_stamp = 0
+	_line_y0 = PackedFloat64Array()
+	_line_y1 = PackedFloat64Array()
+	_line_len = PackedFloat64Array()
+	_line_half = PackedFloat64Array()
+	_line_a = PackedVector2Array()
+	_line_dir = PackedVector2Array()
+	_line_perp = PackedVector2Array()
+	for line: Dictionary in lines:
+		_line_y0.append(float(line["y0"]))
+		_line_y1.append(float(line["y1"]))
+		_line_len.append(float(line["len"]))
+		_line_half.append(float(line["width"]) * 0.5)
+		_line_a.append(line["a"])
+		_line_dir.append(line["dir"])
+		_line_perp.append(line["perp"])
+	_region_y0 = PackedFloat64Array()
+	_region_poly = []
+	_region_n = []
+	for region: Dictionary in regions:
+		_region_y0.append(float(region["y0"]))
+		_region_poly.append(region["poly"])
+		# 未归一化的内法线：_poly_contains 只看符号，与归一化版等价。
+		var poly: PackedVector2Array = region["poly"]
+		var ns := PackedVector2Array()
+		for k in poly.size():
+			var d := poly[(k + 1) % poly.size()] - poly[k]
+			ns.append(Vector2(d.y, -d.x))
+		_region_n.append(ns)
+
+
+static func _is_rect_poly(poly: PackedVector2Array, r: Rect2) -> bool:
+	if poly.size() != 4:
+		return false
+	for v in poly:
+		if not ((v.x == r.position.x or v.x == r.end.x) and (v.y == r.position.y or v.y == r.end.y)):
+			return false
+	return true
+
+
+func _region_has(i: int, p: Vector2) -> bool:
+	var poly: PackedVector2Array = _region_poly[i]
+	var ns: PackedVector2Array = _region_n[i]
+	for k in poly.size():
+		if (p - poly[k]).dot(ns[k]) < 0.0:
+			return false
+	return true
+
+
+## 点 p 周围 reach 内的障碍候选。
+func _pt_obstacles(p: Vector2, reach: float) -> Variant:
+	if reach <= PT_PAD:
+		return _ob_pt_grid.get(Vector2i(int(floor(p.x / PT_CELL)), int(floor(p.y / PT_CELL))), _EMPTY_I)
+	return _r_obstacle_candidates(Rect2(p, Vector2.ZERO).grow(reach))
+
+
+
+
+## 障碍 i 的 XZ 有符号距离 < pad？凸多边形落在自身 AABB 内，
+## 所以点到 AABB 的距离 ≥ pad 时必不命中（与直接求 _poly_signed_dist 等价）。
+func _ob_within(i: int, p: Vector2, pad: float) -> bool:
+	var r: Rect2 = _ob_rect[i]
+	var dx := maxf(maxf(r.position.x - p.x, p.x - r.end.x), 0.0)
+	var dz := maxf(maxf(r.position.y - p.y, p.y - r.end.y), 0.0)
+	var d2 := dx * dx + dz * dz
+	if _ob_isrect[i] != 0:
+		# 轴对齐矩形的精确欧氏有符号距离：外部 = 到矩形距离，内部 ≤ 0。
+		if pad > 0.0:
+			return d2 < pad * pad
+		return p.x > r.position.x and p.x < r.end.x and p.y > r.position.y and p.y < r.end.y
+	if d2 > 0.0 and d2 >= pad * pad:
+		return false
+	return _poly_signed_dist(_ob_poly[i], p) < pad
 
 
 static func _grid_index(list: Array, aabb: Callable) -> Dictionary:
@@ -340,16 +470,32 @@ static func _grid_index(list: Array, aabb: Callable) -> Dictionary:
 
 
 func _region_candidates(p: Vector2) -> Array:
-	return _region_grid.get(Vector2i(int(floor(p.x / GRID_CELL)), int(floor(p.y / GRID_CELL))), [])
+	return _region_grid.get(Vector2i(int(floor(p.x / GRID_CELL)), int(floor(p.y / GRID_CELL))), _EMPTY)
 
 
 func _r_obstacle_candidates(rect: Rect2) -> Array:
+	var gx0 := int(floor(rect.position.x / GRID_CELL))
+	var gx1 := int(floor(rect.end.x / GRID_CELL))
+	var gz0 := int(floor(rect.position.y / GRID_CELL))
+	var gz1 := int(floor(rect.end.y / GRID_CELL))
+	if gx0 == gx1 and gz0 == gz1:
+		return _obstacle_grid.get(Vector2i(gx0, gz0), _EMPTY)
+	if _ob_seen.size() != obstacles.size():
+		_ob_seen.resize(obstacles.size())
+		_ob_seen.fill(0)
+	_ob_stamp += 1
+	if _ob_stamp >= 0x3FFFFFFF:
+		_ob_seen.fill(0)
+		_ob_stamp = 1
 	var out: Array = []
-	for gx in range(int(floor(rect.position.x / GRID_CELL)), int(floor(rect.end.x / GRID_CELL)) + 1):
-		for gz in range(int(floor(rect.position.y / GRID_CELL)), int(floor(rect.end.y / GRID_CELL)) + 1):
-			var cell: Array = _obstacle_grid.get(Vector2i(gx, gz), [])
-			for i in cell:
-				if not out.has(i):
+	for gx in range(gx0, gx1 + 1):
+		for gz in range(gz0, gz1 + 1):
+			var cell = _obstacle_grid.get(Vector2i(gx, gz))
+			if cell == null:
+				continue
+			for i: int in cell:
+				if _ob_seen[i] != _ob_stamp:
+					_ob_seen[i] = _ob_stamp
 					out.append(i)
 	return out
 
@@ -413,20 +559,25 @@ func _region_link(a: Dictionary, b: Dictionary) -> Dictionary:
 func _r_support_at(pos: Vector3, ceiling := INF) -> float:
 	var p := Vector2(pos.x, pos.z)
 	var best := -INF
-	for i in _region_candidates(p):
-		var region: Dictionary = regions[i]
-		var h := float(region["y0"])
+	for i: int in _region_candidates(p):
+		var h := _region_y0[i]
 		if h > ceiling or h <= best:
 			continue
-		if _poly_contains(region["poly"], p):
+		if _region_has(i, p):
 			best = h
-	for line in lines:
-		if not line.get("interpolate_support", true):
+	# 与 _line_info(line, p) 相同的走廊判定，内联避免每次分配 Dictionary。
+	for li in _line_len.size():
+		if not lines[li].get("interpolate_support", true):
 			continue
-		var info := _line_info(line, p)
-		if info.is_empty():
+		var rel := p - _line_a[li]
+		var t := rel.dot(_line_dir[li])
+		var length := _line_len[li]
+		if t < 0.0 or t > length:
+>>>>>>> 6950d79 (perf(nav): 中庭追击寻路消除单帧尖峰——AStar3D 图搜索 + 扁平热表 + 路点二分 + 规划预算)
 			continue
-		var h := lerpf(float(line["y0"]), float(line["y1"]), float(info["t"]))
+		if absf(rel.dot(_line_perp[li])) > _line_half[li]:
+			continue
+		var h := lerpf(_line_y0[li], _line_y1[li], clampf(t / length, 0.0, 1.0))
 		if h <= ceiling and h > best:
 			best = h
 	return best
@@ -561,12 +712,10 @@ func _nearest_on_poly(poly: PackedVector2Array, p: Vector2) -> Vector2:
 func _r_blocked_at(pos: Vector3, radius: float, step_height: float) -> bool:
 	var p := Vector2(pos.x, pos.z)
 	var head := pos.y + STANCE_HEIGHT
-	for i in _obstacle_candidates(Rect2(p, Vector2.ZERO).grow(radius + 0.1)):
-		var o: Dictionary = obstacles[i]
-		if pos.y >= float(o["y1"]) - step_height or head <= float(o["y0"]) + 0.02:
+	for i: int in _pt_obstacles(p, radius + 0.1):
+		if pos.y >= _ob_y1[i] - step_height or head <= _ob_y0[i] + 0.02:
 			continue
-		var pad := radius if String(o["pad"]) == "actor" else 0.0
-		if _poly_signed_dist(o["poly"], p) < pad:
+		if _ob_within(i, p, radius if _ob_actor[i] != 0 else 0.0):
 			return true
 	return false
 
@@ -583,12 +732,10 @@ func _blocked_at(pos: Vector3, radius: float, step_height: float) -> bool:
 
 func _r_column_clear(at: Vector3, radius: float, bottom: float, top: float) -> bool:
 	var p := Vector2(at.x, at.z)
-	for i in _obstacle_candidates(Rect2(p, Vector2.ZERO).grow(radius + 0.1)):
-		var o: Dictionary = obstacles[i]
-		if at.y + top <= float(o["y0"]) or at.y + bottom >= float(o["y1"]):
+	for i: int in _pt_obstacles(p, radius + 0.1):
+		if at.y + top <= _ob_y0[i] or at.y + bottom >= _ob_y1[i]:
 			continue
-		var pad := radius if String(o["pad"]) == "actor" else 0.0
-		if _poly_signed_dist(o["poly"], p) < pad:
+		if _ob_within(i, p, radius if _ob_actor[i] != 0 else 0.0):
 			return false
 	return true
 
@@ -619,18 +766,21 @@ func _r_move_supported(from: Vector3, to: Vector3, radius: float,
 	var offset := (to - from).slide(Vector3.UP)
 	var steps := maxi(1, ceili(offset.length() / SAMPLE_STEP))
 	var pos := from
+	var has_upper := not upper.is_empty()
+	var u_rad := float(upper.get("radius", 0.0)) if has_upper else 0.0
+	var u_bot := float(upper.get("bottom", 0.0)) if has_upper else 0.0
+	var u_top := float(upper.get("top", 0.0)) if has_upper else 0.0
 	for i in range(1, steps + 1):
 		var target := from + offset * (float(i) / steps)
-		var support := support_at(target, pos.y + step_height)
+		var support := _r_support_at(target, pos.y + step_height)
 		if support < -INF * 0.5:
 			break
 		target.y = support
 		if pos.y - support > max_drop:
 			break
-		if _blocked_at(target, radius, step_height):
+		if _r_blocked_at(target, radius, step_height):
 			break
-		if not upper.is_empty() and not column_clear(target, float(upper["radius"]),
-				float(upper["bottom"]), float(upper["top"])):
+		if has_upper and not _r_column_clear(target, u_rad, u_bot, u_top):
 			break
 		pos = target
 	return pos
@@ -922,6 +1072,8 @@ func _r_path(from: Vector3, goal: Vector3, radius: float,
 
 var _graphs := {}   # gkey -> {nodes: Array[Dictionary], r_cells: Dictionary, l_cells: Dictionary}
 const GRAPH_CELL := 1.6
+const ANCHOR_CELL := 6.0
+const ANCHOR_RADIUS := 6.0
 
 
 func prewarm_graph(radius: float, step_height := DEFAULT_STEP_HEIGHT, upper: Dictionary = {}) -> void:
@@ -1087,7 +1239,26 @@ func _get_graph(radius: float, step_height: float, upper: Dictionary) -> Diction
 					(nodes[int(end_id)]["nbrs"] as Array).append({"to": best_r, "cost": cost})
 					(nodes[best_r]["nbrs"] as Array).append({"to": int(end_id), "cost": cost})
 
-	var graph := {"nodes": nodes, "r_cells": r_cells, "l_cells": l_cells}
+	# 图搜索交给引擎 AStar3D（C++）：GDScript 线性开表在 1600+ 节点上单次 ~30ms。
+	# 边代价 = 距离 × 终点 weight_scale：楼梯节点 1.2 复刻 line 段的 ×1.2 代价。
+	var astar := AStar3D.new()
+	astar.reserve_space(nodes.size() + 2)
+	for i in nodes.size():
+		astar.add_point(i, nodes[i]["pos"], 1.2 if int(nodes[i]["li"]) >= 0 else 1.0)
+	for i in nodes.size():
+		for e in nodes[i]["nbrs"]:
+			var j := int(e["to"])
+			if j > i:
+				astar.connect_points(i, j, true)
+	var node_cells := {}
+	for i in nodes.size():
+		var p: Vector3 = nodes[i]["pos"]
+		var ck := Vector2i(int(floor(p.x / ANCHOR_CELL)), int(floor(p.z / ANCHOR_CELL)))
+		if not node_cells.has(ck):
+			node_cells[ck] = []
+		(node_cells[ck] as Array).append(i)
+	var graph := {"nodes": nodes, "r_cells": r_cells, "l_cells": l_cells,
+		"astar": astar, "node_cells": node_cells}
 	_graphs[gkey] = graph
 	return graph
 
@@ -1095,25 +1266,33 @@ func _get_graph(radius: float, step_height: float, upper: Dictionary) -> Diction
 func _graph_anchors(graph: Dictionary, pos: Vector3, radius: float,
 		step_height: float, upper: Dictionary) -> Array:
 	var nodes: Array = graph["nodes"]
+	var cells: Dictionary = graph["node_cells"]
 	var cands: Array = []
-	for i in nodes.size():
-		var p: Vector3 = nodes[i]["pos"]
-		if absf(p.y - pos.y) > 1.35:
-			continue
-		var d2 := p.distance_squared_to(pos)
-		if d2 <= 36.0:
-			cands.append({"id": i, "d2": d2})
-	cands.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return float(a["d2"]) < float(b["d2"]))
+	var cx := int(floor(pos.x / ANCHOR_CELL))
+	var cz := int(floor(pos.z / ANCHOR_CELL))
+	for gx in range(cx - 1, cx + 2):
+		for gz in range(cz - 1, cz + 2):
+			var cell = cells.get(Vector2i(gx, gz))
+			if cell == null:
+				continue
+			for i: int in cell:
+				var p: Vector3 = nodes[i]["pos"]
+				if absf(p.y - pos.y) > 1.35:
+					continue
+				var d2 := p.distance_squared_to(pos)
+				if d2 <= ANCHOR_RADIUS * ANCHOR_RADIUS:
+					cands.append(Vector2(d2, i))
+	# 同距时按节点号稳定排序（与旧的全量顺序扫描一致）。
+	cands.sort()
 	var out: Array = []
-	for c in cands.slice(0, mini(8, cands.size())):
-		var nid := int(c["id"])
+	for c: Vector2 in cands.slice(0, mini(8, cands.size())):
+		var nid := int(c.y)
 		if move_clear(pos, nodes[nid]["pos"], radius, step_height, 0.6, upper):
 			out.append(nid)
 			if out.size() >= 3:
 				break
 	if out.is_empty() and not cands.is_empty():
-		out.append(int(cands[0]["id"]))
+		out.append(int(cands[0].y))
 	return out
 
 
@@ -1129,55 +1308,25 @@ func _graph_path(from: Vector3, goal: Vector3, radius: float,
 	var goals := _graph_anchors(graph, goal_pos, radius, step_height, upper)
 	if starts.is_empty() or goals.is_empty():
 		return []
-	var goal_set := {}
-	for g in goals:
-		goal_set[int(g)] = true
-	var g_score := {}
-	var parent := {}
-	var open: Array = []
+	# 多起点/多终点：临时挂两个虚拟点（起点→各起始锚点，各终止锚点→终点），
+	# 代价与旧实现一致（起点距离 + 图上代价 + 终止锚点到终点的距离）。
+	var astar: AStar3D = graph["astar"]
+	var vs := nodes.size()
+	var vg := vs + 1
+	astar.add_point(vs, start_pos, 1.0)
+	astar.add_point(vg, goal_pos, 1.0)
 	for s in starts:
-		var sid := int(s)
-		var d := start_pos.distance_to(nodes[sid]["pos"])
-		g_score[sid] = d
-		parent[sid] = -1
-		open.append({"id": sid, "f": d + (nodes[sid]["pos"] as Vector3).distance_to(goal_pos)})
-	var closed := {}
-	var hit_goal := -1
-	while not open.is_empty():
-		var bi := 0
-		var bf := float(open[0]["f"])
-		for i in range(1, open.size()):
-			var f := float(open[i]["f"])
-			if f < bf:
-				bf = f
-				bi = i
-		var cur: Dictionary = open[bi]
-		open.remove_at(bi)
-		var cid := int(cur["id"])
-		if closed.has(cid):
-			continue
-		closed[cid] = true
-		if goal_set.has(cid):
-			hit_goal = cid
-			break
-		var cg := float(g_score[cid])
-		for e in nodes[cid]["nbrs"]:
-			var nid := int(e["to"])
-			if closed.has(nid):
-				continue
-			var ng := cg + float(e["cost"])
-			if g_score.has(nid) and float(g_score[nid]) <= ng:
-				continue
-			g_score[nid] = ng
-			parent[nid] = cid
-			open.append({"id": nid, "f": ng + (nodes[nid]["pos"] as Vector3).distance_to(goal_pos)})
-	if hit_goal < 0:
+		astar.connect_points(vs, int(s), false)
+	for g in goals:
+		astar.connect_points(int(g), vg, false)
+	var ids := astar.get_id_path(vs, vg)
+	astar.remove_point(vs)
+	astar.remove_point(vg)
+	if ids.size() < 3:
 		return []
 	var raw: Array = []
-	var k := hit_goal
-	while k >= 0:
-		raw.push_front(nodes[k]["pos"])
-		k = int(parent.get(k, -1))
+	for k in range(1, ids.size() - 1):
+		raw.append(nodes[ids[k]]["pos"])
 	raw.append(goal_pos)
 	return raw
 
@@ -1237,17 +1386,60 @@ func _r_next_waypoint(from: Vector3, goal: Vector3, radius: float,
 	var pts := path(from, goal, radius, step_height, upper)
 	if pts.is_empty():
 		return from
-	for j in range(pts.size() - 1, -1, -1):
+	# 找最远的「从 from 可直接走到」的拉直点。拉直路径上相邻点互为可走，
+	# 可达性沿索单调（近处可达、远处不可达），所以用指数 + 二分查找边界，
+	# 代价 O(log n) 次采样；旧实现从尾端线性回扫，几乎每次都要跑满全路径。
+	var n := pts.size()
+	var lo := -1   # 已知可达的最大下标
+	var hi := n    # 已知不可达的最小下标
+	var probe := 0
+	var stride := 1
+	while probe < n:
+		if _wp_reachable(from, pts[probe], radius, step_height, upper):
+			lo = probe
+			probe += stride
+			stride *= 2
+		else:
+			hi = probe
+			break
+	if lo < n - 1:
+		# 指数步长越过末尾时 hi 仍未定：验一下末点补齐区间。
+		if _wp_reachable(from, pts[n - 1], radius, step_height, upper):
+			lo = n - 1
+		elif hi == n:
+			hi = n - 1
+	while hi - lo > 1:
+		var mid := (lo + hi) / 2
+		if _wp_reachable(from, pts[mid], radius, step_height, upper):
+			lo = mid
+		else:
+			hi = mid
+	if lo < 0:
+		# 连最近的点都走不到：退回旧实现的兜底（第一个明显更远的点）。
+		return _wp_after(pts, from, n, step_height)
+	if _wp_skip(pts[lo], from, step_height):
+		return _wp_after(pts, from, hi, step_height)
+	return pts[lo]
+
+
+func _wp_skip(p: Vector3, from: Vector3, step_height: float) -> bool:
+	return (p - from).slide(Vector3.UP).length_squared() < 0.09 and absf(p.y - from.y) <= step_height + 0.15
+
+
+func _wp_after(pts: Array, from: Vector3, limit: int, step_height: float) -> Vector3:
+	for j in range(0, mini(limit, pts.size())):
 		var p: Vector3 = pts[j]
-		if (p - from).slide(Vector3.UP).length_squared() < 0.09 and absf(p.y - from.y) <= step_height + 0.15:
-			continue
-		var reach := move_supported(from, p, radius, step_height, 0.6, upper)
-		if (reach - p).slide(Vector3.UP).length() < 0.06 and absf(reach.y - p.y) <= step_height + 0.15:
-			return p
-	for p: Vector3 in pts:
-		if (p - from).slide(Vector3.UP).length_squared() >= 0.09 or absf(p.y - from.y) > step_height + 0.15:
+		if not _wp_skip(p, from, step_height):
 			return p
 	return pts[-1]
+
+
+func _wp_reachable(from: Vector3, p: Vector3, radius: float,
+		step_height: float, upper: Dictionary) -> bool:
+	if _wp_skip(p, from, step_height):
+		return true
+	var reach := move_supported(from, p, radius, step_height, 0.6, upper)
+	return (reach - p).slide(Vector3.UP).length() < 0.06 and absf(reach.y - p.y) <= step_height + 0.15
 
 
 ## 把点投影到最近的可走面（对站在障碍顶/空中的目标做落点）。

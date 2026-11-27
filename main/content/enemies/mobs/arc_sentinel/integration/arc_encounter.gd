@@ -26,6 +26,21 @@ var _wp_from := Vector3.ZERO
 var _wp_goal := Vector3.ZERO
 var _wp_age := 0.0
 var _wp_valid := false
+## 同帧规划预算：一帧最多 2 只哨兵重算路径，其余延后一帧（见 step）。
+const WP_PLAN_PER_FRAME := 2
+static var _wp_plan_frame := -1
+static var _wp_plan_used := 0
+
+
+static func _wp_budget_take() -> bool:
+	var frame := Engine.get_process_frames()
+	if frame != _wp_plan_frame:
+		_wp_plan_frame = frame
+		_wp_plan_used = 0
+	if _wp_plan_used >= WP_PLAN_PER_FRAME:
+		return false
+	_wp_plan_used += 1
+	return true
 
 
 func _on_respawn() -> void:
@@ -182,12 +197,19 @@ func step(dt: float, ctx: Dictionary) -> void:
 					or center_at.distance_squared_to(_wp_from) > 0.36 \
 					or target.distance_squared_to(_wp_goal) > 0.36 \
 					or center_at.distance_squared_to(_wp_next) < 0.16:
-				_wp_next = _waypoint.call(center_at, target)
-				_wp_from = center_at
-				_wp_goal = target
-				_wp_age = 0.12
-				_wp_valid = true
-			chase = _wp_next
+				# 同帧规划预算：多只哨兵在同一帧到期时（同帧出生/玩家高速移动
+				# 都会导致），错开到后续帧重算。没拿到预算时这一帧不更新路点：
+				# 有效就继续用上一条，没有就直冲玩家（chase 初值即 target）。
+				if _wp_budget_take():
+					_wp_next = _waypoint.call(center_at, target)
+					_wp_from = center_at
+					_wp_goal = target
+					_wp_age = 0.12
+					_wp_valid = true
+				else:
+					_wp_age = 0.0
+			if _wp_valid:
+				chase = _wp_next
 		else:
 			_wp_valid = false
 		var heading := (chase - center_at).slide(Vector3.UP)
