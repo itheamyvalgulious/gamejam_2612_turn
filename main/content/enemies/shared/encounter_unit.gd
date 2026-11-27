@@ -39,7 +39,16 @@ func mark_radius() -> float:
 
 
 func hit_parts() -> Array:
+	# Rigs con BodyColliders (arc/wheel/shard/duelist/boss) ya devuelven sus
+	# cilindros por articulación. El resto conserva la cápsula genérica.
+	if rig != null and rig.has_method("body_colliders"):
+		return rig.body_colliders()
 	return [{"a": center() - Vector3.UP * 0.9, "b": center() + Vector3.UP * 0.8, "r": 0.85}]
+
+
+var _blade_contact := Vector3.ZERO
+var _blade_travel := Vector3.ZERO
+var _blade_normal := Vector3.UP
 
 
 func hurt(amount: float, normal := Vector3.UP, knock := 0.0) -> void:
@@ -52,6 +61,15 @@ func hurt(amount: float, normal := Vector3.UP, knock := 0.0) -> void:
 		die()
 
 
+## 记录刀口信息（致命一刀的接触点/行进方向），die() 交给 DeathField 切割。
+func hurt_by_blade(amount: float, normal: Vector3, knock: float,
+		travel: Vector3, contact: Dictionary) -> void:
+	_blade_contact = contact.get("point", contact.get("blade_point", center()))
+	_blade_travel = travel
+	_blade_normal = normal
+	hurt(amount, normal, knock)
+
+
 func die() -> void:
 	if not alive:
 		return
@@ -59,6 +77,13 @@ func die() -> void:
 	_dead_t = 1.0
 	Fx.death_burst(center())
 	Snd.play_at("death", center(), {"gain": 0.8})
+	# 新的物理死亡路径：关卡装了 DeathField 就走切割 ragdoll，
+	# 否则（独立开发场景）退回纯特效死亡。
+	var field: Object = level.get_meta(&"death_field") if level != null else null
+	if field != null and not get_meta(&"death_done", false):
+		set_meta(&"death_done", true)
+		field.enemy_died(self, {"contact": _blade_contact,
+			"travel": _blade_travel, "normal": _blade_normal})
 	if level != null:
 		level.on_enemy_died(self)
 
@@ -71,6 +96,7 @@ var spawn_rig_xf := Transform3D.IDENTITY
 
 
 func respawn() -> void:
+	set_meta(&"death_done", false)
 	alive = true
 	hp = max_hp
 	_dead_t = 0.0

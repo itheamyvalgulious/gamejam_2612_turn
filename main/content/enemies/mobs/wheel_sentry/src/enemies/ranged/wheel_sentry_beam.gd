@@ -50,16 +50,14 @@ func configure(origin: Vector3, forward: Vector3, width: float, arena: Dictionar
 	_sheath = _tube(radius * 0.69, distance, _sheath_material)
 	_glow = _tube(radius, distance, _glow_material)
 
-	var flat := Vector3(end.x - start.x, 0, end.z - start.z)
-	var floor_strip := PlaneMesh.new()
-	floor_strip.size = Vector2(radius * 2.0, maxf(flat.length(), 0.01))
+	var flat := Vector2(end.x - start.x, end.z - start.z)
+	var floor_strip := _warning_mesh(arena, flat)
 	_lane_material = ShaderMaterial.new()
 	_lane_material.shader = LaneShader
 	_lane_material.set_shader_parameter("length_world", flat.length())
 	_lane = _mesh(floor_strip, _lane_material)
 	_lane.top_level = true
-	_lane.global_position = Vector3((start.x + end.x) * 0.5, float(arena.get("floor_y", 0.0)) + 0.056, (start.z + end.z) * 0.5)
-	_lane.global_rotation.y = atan2(-flat.x, -flat.z)
+	_lane.global_transform = Transform3D.IDENTITY
 
 	var core_ball := SphereMesh.new()
 	core_ball.radius = 0.22
@@ -85,10 +83,69 @@ func configure(origin: Vector3, forward: Vector3, width: float, arena: Dictionar
 	show_warning(0.0)
 
 
+func _warning_mesh(arena: Dictionary, flat: Vector2) -> ArrayMesh:
+	var mesh := ArrayMesh.new()
+	if flat.length_squared() < 0.0001:
+		return mesh
+	var builder := SurfaceTool.new()
+	builder.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var bounds: AABB = arena.get("bounds", AABB())
+	var base := Rect2(bounds.position.x, bounds.position.z, bounds.size.x, bounds.size.z)
+	if not base.has_area():
+		var first := Vector2(start.x, start.z)
+		base = Rect2(first, Vector2.ZERO).expand(first + flat).grow(radius * 2.0)
+	var count := _add_warning_surface(builder, base, float(arena.get("floor_y", 0.0)), flat)
+	for surface: AABB in arena.get("walkables", []):
+		var region := Rect2(surface.position.x, surface.position.z, surface.size.x, surface.size.z)
+		count += _add_warning_surface(builder, region, surface.end.y, flat)
+	if count > 0:
+		builder.commit(mesh)
+	return mesh
+
+
+func _add_warning_surface(builder: SurfaceTool, region: Rect2, height: float, flat: Vector2) -> int:
+	# Put the warning on surfaces within the beam's reachable height, such as individual stair treads.
+	var first := 0.0
+	var last := 1.0
+	var rise := end.y - start.y
+	var lowest := height - radius
+	var highest := height + 3.45 + radius
+	if absf(rise) < 0.001:
+		if start.y < lowest or start.y > highest:
+			return 0
+	else:
+		var lower := (lowest - start.y) / rise
+		var upper := (highest - start.y) / rise
+		first = maxf(first, minf(lower, upper))
+		last = minf(last, maxf(lower, upper))
+		if first >= last:
+			return 0
+	var origin := Vector2(start.x, start.z)
+	var along := flat.normalized()
+	var across := Vector2(-along.y, along.x)
+	var edge := across * radius
+	var a := origin + flat * first
+	var b := origin + flat * last
+	var lane := PackedVector2Array([a - edge, b - edge, b + edge, a + edge])
+	var floor_outline := PackedVector2Array([region.position, Vector2(region.end.x, region.position.y),
+		region.end, Vector2(region.position.x, region.end.y)])
+	var count := 0
+	for polygon: PackedVector2Array in Geometry2D.intersect_polygons(lane, floor_outline):
+		var indices := Geometry2D.triangulate_polygon(polygon)
+		for index in indices:
+			var point := polygon[index]
+			var relative := point - origin
+			builder.set_uv(Vector2(0.5 + relative.dot(across) / (radius * 2.0), relative.dot(along) / flat.length()))
+			builder.add_vertex(Vector3(point.x, height + 0.05, point.y))
+		count += indices.size()
+	return count
+
+
 func show_warning(progress: float) -> void:
 	_core.hide()
 	_sheath.hide()
-	_glow.hide()
+	_glow.show()
+	_glow_material.set_shader_parameter("strength", lerpf(0.035, 0.11, progress))
 	_aim_line.show()
 	_lane.show()
 	_lane_material.set_shader_parameter("phase", progress)
@@ -193,14 +250,17 @@ static func trace_obstruction(origin: Vector3, forward: Vector3, arena: Dictiona
 	for wall: Dictionary in arena.get("walls", []):
 		var edge: Vector2 = wall["b"] - wall["a"]
 		var determinant := forward_xz.cross(edge)
-		if determinant == 0.0:
+		if absf(determinant) < 0.000001:
 			continue
 		var offset: Vector2 = wall["a"] - origin_xz
 		var distance := offset.cross(edge) / determinant
 		var along_wall := offset.cross(forward_xz) / determinant
 		var height := origin.y + forward.y * distance
+		var bottom := float(wall.get("base_y", floor_y))
+		# Encounter box edges store an absolute top; older walls store height above the floor.
+		var top := float(wall["h"]) if wall.has("base_y") else bottom + float(wall["h"])
 		if distance >= 0.0 and along_wall >= 0.0 and along_wall <= 1.0 \
-				and height >= floor_y and height <= floor_y + float(wall["h"]):
+				and height >= bottom and height <= top:
 			closest = minf(closest, distance)
 
 	for object: Dictionary in arena.get("cover", []):

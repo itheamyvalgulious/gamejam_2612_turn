@@ -90,7 +90,8 @@ static func prepare_run(model, state: Dictionary, focus: Vector3, cover: Array, 
 	for obstacle: Dictionary in cover:
 		var radius := maxf(0.35, float(obstacle["r"]) - 1.2) + 1.1 * size
 		dest = HitMath.slide_around_body(root.origin, dest, obstacle["c"], radius)
-	var shift := root.affine_inverse() * DoubleCut._inside(dest, bounds)
+	var grounded: Vector3 = model.attack_step(root.origin, DoubleCut._inside(dest, bounds))
+	var shift := root.basis.inverse() * (grounded - root.origin).slide(Vector3.UP)
 	run["root"] = root
 	run["shift"] = shift
 	run["left_step"] = DoubleCut._foot_at(model, root, shift * 0.51 + Vector3(-0.51, 0.0, -0.88), 9.0, cover, bounds)
@@ -108,7 +109,8 @@ static func apply(model, state: Dictionary, time: float) -> void:
 	var shift: Vector3 = run["shift"]
 	var drive := smoothstep(LEFT_STEP, RIGHT_LAND + 0.03, time)
 	var drift := shift * drive
-	model.global_position = root * drift
+	model.global_position = model.attack_step(root.origin, root * drift)
+	drift = root.affine_inverse() * (model.global_position as Vector3)
 
 	var hip: Transform3D = run["hip"]
 	var body := model.body as Node3D
@@ -135,7 +137,7 @@ static func apply(model, state: Dictionary, time: float) -> void:
 	support = support.lerp(Vector3(-0.56, 1.06, -0.68), close).lerp(Alert.SUPPORT_HAND, guard)
 	NormalCut.pose_support(model, run, support - hand)
 	_pose_sword(model, run, time)
-	model.finish_pose(0.18, 1.0, Vector2.ZERO, 0.0, 0.075 * (1.0 - guard))
+	model.finish_attack_pose(0.18, Vector2.ZERO, 0.0, 0.075 * (1.0 - guard))
 
 
 static func _pose_legs(model, run: Dictionary, time: float, drift: Vector3) -> void:

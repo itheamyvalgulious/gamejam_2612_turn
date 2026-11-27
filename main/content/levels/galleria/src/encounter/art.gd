@@ -126,12 +126,15 @@ func environment(outside := false) -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color("879bb4")
 	env.ambient_light_energy = 0.22 if outside else 0.26
-	env.ssr_enabled = true
-	env.ssr_max_steps = 48
+	# SSR / SSAO 在中低端 GPU（如 GTX 1650）上每帧 ~3ms，是掉帧来源；
+	# 做成「后期特效」设置项，嫌卡的玩家可自行关闭。
+	var post_fx: bool = bool(TurnSession.get_option("display.post_fx", true))
+	env.ssr_enabled = post_fx
+	env.ssr_max_steps = 20
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.glow_enabled = true
 	env.glow_intensity = 0.35
-	env.ssao_enabled = true
+	env.ssao_enabled = post_fx
 	env.ssao_radius = 1.0
 	env.ssao_intensity = 1.2
 	env.fog_enabled = true
@@ -267,9 +270,12 @@ func solid_box(center: Vector3,size: Vector3,walkable := false) -> void:
 		var d: Vector2 = edge[1]-edge[0]
 		walls.append({"a":edge[0],"b":edge[1],"h":box.end.y,"base_y":box.position.y,"n":Vector2(-d.y,d.x).normalized()})
 
-func downlight(pos: Vector3,color: Color,energy: float,reach: float) -> void:
+func downlight(pos: Vector3,color: Color,energy: float,reach: float, shadow := false) -> void:
 	# A mounted luminaire illuminates the floor in one cone, with one shadow map
 	# instead of six omnidirectional faces (and no upward light through the housing).
+	# 阴影默认关：这几盏 range=32 的聚光灯每帧要给整座中庭重画一遍阴影图，
+	# 实测占 GPU 时间约 30ms（GTX 1650 上 p50 78→48ms）。落地感由 mmm
+	# 的平行光（moon）负责，不靠这几盏。
 	var lamp := SpotLight3D.new()
 	lamp.position=pos
 	lamp.rotation_degrees=Vector3(-90,0,0)
@@ -280,5 +286,5 @@ func downlight(pos: Vector3,color: Color,energy: float,reach: float) -> void:
 	lamp.spot_attenuation=1.4
 	lamp.light_size=0.4
 	lamp.light_specular=0.25
-	lamp.shadow_enabled=true
+	lamp.shadow_enabled=shadow
 	root.add_child(lamp)

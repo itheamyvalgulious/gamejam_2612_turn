@@ -2,6 +2,33 @@ extends "res://src/encounter/art.gd"
 const HALF_WIDTH := 36.0
 const HALF_DEPTH := 32.0
 const CEILING := 25.0
+const STAIR_X := 29.0
+const STAIR_WIDTH := 6.0
+const STAIR_BOTTOM := -10.0
+const STAIR_TOP := 18.0
+const DECK_HEIGHT := 8.0
+
+## 导航元信息（NavField.build 的 spec）：
+##   面 —— 地面 bounds 矩形 + walkable 顶面（两块高台甲板 + 28 级踏面）；
+##   线 —— 南侧返程楼梯中线，a 端落地、b 端上台，沿中线插值高度；
+##   障碍 —— 全部非 walkable solids（立面、栏杆、柜体、踏面护边）。
+static func nav_spec(_arena: Dictionary) -> Dictionary:
+	return {
+		"floor_margin": 2.4,
+		"walls_obstacles": false,
+		"cover_obstacles": true,
+		"platforms": false,
+		"ignore_box": [
+			AABB(Vector3(STAIR_X - STAIR_WIDTH * 0.5 - 0.1, 0.0, STAIR_BOTTOM - 0.1),
+				Vector3(STAIR_WIDTH + 0.2, DECK_HEIGHT - 0.05, STAIR_TOP - STAIR_BOTTOM + 0.2)),
+		],
+		"lines": [{
+			"a": Vector2(STAIR_X, STAIR_BOTTOM),
+			"b": Vector2(STAIR_X, STAIR_TOP),
+			"y0": 0.0, "y1": DECK_HEIGHT,
+			"width": STAIR_WIDTH, "kind": "stair",
+		}],
+	}
 
 static func build(height_test := false) -> Dictionary:
 	return new().build_scene(height_test)
@@ -50,10 +77,10 @@ func build_scene(height_test: bool) -> Dictionary:
 			neon_path("cyan",[Vector3(x-0.5,8.04,z+0.4),Vector3(x,8.04,z),Vector3(x+0.5,8.04,z+0.4)],0.025)
 	# 28 shallow solid treads form the return route; same boxes drive support and collision.
 	for i in 28:
-		var h := (i+1)*8.0/28.0
-		var z := -9.5+i
-		block("frame",Vector3(6,h,1),Vector3(29,h*0.5,z),true,true,0.02)
-		block("metal",Vector3(5.8,0.025,0.09),Vector3(29,h+0.014,z-0.43),false,false,0.005)
+		var h := (i+1)*DECK_HEIGHT/28.0
+		var z := STAIR_BOTTOM+0.5+i
+		block("frame",Vector3(STAIR_WIDTH,h,1),Vector3(STAIR_X,h*0.5,z),true,true,0.02)
+		block("metal",Vector3(5.8,0.025,0.09),Vector3(STAIR_X,h+0.014,z-0.43),false,false,0.005)
 		if i%4 == 0:
 			for x in [26.35,31.65]:
 				block("cyan",Vector3(0.15,0.03,0.65),Vector3(x,h+0.018,z),false,false,0.008)

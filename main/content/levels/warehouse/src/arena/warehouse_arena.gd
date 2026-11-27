@@ -35,6 +35,42 @@ const PARKOUR := [
 	{"c": Vector3(21.5, 0.0, -5.2), "top": 5.50, "hx": 1.20, "hz": 0.90},
 ]
 
+## 导航元信息：地面矩形（walls 已在边界内缩）+ platforms 顶面为多层区域；
+## 障碍 = cover 圆棱柱（含环廊栏杆，base_y=RING_TOP）+ 边界墙。
+## 线 = 跑酷链：地面→集装箱→环廊 GATE 开口，沿中线插值高度。
+static func nav_spec(_arena: Dictionary) -> Dictionary:
+	var lines: Array = []
+	lines.append({
+		"a": Vector2(21.5, 13.4) * U, "b": Vector2(21.5, 10.0) * U,
+		"y0": 0.0, "y1": float(PARKOUR[0]["top"]) * U,
+		"width": 1.4 * U, "kind": "climb",
+	})
+	for i in range(1, PARKOUR.size()):
+		var a: Dictionary = PARKOUR[i - 1]
+		var b: Dictionary = PARKOUR[i]
+		lines.append({
+			"a": Vector2(a["c"].x, a["c"].z) * U,
+			"b": Vector2(b["c"].x, b["c"].z) * U,
+			"y0": float(a["top"]) * U, "y1": float(b["top"]) * U,
+			"width": 1.4 * U, "kind": "climb",
+		})
+	var top_box: Dictionary = PARKOUR[-1]
+	lines.append({
+		"a": Vector2(top_box["c"].x, top_box["c"].z) * U,
+		"b": Vector2(RING_X, (GATE_A + GATE_B) * 0.5) * U,
+		"y0": float(top_box["top"]) * U, "y1": RING_TOP * U,
+		"width": 1.6 * U, "kind": "climb",
+	})
+	return {
+		"floor_margin": WALL_PAD * U + 0.4,
+		"walls_obstacles": true,
+		"walls_sight": true,
+		"cover_obstacles": true,
+		"cover_shrink": BALL,
+		"platforms": true,
+		"lines": lines,
+	}
+
 
 static func build(origin := Vector3.ZERO) -> Dictionary:
 	var root := Node3D.new()

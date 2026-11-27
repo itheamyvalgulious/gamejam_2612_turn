@@ -8,7 +8,7 @@
 
 | 目录 | 内容 |
 | --- | --- |
-| `main/content/levels/` | 霓虹窄巷、雨夜广场、灯墙之厅、货舱 02、霓虹街区、坠击中庭、仓库、回廊实验舱和病房的源文件 |
+| `main/content/levels/` | 霓虹窄巷、雨夜广场、灯墙之厅、货舱 02、霓虹街区、坠击中庭、仓库、回廊实验舱、病房和三号船坞的源文件 |
 | `main/content/enemies/mobs/` | [人形刀客](main/content/enemies/mobs/mech_duelist/README.md)、[ARC Sentinel](main/content/enemies/mobs/arc_sentinel/README.md)、[单轮巡射机甲](main/content/enemies/mobs/wheel_sentry/README.md)、[Shard Phantom](main/content/enemies/mobs/shard_phantom/README.md) |
 | `main/content/enemies/bosses/` | [折相](main/content/enemies/bosses/phase_boss/README.md)、[Leviathan](main/content/enemies/bosses/leviathan/README.md) |
 | `main/content/characters/` | [VESPER 主角](main/content/characters/vesper/README.md) |
@@ -32,21 +32,22 @@
 | 仓库 | [levels/warehouse](main/content/levels/warehouse/README.md) |
 | 回廊实验舱 | [levels/panopticon](main/content/levels/panopticon/README.md) |
 | 病房 · 夜班 | [levels/ward](main/content/levels/ward/README.md) |
+| 三号船坞 | [levels/hangar](main/content/levels/hangar/README.md) |
 
-仓库、回廊实验舱和病房的玩家控制、界面与公用材质工具放在 [levels/shared](main/content/levels/shared/README.md)。十个关卡都从「关卡选择」进入。仓库、回廊实验舱和病房暂未配置敌人，可停留走动，按 **N** 继续到下一关，或按 **F1** 返回选关。
+仓库、回廊实验舱、病房和三号船坞的玩家控制、界面与公用材质工具放在 [levels/shared](main/content/levels/shared/README.md)。十一个关卡都从「关卡选择」进入。仓库、回廊实验舱、病房和三号船坞暂未配置敌人，可停留走动，按 **N** 继续到下一关，或按 **F1** 返回选关。
 
 各关卡自带的合成音效源码在对应关卡的 `src/audio/`，构建时归到 `main/runtime/audio/`。编辑请从 `main/content/` 的原件开始。正式关卡使用 `main/project.godot` 启动。敌人与其他独立素材可以用各自的 `project.godot` 预览。
 
-十个关卡共用 [VESPER v2](main/content/characters/vesper/README.md) 的机体、武器和动作。主角修改提交到 `main/content/characters/vesper/`，关卡自己的按键、相机和战斗参数随该关卡维护。
+十一个关卡共用 [VESPER v2](main/content/characters/vesper/README.md) 的机体、武器和动作。主角修改提交到 `main/content/characters/vesper/`，关卡自己的按键、相机和战斗参数随该关卡维护。
 
 ## 正式关卡敌人
 
 | 敌人 | 关卡中的数量和用途 |
 | --- | --- |
 | ARC Sentinel | 12，基础近战小兵 |
-| 单轮巡射机甲 | 5，远程射手 |
+| 单轮巡射机甲 | 6，远程射手 |
 | Shard Phantom | 4，替换货舱和街区的相位位移怪 |
-| 人形刀客 | 1，坠击中庭 · 高低差单挑关，可试验击倒慢放 |
+| 人形刀客 | 1，坠击中庭 · 高低差，可试验击倒慢放 |
 | 折相 | 1，灯墙之厅首领 |
 
 Leviathan 的素材在敌人目录中供后续关卡使用。构建工具提取各关卡需要的敌人依赖。普通敌人使用原设计工程的模型、动画和专用脚本，折相使用自身的完整战斗控制器。
@@ -64,7 +65,7 @@ Leviathan 的素材在敌人目录中供后续关卡使用。构建工具提取�
 | 独立武器的模型、动作和特效 | `main/content/weapons/<武器名>/` |
 | 地图试验、原型和历史方案 | `main/content/maps/` 下对应主题的目录 |
 | 关卡内合成音效 | 对应关卡的 `src/audio/` |
-| 音频文件、贴图和其他原始素材 | 使用它们的关卡、敌人或角色目录中的 `assets/`，录制音频放在 `assets/audio/` |
+| 音频文件、贴图和其他原始素材 | 使用它们的关卡、敌人或角色目录中的 `assets/`，录制音频放在 `assets/audio/`，已接入的文件名见下方 |
 | 主菜单背景、关卡缩略图和菜单代码 | 图片放 `main/assets/ui/backgrounds/` 或 `main/assets/ui/level_previews/`，菜单代码放 `main/ui/menu/` |
 
 每份交付把模型、动作、着色器、引用资源和预览场景放在同一目录。随素材提交或更新 `README.md`，写明预览入口、依赖和接入的关卡。未接入关卡的敌人也放在相应的敌人类别下。
@@ -73,6 +74,17 @@ Leviathan 的素材在敌人目录中供后续关卡使用。构建工具提取�
 - **把新敌人接入游戏**：更新关卡中的刷怪入口，并在 `main/tools/encounter_roster.py` 中声明共享模型和控制器依赖。关卡专用的接入脚本随关卡维护，敌人自身的模型和动作随敌人维护。
 - **提交和验证**：从最新 `main` 建分支，使用项目内相对路径，保留 Godot 资源的 `.uid` 和导入设置。运行下方构建命令，打开受影响的关卡或预览，然后发起合并请求，写明素材路径和验证结果。
 - **生成目录**：`main/runtime/`、`main/build/`、`.godot/` 和 `__pycache__/` 由本地工具生成。提交源文件即可，试玩包单独分发。
+
+### 替换敌方音效
+
+[人形刀客](main/content/enemies/mobs/mech_duelist/assets/audio/README.md) ·
+[单轮巡射机甲](main/content/enemies/mobs/wheel_sentry/assets/audio/README.md) ·
+[折相](main/content/enemies/bosses/phase_boss/assets/audio/README.md)
+
+按列表把音频放进对应敌人的 `assets/audio/`，使用列出的文件名。支持小写扩展名 `.wav`、`.ogg`、`.mp3`。
+同一文件名使用一种格式即可，若同时存在，游戏依次尝试 WAV、OGG、MP3。个别音效还没有文件时，游戏使用原有合成音。
+替换完成后关闭游戏，双击「启动试玩」，启动器会更新运行资源并导入新音频。已经导出的游戏需要重新导出才能带上这些素材。
+源音频提交到对应敌人的目录，构建输出留在本机。
 
 ## 运行和导出
 

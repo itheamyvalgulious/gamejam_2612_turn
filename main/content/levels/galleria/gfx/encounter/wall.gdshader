@@ -80,7 +80,7 @@ void fragment() {
 		float lamp = 0.5 + 0.5 * sin(uv.x * 6.2831 / 0.46);
 		float corr = smoothstep(0.15, 0.85, lamp);
 		col = mix(base_col * 0.62, base_col * 1.12, corr);
-		col *= 0.9 + 0.2 * m_fbm2(uv * 0.7 + s, 4);
+		col *= 0.9 + 0.2 * m_fbm2(uv * 0.7 + s, 3);
 		col *= 1.0 + (rnd - 0.5) * 0.24;
 		col = mix(col, trim_col, seam * 0.65);
 		// vertical ribs every 1.8 m
@@ -138,7 +138,7 @@ void fragment() {
 
 	// ---------------- shared weathering ----------------
 	float wear = clamp(vwear, 0.0, 1.6);
-	float streaks = m_streaks(uv * vec2(1.0, 1.0), 2.0, s) * grime * wear * mix(0.5, 1.0, detail);
+	float streaks = (detail > 0.05 ? m_streaks(uv * vec2(1.0, 1.0), 2.0, s) : 0.0) * grime * wear * mix(0.5, 1.0, detail);
 	float floor_dirt = (1.0 - smoothstep(0.0, 0.22, lh)) * grime * (0.45 + 0.55 * wear);
 	float corner = m_sat(m_fbm2(uv * 0.25 + s, 3) * 1.3 - 0.45);
 	grime_mask = m_sat(floor_dirt * 0.9 + streaks * 0.45 + corner * 0.25 * wear);

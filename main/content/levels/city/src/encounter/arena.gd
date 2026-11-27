@@ -3,6 +3,16 @@ const HALF_WIDTH := 36.0
 const HALF_DEPTH := 36.0
 const CEILING := 60.0
 
+## 导航元信息：平地街区 —— 地面矩形 + 全部 solids 作障碍棱柱
+## （亭体 / 车辆 / 立柱 / 立面；非碰撞纯装饰不在 solids 里）。
+static func nav_spec(_arena: Dictionary) -> Dictionary:
+	return {
+		"floor_margin": 2.4,
+		"walls_obstacles": false,
+		"cover_obstacles": true,
+		"platforms": false,
+	}
+
 static func build() -> Dictionary:
 	return new().build_scene()
 

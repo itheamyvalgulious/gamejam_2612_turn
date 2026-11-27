@@ -6,6 +6,7 @@ signal impact_shake(source: Vector3, strength: float)
 signal footfall_shake(source: Vector3, strength: float)
 
 const Body = preload("res://src/enemies/phase_boss/phase_boss_body.gd")
+const BodyColliders = preload("res://core/body_colliders.gd")
 const Model = preload("res://scenes/phase_boss/phase_boss_model.tscn")
 const Motion = preload("res://src/enemies/phase_boss/phase_boss_motion.gd")
 const PhaseState = preload("res://src/enemies/phase_boss/phase_boss_state.gd")
@@ -193,11 +194,48 @@ func finish_intro() -> bool:
 	return true
 
 
+var _body_colliders: Dictionary = {}
+
+## 多圆柱体受击判定件（requirement #2）：BodyColliders ajusta cápsulas por
+## articulación en espacio local (pecho/pelvis/cuello/cabeza/mandíbula/cañón/
+## piernas/cola) — la unión contiene TODOS los vértices del mesh
+## (verify_body_parts.gd lo verifica vértice a vértice).
 func hit_parts() -> Array:
-	var parts := []
-	for volume: Array in _hurt_volumes():
-		parts.append({"a": volume[0], "b": volume[1], "r": volume[2]})
-	return parts
+	if _body_colliders.is_empty():
+		_body_colliders = _build_body_colliders()
+	return BodyColliders.world_parts(_body_colliders)["parts"]
+
+
+func _build_body_colliders() -> Dictionary:
+	var anchors: Array = [model.chest, model.pelvis, model.neck, model.head,
+		model.jaw, model.cannon, model.tail_fin]
+	anchors.append_array(model.emitters)
+	for leg: Dictionary in model.legs:
+		for k in ["root", "joint", "distal", "paw"]:
+			if leg.get(k) != null:
+				anchors.append(leg[k])
+	anchors.append_array(model.tail)
+	# El boss articula TODAS sus extremidades (patas, mandíbula, cola,
+	# emisores): cualquier fusión automática child→padre rompería contención
+	# al moverse — detectado perturbando anclas en verify_body_parts.gd.
+	# Por eso NO hay budget-merge aquí: 32 piezas > cota genérica de 30,
+	# coste aceptable (world_parts ~60µs) y corrección por encima de la cota.
+	return BodyColliders.build({
+		"root": model,
+		"anchors": anchors,
+		"k_max": 1,          # 1 cápsula/cluster: colas/patas son segmentos finos
+		"mesh_filter": _body_mesh_filter,
+	})
+
+
+## Las lanzas del actuador se reorientan cada frame (update_actuators): no son
+## rígidas en espacio de su montura, así que no entran al ajuste. Los nombres
+## de los beams es lo que las distingue de los paneles estáticos.
+func _body_mesh_filter(mi: MeshInstance3D) -> bool:
+	for actuator: Dictionary in model._actuators:
+		if mi == actuator["barrel"] or mi == actuator["rod"]:
+			return false
+	return true
 
 
 func contact_radius() -> float:
@@ -209,13 +247,20 @@ func contact_radius() -> float:
 	return 0.0
 
 
-func melee_forecast(capsule: Dictionary, margin: float, lead: float) -> Dictionary:
-	var bottom: Vector3 = capsule["a"]
-	var top: Vector3 = capsule["b"]
-	var radius: float = capsule["r"]
-	var center := (bottom + top) * 0.5
+## parts = multi-cilindro del jugador (rig.hit_parts()); margin/lead como antes.
+## Se evalúa cada pieza: la primera amenaza contra el cuerpo real gana.
+func melee_forecast(parts: Array, margin: float, lead: float) -> Dictionary:
+	if parts.is_empty():
+		return {}
+	# Centro del conjunto para cheques de lado (tail sweep) y distancias.
+	var center := Vector3.ZERO
+	var n := 0
+	for p: Dictionary in parts:
+		center += (p["a"] + p["b"]) * 0.5
+		n += 1
+	center /= maxf(n, 1)
 	if action == "sprint" and not _hit_windows.has(0):
-		return _rush_forecast(bottom, top, radius, margin, lead)
+		return _rush_forecast(parts, margin, lead)
 	var side := Motion.tail_sweep_direction(action)
 	if side != 0.0 and _motion.tail_sweep_side_distance(center, side) < 0.0:
 		return {}
@@ -230,12 +275,16 @@ func melee_forecast(capsule: Dictionary, margin: float, lead: float) -> Dictiona
 		var path := PackedVector3Array()
 		for point: Vector3 in entry[0]:
 			path.append(_actor.to_global(point + Vector3.BACK * shift))
-		var source := _strike_source(path, bottom, top, float(entry[1]) * BOSS_SCALE + radius + margin, entry[4])
-		if not source.is_finite():
-			continue
-		var threat := _contact_threat(source, bottom, top, radius + margin * 0.45, eta)
-		if not threat.is_empty():
-			return threat
+		for p: Dictionary in parts:
+			var bottom: Vector3 = p["a"]
+			var top: Vector3 = p["b"]
+			var radius: float = p["r"]
+			var source := _strike_source(path, bottom, top, float(entry[1]) * BOSS_SCALE + radius + margin, entry[4])
+			if not source.is_finite():
+				continue
+			var threat := _contact_threat(source, bottom, top, radius + margin * 0.45, eta)
+			if not threat.is_empty():
+				return threat
 	return {}
 
 
@@ -255,7 +304,7 @@ func _contact_threat(source: Vector3, bottom: Vector3, top: Vector3, reach: floa
 		"normal": outward, "eta": maxf(0.0, eta), "kind": "melee"}
 
 
-func _rush_forecast(bottom: Vector3, top: Vector3, radius: float, margin: float, lead: float) -> Dictionary:
+func _rush_forecast(parts: Array, margin: float, lead: float) -> Dictionary:
 	var from_time := maxf(action_time, RUSH_HIT_BEGIN)
 	var lead_motion := _rush_advance(lead)
 	var to_time := minf(action_time + lead_motion, _movement_end)
@@ -263,19 +312,23 @@ func _rush_forecast(bottom: Vector3, top: Vector3, radius: float, margin: float,
 		return {}
 	var velocity := -_actor.global_basis.z * Motion.SPRINT_SPEED
 	var at := ground_position()
-	var reach := RUSH_HIT_RADIUS * BOSS_SCALE + radius + margin
 	for nose: Vector3 in _attack_path("head"):
 		var a := nose + velocity * (from_time - action_time)
 		var b := nose + velocity * (to_time - action_time)
-		var contact := Geometry3D.get_closest_points_between_segments(a, b, bottom, top)
-		if contact[0].distance_squared_to(contact[1]) > reach * reach:
-			continue
-		var travel_time := nose.distance_to(contact[0]) / velocity.length()
-		var eta := lead * travel_time / maxf(0.001, lead_motion)
-		if _has_runway(at, at + velocity * travel_time, 2.6):
-			var threat := _contact_threat(contact[0], bottom, top, radius + margin * 0.45, eta)
-			if not threat.is_empty():
-				return threat
+		for p: Dictionary in parts:
+			var bottom: Vector3 = p["a"]
+			var top: Vector3 = p["b"]
+			var radius: float = p["r"]
+			var reach := RUSH_HIT_RADIUS * BOSS_SCALE + radius + margin
+			var contact := Geometry3D.get_closest_points_between_segments(a, b, bottom, top)
+			if contact[0].distance_squared_to(contact[1]) > reach * reach:
+				continue
+			var travel_time := nose.distance_to(contact[0]) / velocity.length()
+			var eta := lead * travel_time / maxf(0.001, lead_motion)
+			if _has_runway(at, at + velocity * travel_time, 2.6):
+				var threat := _contact_threat(contact[0], bottom, top, radius + margin * 0.45, eta)
+				if not threat.is_empty():
+					return threat
 	return {}
 
 
@@ -291,8 +344,8 @@ static func _action_basis(facing: float) -> Basis:
 
 func aim_at_camera(camera: Camera3D) -> bool:
 	var eye := camera.global_position
-	for volume: Array in _hurt_volumes():
-		for sample_point: Vector3 in [volume[0], (volume[0] + volume[1]) * 0.5, volume[1]]:
+	for part: Dictionary in hit_parts():
+		for sample_point: Vector3 in [part["a"], (part["a"] + part["b"]) * 0.5, part["b"]]:
 			if camera.is_position_in_frustum(sample_point) and _ray(eye, sample_point).is_empty():
 				return true
 	return false
@@ -301,9 +354,9 @@ func aim_at_camera(camera: Camera3D) -> bool:
 func receive_blade(base: Vector3, tip: Vector3, damage: float, camera: Camera3D) -> float:
 	if hp <= 0.0:
 		return -1.0
-	for volume: Array in _hurt_volumes():
-		if _within(base, tip, volume[0], volume[1], volume[2] + 0.16):
-			var contact := Geometry3D.get_closest_points_between_segments(base, tip, volume[0], volume[1])
+	for part: Dictionary in hit_parts():
+		if _within(base, tip, part["a"], part["b"], float(part["r"]) + 0.16):
+			var contact := Geometry3D.get_closest_points_between_segments(base, tip, part["a"], part["b"])
 			if not _ray(base, contact[1]).is_empty():
 				continue
 			visible_to_player = aim_at_camera(camera)
@@ -346,7 +399,8 @@ func damage_multiplier(visible: bool) -> float:
 	return phase.damage_multiplier(visible)
 
 
-func step(delta: float, player: Vector3, camera: Camera3D, capsule := {}) -> void:
+func step(delta: float, player: Vector3, camera: Camera3D, capsule := {},
+		parts: Array = []) -> void:
 	if hp <= 0.0:
 		return
 	_clock += delta
@@ -403,7 +457,7 @@ func step(delta: float, player: Vector3, camera: Camera3D, capsule := {}) -> voi
 	_fx.advance_audio(action, before, action_time)
 	_apply_pose(player, delta)
 	_emit_impact_shake(before)
-	_resolve_attack(player, delta, capsule, past_nose)
+	_resolve_attack(player, delta, capsule, past_nose, parts)
 	if action in ["phase_enter", "phase_exit"]:
 		return
 	var interruptible := action in ["idle", "walk"] or (action != "sprint" and action_time >= float(_duration[action]))
@@ -1001,22 +1055,30 @@ func _emit_impact_shake(before: float) -> void:
 	impact_shake.emit(source, strength)
 
 
-func _resolve_attack(player: Vector3, delta: float, capsule: Dictionary, past_nose: PackedVector3Array) -> void:
-	var bottom: Vector3 = capsule.get("a", player + Vector3.UP * 0.38)
-	var top: Vector3 = capsule.get("b", player + Vector3.UP * 2.48)
-	var body_radius: float = capsule.get("r", PLAYER_RADIUS)
+## parts = multi-cilindro del jugador (rig.hit_parts()); capsule queda sólo
+## como fallback/centro para rayos y checks de lado. Daño y bloqueo evalúan
+## cada pieza — ya no hay una sola capsulota.
+func _resolve_attack(player: Vector3, delta: float, capsule: Dictionary,
+		past_nose: PackedVector3Array, parts: Array = []) -> void:
+	# Fallback defensivo por si alguien llama sin parts (no debería ocurrir).
+	if parts.is_empty():
+		parts = [{"a": capsule.get("a", player + Vector3.UP * 0.38),
+			"b": capsule.get("b", player + Vector3.UP * 2.48),
+			"r": capsule.get("r", PLAYER_RADIUS)}]
 	if action == "sprint":
 		if action_time < RUSH_HIT_BEGIN or _hit_windows.has(0):
 			return
-		var reach := RUSH_HIT_RADIUS * BOSS_SCALE + body_radius
-		var center := (bottom + top) * 0.5
 		var nose := _attack_path("head")
 		for i in nose.size():
-			var pair := Geometry3D.get_closest_points_between_segments(past_nose[i], nose[i], bottom, top)
-			if pair[0].distance_squared_to(pair[1]) <= reach * reach and _ray(pair[0], center).is_empty():
-				_hit_windows[0] = true
-				attack_hit.emit(DAMAGE["sprint"], true, pair[0])
-				return
+			for p: Dictionary in parts:
+				var reach := RUSH_HIT_RADIUS * BOSS_SCALE + float(p["r"])
+				var pair := Geometry3D.get_closest_points_between_segments(
+					past_nose[i], nose[i], p["a"], p["b"])
+				if pair[0].distance_squared_to(pair[1]) <= reach * reach \
+						and _ray(pair[0], (p["a"] + p["b"]) * 0.5).is_empty():
+					_hit_windows[0] = true
+					attack_hit.emit(DAMAGE["sprint"], true, pair[0])
+					return
 		return
 	if action == "back_cannon":
 		_cannon_tick = maxf(0.0, _cannon_tick - delta)
@@ -1024,29 +1086,36 @@ func _resolve_attack(player: Vector3, delta: float, capsule: Dictionary, past_no
 			var muzzle: Marker3D = model.cannon.muzzle
 			var source := muzzle.global_position
 			var end := source - muzzle.global_basis.z.normalized() * _pose.cannon_range
-			var contact := Geometry3D.get_closest_points_between_segments(source, end, bottom, top)
-			var reach := body_radius + 0.44 * BOSS_SCALE
-			if contact[0].distance_squared_to(contact[1]) <= reach * reach and _ray(source, contact[1]).is_empty():
-				_cannon_tick = 0.28
-				attack_hit.emit(15.0, false, source)
+			for p: Dictionary in parts:
+				var contact := Geometry3D.get_closest_points_between_segments(source, end, p["a"], p["b"])
+				var reach := float(p["r"]) + 0.44 * BOSS_SCALE
+				if contact[0].distance_squared_to(contact[1]) <= reach * reach \
+						and _ray(source, contact[1]).is_empty():
+					_cannon_tick = 0.28
+					attack_hit.emit(15.0, false, source)
+					return
 		return
 	var windows: Array = Motion.CONTACT_WINDOWS.get(action, [])
 	for i in windows.size():
 		var window: Array = windows[i]
 		if action_time < window[1] or action_time > window[2] or _hit_windows.has(i):
 			continue
-		var center := (bottom + top) * 0.5
 		var directional_tail := Motion.tail_sweep_direction(action) != 0.0
-		if directional_tail and not _motion.tail_sweep_overlaps(action, action_time, bottom, top, body_radius):
-			continue
-		for shape: Array in _attack_shapes(window[0], _attack_radius(action, window, action_time)):
-			var path: PackedVector3Array = shape[0]
-			var reach := float(shape[1]) * BOSS_SCALE + body_radius
-			var source := _nearest_contact(path, center) if directional_tail else _strike_source(path, bottom, top, reach, shape[2])
-			if source.is_finite() and _ray(source, center).is_empty():
-				_hit_windows[i] = true
-				attack_hit.emit(DAMAGE[action], true, source)
-				break
+		for p: Dictionary in parts:
+			var bottom: Vector3 = p["a"]
+			var top: Vector3 = p["b"]
+			var body_radius: float = p["r"]
+			var pcenter := (bottom + top) * 0.5
+			if directional_tail and not _motion.tail_sweep_overlaps(action, action_time, bottom, top, body_radius):
+				continue
+			for shape: Array in _attack_shapes(window[0], _attack_radius(action, window, action_time)):
+				var path: PackedVector3Array = shape[0]
+				var reach := float(shape[1]) * BOSS_SCALE + body_radius
+				var source := _nearest_contact(path, pcenter) if directional_tail else _strike_source(path, bottom, top, reach, shape[2])
+				if source.is_finite() and _ray(source, pcenter).is_empty():
+					_hit_windows[i] = true
+					attack_hit.emit(DAMAGE[action], true, source)
+					return
 
 
 func _build_contact_catalog() -> void:
@@ -1096,6 +1165,9 @@ func _attack_path(kind: String) -> PackedVector3Array:
 		model.jaw.to_global(Vector3(0, -0.1, -2.04)), model.head.to_global(Vector3(0.68, -0.22, -1.52))])
 
 
+## Obsoleto: hit_parts() usa las cápsulas ajustadas por BodyColliders que
+## contienen TODOS los vértices del mesh. Se conserva para cualquier consulta
+## externa, pero ningún check interno lo usa ya.
 func _hurt_volumes() -> Array:
 	var volumes := [
 		[model.chest.to_global(Vector3(0, -0.25, -1.7)), model.chest.to_global(Vector3(0, 0.22, 1.4)), 1.36],

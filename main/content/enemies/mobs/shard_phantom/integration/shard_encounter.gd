@@ -1,6 +1,7 @@
 extends "res://src/game/encounter_unit.gd"
 
 const Model = preload("res://team/shard/scripts/character.gd")
+const DeathFracture = preload("res://core/death_fracture.gd")
 const SCALE := 1.0 / 0.547
 
 var anchor_index := 0
@@ -10,6 +11,7 @@ var _phase_cd := 0.65
 var _attack_cd := 1.1
 var _shot_pending := false
 var _rebase_pending := false
+var _death_warmed := false
 
 
 func _on_respawn() -> void:
@@ -19,6 +21,7 @@ func _on_respawn() -> void:
 	_attack_cd = 1.1
 	_shot_pending = false
 	_rebase_pending = false
+	_death_warmed = false
 	if rig != null and rig.has_method("reset_encounter"):
 		rig.reset_encounter()
 
@@ -49,7 +52,10 @@ func center() -> Vector3:
 
 
 func hit_parts() -> Array:
-	return super.hit_parts() if _destination < 0 and rig.is_assembled() else []
+	# Multi-cilindro real del phantom (esqueleto + módulos por articulación).
+	if _destination < 0 and rig.is_assembled():
+		return rig.body_colliders()
+	return []
 
 
 func step(dt: float, ctx: Dictionary) -> void:
@@ -72,6 +78,9 @@ func step(dt: float, ctx: Dictionary) -> void:
 	if _rebase_pending and rig.is_assembled():
 		rig.rebase_encounter()
 		_rebase_pending = false
+	if not _death_warmed and rig != null and rig.is_assembled():
+		_death_warmed = true
+		DeathFracture.prepare(self, rig)
 	if rig.current_anim == "attack" and not _shot_pending and rig.anim_time() >= rig.anim_duration() - 0.001:
 		rig.play_anim("idle")
 	if player != null and player.alive and level.state == "fight" and rig.is_assembled():

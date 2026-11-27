@@ -9,6 +9,19 @@ const Kit := preload("res://src/arena/kit.gd")
 const U := 1.0 / 0.547
 const BALL := 1.2
 const RADIUS := 30.0        # 圆形大厅半径
+
+## 导航元信息：圆形大厅 —— bounds_circle 地面 + platforms 顶面；
+## 障碍 = cover 圆棱柱（罐体围栏、监控臂、控制台）+ 分段边界墙。
+static func nav_spec(arena: Dictionary) -> Dictionary:
+	return {
+		"floor_circle": float(arena.get("bounds_circle", (RADIUS - 1.0) * U)),
+		"floor_margin": 0.4 * U,
+		"walls_obstacles": true,
+		"walls_sight": true,
+		"cover_obstacles": true,
+		"cover_shrink": BALL,
+		"platforms": true,
+	}
 const SEGMENTS := 32        # 墙体分面数
 const H := 14.0             # 层高
 const TANK_R := 13.0        # 玻璃罐半径
@@ -88,6 +101,7 @@ static func build(origin := Vector3.ZERO) -> Dictionary:
 		"bounds": bounds,
 		"bounds_circle": (RADIUS - 1.0) * U,
 		"walls": walls,
+		"blade_center_cylinder": Vector2(TANK_R, TANK_TOP) * U,
 		"cover": cover,
 		"platforms": platforms,
 		"camera_open": false,

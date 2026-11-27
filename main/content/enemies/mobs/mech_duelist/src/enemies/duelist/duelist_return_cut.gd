@@ -70,7 +70,7 @@ static func apply(model, state: Dictionary, time: float) -> void:
 	Pace.aim_head(model, state["watch"])
 	_pose_support(model, state, time)
 	_pose_sword(model, state, time)
-	model.finish_pose(0.24, 1.0, toes)
+	model.finish_attack_pose(0.24, toes, 0.0, 0.0, 0.0, model.SWEEP_END)
 
 
 static func _pose_legs(model, state: Dictionary, time: float, turn: float, weight: float) -> Vector2:

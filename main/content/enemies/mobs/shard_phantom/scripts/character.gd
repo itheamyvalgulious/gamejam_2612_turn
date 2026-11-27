@@ -14,6 +14,7 @@ extends Node3D
 ## from the snapshot taken at trigger time (documented in README.md).
 
 const RigScript := preload("res://scripts/phantom/phantom_rig.gd")
+const BodyColliders := preload("res://core/body_colliders.gd")
 const FieldScript := preload("res://scripts/phantom/module_field.gd")
 const ShurikenScript := preload("res://scripts/phantom/energy_shuriken.gd")
 const PK := preload("res://scripts/phantom/phantom_kit.gd")
@@ -108,6 +109,70 @@ var _charge := 0.0
 var _orb_scale := 0.0
 var _shot_flash := 0.0
 var _manual := false
+
+
+var _body_colliders: Dictionary = {}
+
+## Cápsulas multi-cilindro (requirement #2): esqueleto rígido (joints) +
+## cada módulo suelto cubierto en el espacio de SU articulación — la unión
+## contiene todos los vértices visibles (verify_body_parts.gd lo comprueba).
+func body_colliders() -> Array:
+	if _body_colliders.is_empty():
+		_body_colliders = _build_body_colliders()
+	return BodyColliders.world_parts(_body_colliders)["parts"]
+
+
+func _build_body_colliders() -> Dictionary:
+	var anchors: Array = rig.joints.values()
+	# Los módulos no son hijos del joint (los pone ModuleField en world space
+	# cada frame): se cubren como pseudo-vértices en el espacio del joint —
+	# caja local del mesh escalada + pos/quat del slot + margen de breath.
+	var groups: Array = []
+	if field:
+		var per_joint := {}
+		for m: Dictionary in field.mods:
+			var jn: Node3D = m["joint"]
+			var slot: Dictionary = m["slot"]
+			var scl: Vector3 = m["scale"]
+			var inv: Transform3D = jn.global_transform.affine_inverse()
+			var b := Basis(slot["quat"])
+			var aabb: AABB = m["node"].mesh.get_aabb()
+			var breath: float = P["module_breath"] + 0.010
+			var pts: PackedVector3Array = per_joint.get(jn, PackedVector3Array())
+			var breath_dir: Vector3 = jn.global_transform.basis * b.z * breath
+			for sx in [-1.0, 1.0]:
+				for sy in [-1.0, 1.0]:
+					for sz in [-1.0, 1.0]:
+						var c := aabb.position + aabb.size * 0.5 \
+							+ (aabb.size * 0.5) * Vector3(sx, sy, sz)
+						var world_pt: Vector3 = (jn.global_transform \
+							* Transform3D(b, slot["pos"])) * (c * scl)
+						pts.append(inv * (world_pt + breath_dir))
+						pts.append(inv * (world_pt - breath_dir))
+			per_joint[jn] = pts
+		for jn in per_joint:
+			groups.append({"anchor": jn, "points": per_joint[jn]})
+	return BodyColliders.build({
+		"root": self,
+		"anchors": anchors,
+		"k_max": 3,
+		"budget": 30,
+		"mesh_filter": _body_mesh_filter,
+		"groups": groups,
+	})
+
+
+func _body_mesh_filter(mi: MeshInstance3D) -> bool:
+	var n: Node = mi
+	while n != null and n != self:
+		# Modules/flight FX/decoración no son cuerpo rígido del rig.
+		if n == field or n == charge_orb or n == shadow \
+				or n == ring_node or n == glow_node:
+			return false
+		if String(n.name).begins_with("Shuriken"):
+			return false
+		n = n.get_parent()
+	return true
 
 
 func _ready() -> void:
