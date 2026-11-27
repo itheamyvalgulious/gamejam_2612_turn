@@ -843,26 +843,31 @@ func depenetrate(pos: Vector3, radius: float, step_height := DEFAULT_STEP_HEIGHT
 						best_d = dist_e
 						best_n = n
 				p += best_n * (best_d + pad + 0.03)
+	# 水平推出只允许落回同一层：楼上护栏紧贴楼板边缘时，「沿最近边推出」会
+	# 把人推到楼板外，支撑从 8 掉到 0 —— 表现为同 XZ 在两层之间闪现。
+	var floor_min := cur.y - step_height - 0.25
 	var cand := Vector3(p.x, cur.y, p.y)
 	var s_cand := support_at(cand, cur.y + step_height)
-	if s_cand > -INF * 0.5:
+	if s_cand > -INF * 0.5 and s_cand >= floor_min:
 		cand.y = s_cand
 		if not _blocked_at(cand, radius, step_height) and (upper.is_empty()
 				or column_clear(cand, float(upper["radius"]), float(upper["bottom"]), float(upper["top"]))):
 			return cand
-	# 兜底：8 方向小半径采样最近可站点
-	for r_off in [0.35, 0.75, 1.35]:
+	# 兜底：8 方向采样最近可站点。半径要能跨出「按角色半径膨胀」的障碍带
+	# （楼上护栏、掩体），否则被卡在膨胀区里出不来；同时仍限定在同一层。
+	var probes: Array[float] = [0.35, 0.75, 1.35, radius + 0.25, radius * 1.6 + 0.2]
+	for r_off in probes:
 		for k in 8:
 			var ang := TAU * float(k) / 8.0
 			var probe := Vector3(pos.x + cos(ang) * r_off, pos.y, pos.z + sin(ang) * r_off)
 			var sp := support_at(probe, pos.y + step_height)
-			if sp < -INF * 0.5:
+			if sp < -INF * 0.5 or sp < floor_min:
 				continue
 			probe.y = sp
 			if not _blocked_at(probe, radius, step_height) and (upper.is_empty()
 					or column_clear(probe, float(upper["radius"]), float(upper["bottom"]), float(upper["top"]))):
 				return probe
-	return pos
+	return cur
 
 
 func _step_valid(cur: Vector3, target_xz: Vector3, radius: float,
