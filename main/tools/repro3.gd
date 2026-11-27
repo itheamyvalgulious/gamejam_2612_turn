@@ -1,10 +1,13 @@
 extends Node
+
+const Catalog = preload("res://core/level_catalog.gd")
 # 冒烟：连续过几关确认场景能加载、敌人能生成
 func _ready() -> void:
 	_run.call_deferred()
 
 func _run() -> void:
-	for idx in [1, 3, 6, 4, 9]:
+	for id in ["rain_plaza", "cargo_hold_02", "warehouse", "neon_district", "galleria_height_test"]:
+		var idx := Catalog.index_for_id(id)
 		TurnSession.open_level(idx)
 		while TurnSession.active_level_index() != idx or get_tree().current_scene == null:
 			await get_tree().process_frame

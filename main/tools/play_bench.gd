@@ -6,7 +6,7 @@ extends Node
 ## 在 DISPLAY=:10 上渲染整帧，逐帧记录墙钟耗时。
 ##
 ## Usage:
-##   DISPLAY=:10 godot --path main -- --play-bench --level=5 \
+##   DISPLAY=:10 godot --path main -- --play-bench --level=1 \
 ##       --warmup=8 --measure=30 --report=/tmp/opencode/play_bench.json
 ##
 ## 可选诊断（只用于定位，不用于验收）：
@@ -14,8 +14,7 @@ extends Node
 ##   --hud=0        测量时不打开 F5 调试 HUD
 ##   --screenshot=/path.png
 
-const LEVEL_NAMES := ["霓虹窄巷", "雨夜广场", "灯墙之厅", "货舱02", "霓虹街区",
-	"坠击中庭", "仓库", "回廊实验舱", "病房夜班", "坠击中庭高低差", "三号船坞"]
+const Catalog = preload("res://core/level_catalog.gd")
 
 var _args := {}
 var _frames: Array = []
@@ -30,7 +29,7 @@ var _jump_cd := 0.0
 var _stuck := 0.0
 var _last_pos := Vector3.ZERO
 var _snapshots: Array = []
-var _level_index := 5
+var _level_index := Catalog.index_for_id("galleria")
 var _player
 var _level
 var _cam
@@ -117,11 +116,12 @@ func _process(delta: float) -> void:
 
 
 func _run() -> void:
-	_level_index = int(_args.get("level", "5"))
+	if _args.has("level"):
+		_level_index = int(_args["level"])
 	_warmup = float(_args.get("warmup", "6"))
 	_measure = float(_args.get("measure", "20"))
 	_idle = _args.has("idle")
-	print("[play-bench] opening level %d %s" % [_level_index, LEVEL_NAMES[_level_index]])
+	print("[play-bench] opening level %d %s" % [_level_index, Catalog.get_entry(_level_index)[0]])
 	TurnSession.open_level(_level_index)
 	while TurnSession.active_level_index() != _level_index:
 		await get_tree().process_frame
@@ -436,7 +436,7 @@ func _stats() -> Dictionary:
 func _write_report(stats: Dictionary) -> void:
 	var path := String(_args.get("report", "/tmp/opencode/play_bench.json"))
 	var report := {
-		"level": LEVEL_NAMES[_level_index],
+		"level": Catalog.get_entry(_level_index)[0],
 		"level_index": _level_index,
 		"display": OS.get_environment("DISPLAY"),
 		"renderer": RenderingServer.get_video_adapter_name(),
