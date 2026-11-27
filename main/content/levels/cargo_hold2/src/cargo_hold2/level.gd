@@ -7,7 +7,9 @@ signal instruction_changed(text: String)
 const CargoArena = preload("res://src/cargo_hold2/arena.gd")
 const Sentinel = preload("res://src/game/arc_encounter.gd")
 const LevelDeathField = preload("res://core/death_field.gd")
-const ACTOR_RADIUS := 1.75
+const PLAYER_RADIUS := 0.85
+const PLAYER_HEIGHT := 3.8
+const CONTACT_EPS := 0.015
 const GATE_OPEN_TIME := 0.9
 
 var player_previous := Vector3.ZERO
@@ -35,6 +37,7 @@ func start_level(_idx: int) -> void:
 	enemies[0].hide()
 	if projectiles != null:
 		projectiles.clear_all()
+	player.rig.ground_height = float(arena["floor_y"])
 	player.reset(arena["player_spawn"])
 	player.rig.arena_bounds = Vector2.ZERO
 	player_previous = player.rig.global_position
@@ -181,7 +184,8 @@ func _step_evacuation(dt: float, ctx: Dictionary) -> void:
 		Snd.play_at("cargo_radio", player.rig.global_position, {"gain": 0.76, "prio": 4})
 		radio_line.emit("……通信中断。", 1.8, false)
 	var at: Vector3 = player.rig.global_position
-	if not _gate_locked and CargoArena.EXIT_TRIGGER.has_point(Vector2(at.x, at.z)):
+	if not _gate_locked and at.y < CargoArena.EXIT_ROOF_Y \
+			and CargoArena.EXIT_TRIGGER.has_point(Vector2(at.x, at.z)):
 		_stop_alarm()
 		_set_beacons(0.0)
 		instruction_changed.emit("")
@@ -223,52 +227,86 @@ func player_can_act() -> bool:
 
 
 func constrain_player() -> void:
-	var resolved := resolve_motion(player_previous, player.rig.global_position)
+	var rig = player.rig
+	var resolved := resolve_motion(player_previous, rig.global_position)
 	if state == "fight" and enemies[0].alive:
 		var enemy_at: Vector3 = enemies[0].ground_position()
 		var offset := (resolved - enemy_at) * Vector3(1, 0, 1)
-		if offset.length() < 2.6:
+		if absf(resolved.y - enemy_at.y) < 3.0 and offset.length_squared() < 2.6 * 2.6:
 			if offset.length_squared() < 0.001:
 				offset = Vector3.FORWARD
 			var separation := enemy_at + offset.normalized() * 2.6
 			separation.y = resolved.y
-			resolved = resolve_motion(player_previous, separation)
-	if resolved.y < player.rig.global_position.y and player.rig.vertical_velocity > 0.0:
-		player.rig.vertical_velocity = 0.0
-	player.rig.weapon_xf.origin += resolved - player.rig.global_position
-	player.rig.global_position = resolved
+			resolved = resolve_motion(resolved, separation)
+	if resolved.y < rig.global_position.y - CONTACT_EPS and rig.vertical_velocity > 0.0:
+		rig.vertical_velocity = 0.0
+	rig.ground_height = _floor_at(resolved)
+	var supported: bool = resolved.y <= rig.ground_height + CONTACT_EPS
+	if not supported and rig.jump_state in ["GROUND", "LANDING"]:
+		rig.jump_state = "AIR"
+		rig.jump_t = 0.0
+		rig.air_time = 0.0
+		rig.vertical_velocity = 0.0
+	elif supported and rig.jump_state == "AIR" and rig.vertical_velocity <= 0.0:
+		resolved.y = rig.ground_height
+		rig.jump_state = "LANDING"
+		rig.jump_t = 0.0
+		rig.vertical_velocity = 0.0
+	rig.weapon_xf.origin += resolved - rig.global_position
+	rig.global_position = resolved
 	player_previous = resolved
 
 
 func resolve_motion(from: Vector3, target: Vector3) -> Vector3:
-	var distance := Vector2(target.x - from.x, target.z - from.z).length()
-	var count := maxi(1, ceili(distance / 0.3))
+	var count := maxi(1, ceili(from.distance_to(target) / 0.25))
 	var delta := (target - from) / float(count)
 	var pos := from
-	for i in count:
+	for _i in count:
+		pos.y = _resolve_height(pos, pos.y + delta.y)
 		for axis in [0, 2]:
 			var next := pos
 			next[axis] += delta[axis]
-			next.x = clampf(next.x, -CargoArena.HALF_WIDTH + 3.0, CargoArena.HALF_WIDTH - 3.0)
-			next.z = clampf(next.z, -CargoArena.HALF_DEPTH + 3.0, CargoArena.HALF_DEPTH - 3.0)
 			if position_clear(next):
 				pos = next
-	var ceiling := CargoArena.CEILING - 5.0
-	for box: AABB in arena["headroom"]:
-		var footprint := Rect2(box.position.x, box.position.z, box.size.x, box.size.z)
-		if footprint.grow(0.7).has_point(Vector2(pos.x, pos.z)):
-			ceiling = minf(ceiling, box.position.y - 4.3)
-	pos.y = clampf(target.y, 0.0, ceiling)
 	return pos
 
 
-func position_clear(pos: Vector3, radius := ACTOR_RADIUS) -> bool:
-	for box: AABB in arena["solids"]:
-		var expanded := Rect2(box.position.x - radius, box.position.z - radius,
-			box.size.x + radius * 2.0, box.size.z + radius * 2.0)
-		if expanded.has_point(Vector2(pos.x, pos.z)):
+func _resolve_height(pos: Vector3, target_y: float) -> float:
+	if is_equal_approx(pos.y, target_y):
+		return pos.y
+	var height := maxf(target_y, float(arena["floor_y"]))
+	var rising := target_y > pos.y
+	for box: AABB in arena["camera_solids"]:
+		if rising:
+			var head_limit := box.position.y - PLAYER_HEIGHT
+			if pos.y <= head_limit + CONTACT_EPS and height > head_limit and _overlaps_footprint(pos, box):
+				height = minf(height, head_limit)
+		elif pos.y >= box.end.y - CONTACT_EPS and height < box.end.y and _overlaps_footprint(pos, box):
+			height = maxf(height, box.end.y)
+	return height
+
+
+func _floor_at(pos: Vector3) -> float:
+	var floor_y: float = arena["floor_y"]
+	for box: AABB in arena["camera_solids"]:
+		if box.end.y > floor_y and box.end.y <= pos.y + CONTACT_EPS and _overlaps_footprint(pos, box):
+			floor_y = box.end.y
+	return floor_y
+
+
+func position_clear(pos: Vector3) -> bool:
+	for box: AABB in arena["camera_solids"]:
+		if pos.y >= box.end.y - CONTACT_EPS or pos.y + PLAYER_HEIGHT <= box.position.y + CONTACT_EPS:
+			continue
+		if _overlaps_footprint(pos, box):
 			return false
 	return true
+
+
+func _overlaps_footprint(pos: Vector3, box: AABB) -> bool:
+	var near_x := clampf(pos.x, box.position.x, box.end.x)
+	var near_z := clampf(pos.z, box.position.z, box.end.z)
+	return Vector2(pos.x - near_x, pos.z - near_z).length_squared() < PLAYER_RADIUS * PLAYER_RADIUS
 
 
 func combat_targets() -> Array:

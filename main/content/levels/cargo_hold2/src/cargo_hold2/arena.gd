@@ -13,12 +13,13 @@ const TARGET := Vector3(-22, 2.6, 21)
 const EXIT_X := 27.0
 const EXIT_DOOR_Z := -32.0
 const EXIT_TRIGGER := Rect2(23.5, -43.0, 7.0, 4.5)
+const EXIT_ROOF_Y := 8.475
 
 var _root := Node3D.new()
 var _kit := Kit.new()
+# Ground obstacles feed navigation. The full set also includes boxes above the ground.
 var _solids: Array[AABB] = []
 var _camera_solids: Array[AABB] = []
-var _headroom: Array[AABB] = []
 var _blade_boxes: Array[AABB] = []
 var _walls: Array = []
 var _beacons: Array[OmniLight3D] = []
@@ -57,7 +58,7 @@ func _build() -> Dictionary:
 		"floor_y": 0.0, "bounds": AABB(Vector3(-HALF_WIDTH, 0, -HALF_DEPTH),
 			Vector3(HALF_WIDTH * 2, CEILING, HALF_DEPTH * 2)),
 		"walls": _walls, "cover": [], "solids": _solids, "camera_solids": _camera_solids,
-		"headroom": _headroom, "blade_boxes": _blade_boxes,
+		"blade_boxes": _blade_boxes,
 		"player_spawn": Transform3D(Basis.IDENTITY, PLAYER_SPAWN),
 		"gate": gate, "guide": guide, "beacons": _beacons, "beacon_material": _beacon_material,
 	}
@@ -179,8 +180,7 @@ func _recovery_rack(x: float) -> void:
 				hinge + Vector3(-side * 0.17, 0.44, 0.77)], 0.105, 8)
 			_kit.box_bevel("metal_dark", Vector3(0.25, 0.26, 0.22),
 				hinge + Vector3(-side * 0.17, 0.49, 0.77), 0.05)
-		# The open clamps are inside this side channel, outside the aisle.
-		_obstacle(upright + Vector3(-side * 0.49, 0.38, 0.4), Vector3(0.62, 2.80, 1.45), true)
+			_obstacle(hinge + Vector3(-side * 0.11, 0.23, 0.39), Vector3(0.42, 0.80, 1.02), false)
 		_kit.box("cyan", Vector3(0.22, 0.10, 0.045), upright + Vector3(0, 1.82, 0.98))
 		_kit.box("safety_yellow", Vector3(0.15, 0.013, 7.0), Vector3(x + side * 2.1, 0.078, 36.4))
 	_box("orion_frame", Vector3(x, 5.14, station_z), Vector3(8.22, 0.43, 1.28), true, false)
@@ -296,7 +296,7 @@ func _loading_deck() -> void:
 		var at: Vector3 = entry[0]
 		var size: Vector3 = entry[2]
 		crates.container(at, "container_%d" % entry[1], 0, size)
-		_obstacle(at + Vector3.UP * size.y * 0.5, size + Vector3(0.5, 0.02, 0.35), true)
+		_obstacle(at + Vector3.UP * size.y * 0.5, size + Vector3(0.32, 0.0, 0.23), true)
 		if entry[3]:
 			var upper := Vector3(size.x - 0.55, 4.6, size.z - 0.35)
 			crates.container(at + Vector3.UP * size.y, "container_%d" % ((int(entry[1]) + 1) % 3), 0, upper)
@@ -416,7 +416,7 @@ func _airlock() -> Dictionary:
 		for z in [-35.7, -40.0]:
 			_kit.box_bevel("metal_dark", Vector3(0.34, 2.5, 2.85), Vector3(x - side * 0.52, 4.25, z), 0.08)
 			_kit.box("violet", Vector3(0.095, 0.12, 2.34), Vector3(x - side * 0.74, 4.9, z))
-	_box("orion_frame", Vector3(EXIT_X, 8.75, -38.1), Vector3(11.8, 0.55, 12.6), true, false)
+	_box("orion_frame", Vector3(EXIT_X, EXIT_ROOF_Y + 0.275, -38.1), Vector3(11.8, 0.55, 12.6), true, false)
 	_box("metal_dark", Vector3(EXIT_X, 8.28, EXIT_DOOR_Z), Vector3(12.4, 1.05, 1.2), true, false)
 	_kit.box_bevel("orion_frame", Vector3(11.8, 7.5, 0.82), Vector3(EXIT_X, 12.55, EXIT_DOOR_Z + 0.70), 0.18)
 	_kit.box("metal_dark", Vector3(9.4, 5.8, 0.17), Vector3(EXIT_X, 12.65, EXIT_DOOR_Z + 1.14))
@@ -523,9 +523,16 @@ func _terminal(at: Vector3) -> void:
 
 func _pallet(at: Vector3) -> void:
 	_box("orion_frame", at + Vector3.UP * 0.4, Vector3(3.3, 0.8, 2.8), true)
+	# The base stays a ground obstacle for Sentinel. The deck and crate provide actual upper contacts.
 	for x in [-1.1, 0.0, 1.1]:
-		_kit.box_bevel("metal_dark", Vector3(0.49, 0.28, 2.84), at + Vector3(x, 0.8, 0), 0.045)
-	_kit.box_bevel("container_2", Vector3(1.82, 0.83, 1.68), at + Vector3(-0.45, 1.34, -0.25), 0.08)
+		var center := at + Vector3(x, 0.8, 0)
+		var size := Vector3(0.49, 0.28, 2.84)
+		_kit.box_bevel("metal_dark", size, center, 0.045)
+		_obstacle(center, size, false)
+	var cargo_at := at + Vector3(-0.45, 1.34, -0.25)
+	var cargo_size := Vector3(1.82, 0.83, 1.68)
+	_kit.box_bevel("container_2", cargo_size, cargo_at, 0.08)
+	_obstacle(cargo_at, cargo_size, false)
 	for x in [-1.04, 0.14]:
 		_kit.box("metal", Vector3(0.115, 0.89, 1.72), at + Vector3(x, 1.34, -0.25))
 
@@ -621,20 +628,18 @@ func _light(at: Vector3, tint: Color, power: float, reach: float) -> OmniLight3D
 	return lamp
 
 
-func _box(key: String, at: Vector3, size: Vector3, physical: bool, blocks_move := true) -> void:
+func _box(key: String, at: Vector3, size: Vector3, physical: bool, ground_obstacle := true) -> void:
 	_kit.box_bevel(key, size, at, 0.06)
 	if physical:
-		_obstacle(at, size, blocks_move)
+		_obstacle(at, size, ground_obstacle)
 
 
-func _obstacle(at: Vector3, size: Vector3, blocks_move: bool) -> void:
+func _obstacle(at: Vector3, size: Vector3, ground_obstacle: bool) -> void:
 	_body(at, size)
 	var bounds := AABB(at - size * 0.5, size)
 	_camera_solids.append(bounds)
-	if not blocks_move:
+	if not ground_obstacle:
 		_blade_boxes.append(bounds)
-		if bounds.position.y < 10.0:
-			_headroom.append(bounds)
 		return
 	_solids.append(bounds)
 	var low := Vector2(bounds.position.x, bounds.position.z)
