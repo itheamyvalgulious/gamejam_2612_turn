@@ -162,7 +162,7 @@ func _show_page() -> void:
 	_status.visible = false
 	_sheet.add_child(_status)
 	if _page in [Page.SETTINGS, Page.HELP]:
-		var back_button := _add_action(_sheet, "返回主菜单" if home_settings else "返回暂停菜单", back)
+		var back_button := _navigation_row(_sheet, "返回主菜单" if home_settings else "返回暂停菜单", back)
 		if _focus == null:
 			_focus = back_button
 	_sheet.add_child(_label("Esc    " + ("返回战斗" if _page == Page.PAUSE else "返回"), 14, MUTED))
@@ -183,7 +183,19 @@ func _pause_actions() -> void:
 	var gap := Control.new()
 	gap.custom_minimum_size.y = 9
 	_body.add_child(gap)
-	_add_action(_body, "返回关卡选择", request_exit)
+	_navigation_row(_body, "返回关卡选择", request_exit)
+
+
+func _navigation_row(parent: Container, title: String, callback: Callable) -> Button:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 11)
+	parent.add_child(row)
+	var back_button := _add_action(row, title, callback)
+	back_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var minimize := Style.minimize_button(TurnSession.minimize_window)
+	minimize.custom_minimum_size.y = back_button.custom_minimum_size.y
+	row.add_child(minimize)
+	return back_button
 
 
 func _request_transition(exiting: bool) -> void:

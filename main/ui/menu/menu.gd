@@ -122,16 +122,21 @@ func _show_home() -> void:
 		checkpoint_label.position = Vector2(27, 73)
 		actions.add_child(checkpoint_label)
 	var settings := Style.button("设置", TurnSession.open_home_settings)
+	var minimize := Style.minimize_button(TurnSession.minimize_window)
 	var exit := Style.button("退出游戏", get_tree().quit)
 	var settings_box := Rect2(244, 117, 130, 49) if primary != level_select else Rect2(28, 105, 154, 49)
 	_place_action(actions, settings, settings_box)
-	_place_action(actions, exit, Rect2(56, 174, 155, 47))
+	_place_action(actions, minimize, Rect2(56, 174, 155, 47))
+	_place_action(actions, exit, Rect2(224, 182, 155, 47))
+	minimize.focus_neighbor_right = minimize.get_path_to(exit)
+	exit.focus_neighbor_left = exit.get_path_to(minimize)
+	settings.focus_neighbor_bottom = settings.get_path_to(minimize if primary == level_select else exit)
 	primary.focus_neighbor_bottom = primary.get_path_to(settings if primary == level_select else level_select)
 	if primary != level_select:
 		level_select.focus_neighbor_top = level_select.get_path_to(primary)
 		level_select.focus_neighbor_right = level_select.get_path_to(settings)
 		settings.focus_neighbor_left = settings.get_path_to(level_select)
-		level_select.focus_neighbor_bottom = level_select.get_path_to(exit)
+		level_select.focus_neighbor_bottom = level_select.get_path_to(minimize)
 	_add_status(column)
 	primary.grab_focus()
 
@@ -202,9 +207,13 @@ func _show_catalog() -> void:
 	preview.add_child(_description)
 	_enter = Style.button("进入关卡", _enter_level)
 	_enter.custom_minimum_size.x = 176
-	_enter.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_enter.add_theme_stylebox_override("normal", Style.primary_surface())
-	preview.add_child(_enter)
+	var actions := HBoxContainer.new()
+	actions.alignment = BoxContainer.ALIGNMENT_END
+	actions.add_theme_constant_override("separation", 12)
+	preview.add_child(actions)
+	actions.add_child(Style.minimize_button(TurnSession.minimize_window))
+	actions.add_child(_enter)
 	for row in _rows:
 		row.focus_neighbor_right = row.get_path_to(_enter)
 	_add_status(column)

@@ -43,20 +43,46 @@
             <TextBlock x:Name="ErrorDetail" Visibility="Collapsed" FontSize="13" Foreground="#FFBD82"
                        TextWrapping="Wrap" TextAlignment="Center" Margin="0,12,0,0"/>
         </StackPanel>
-        <Button x:Name="CloseButton" Content="×" AutomationProperties.Name="关闭"
+        <Button x:Name="CloseButton" AutomationProperties.Name="关闭"
                 HorizontalAlignment="Right" VerticalAlignment="Top" Width="44" Height="44"
-                Margin="0,39,39,0" Background="#342241" Foreground="#F1EFFA"
-                BorderBrush="#956695" FontSize="24">
+                Margin="0,39,39,0" BorderBrush="#AB756984" ToolTip="关闭启动窗口">
+            <Button.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop Color="#DC151524" Offset="0"/>
+                    <GradientStop Color="#DC282136" Offset="1"/>
+                </LinearGradientBrush>
+            </Button.Background>
             <Button.Template>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="ClosePlate" Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
+                    <Grid Background="Transparent">
+                        <Path x:Name="ClosePlate" Data="M 7.5,0.5 L 43.5,0.5 L 36.5,43.5 L 0.5,43.5 Z"
+                              Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}"
+                              StrokeThickness="1" IsHitTestVisible="False"/>
+                        <Path x:Name="CloseSignal" Data="M 5,42.5 L 31,42.5"
+                              StrokeThickness="2" Opacity="0" IsHitTestVisible="False">
+                            <Path.Stroke>
+                                <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                    <GradientStop Color="#FFEFA4E5" Offset="0"/>
+                                    <GradientStop Color="#59EFA4E5" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Path.Stroke>
+                        </Path>
+                        <Path Data="M 17,17 L 27,27 M 27,17 L 17,27" Stroke="#F1EFFA"
+                              StrokeThickness="1.75" IsHitTestVisible="False"/>
+                    </Grid>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="ClosePlate" Property="Stroke" Value="#C47EC4"/>
+                        </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="ClosePlate" Property="Background" Value="#57325F"/>
-                            <Setter TargetName="ClosePlate" Property="BorderBrush" Value="#EFA4E5"/>
+                            <Setter TargetName="ClosePlate" Property="Fill" Value="#392747"/>
+                            <Setter TargetName="ClosePlate" Property="Stroke" Value="#EFA4E5"/>
+                            <Setter TargetName="CloseSignal" Property="Opacity" Value="1"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ClosePlate" Property="Fill" Value="#281834"/>
+                            <Setter TargetName="ClosePlate" Property="Stroke" Value="#CA78C0"/>
+                            <Setter TargetName="CloseSignal" Property="Opacity" Value="1"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

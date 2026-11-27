@@ -21,6 +21,7 @@ var _options := ConfigFile.new()
 var _pause_menu: PauseMenu
 var _hud_was_visible := true
 var _resume_mouse := false
+var _mode_before_minimize := Window.MODE_MINIMIZED
 var _home_settings: PauseMenu
 var _home_focus: Control
 var _loading: LevelLoading
@@ -43,6 +44,7 @@ func _ready() -> void:
 	_set_vsync(bool(get_option("display.vsync", false)))
 	_build_debug_hud()
 	get_window().focus_exited.connect(_pause_on_focus_loss)
+	get_window().focus_entered.connect(_restore_minimized_mode, CONNECT_DEFERRED)
 
 
 func _build_debug_hud() -> void:
@@ -81,7 +83,7 @@ func _build_debug_hud() -> void:
 
 func toggle_debug_hud() -> void:
 	_debug_on = not _debug_on
-	_debug_hud.visible = _debug_on
+	_debug_hud.visible = _debug_on and _pause_menu == null
 	if _debug_on:
 		_debug_cursor = 0
 		_debug_filled = 0
@@ -284,6 +286,7 @@ func _open_pause(from_focus_loss := false) -> void:
 	overlay.exit_requested.connect(return_to_menu)
 	overlay.setting_changed.connect(_set_option)
 	_pause_menu = overlay
+	_debug_hud.hide()
 	get_tree().paused = true
 	var capture_frame := DisplayServer.get_name() != "headless"
 	overlay.visible = not capture_frame
@@ -327,6 +330,26 @@ func _close_pause() -> void:
 		var hud: CanvasLayer = current.get("hud")
 		hud.visible = _hud_was_visible
 	get_tree().paused = false
+	_debug_hud.visible = _debug_on
+
+
+func minimize_window() -> void:
+	var window := get_window()
+	if window.mode != Window.MODE_MINIMIZED:
+		_mode_before_minimize = window.mode
+		window.mode = Window.MODE_MINIMIZED
+
+
+func _restore_minimized_mode() -> void:
+	if _mode_before_minimize == Window.MODE_MINIMIZED:
+		return
+	var window := get_window()
+	if window.mode == Window.MODE_MINIMIZED:
+		return
+	var previous_mode := _mode_before_minimize
+	_mode_before_minimize = Window.MODE_MINIMIZED
+	if window.mode != previous_mode:
+		window.mode = previous_mode
 
 
 func _is_fullscreen() -> bool:
@@ -438,6 +461,7 @@ func _switch(index: int) -> void:
 	if _services != null:
 		_services.call("stop")
 	_active = index
+	_debug_hud.visible = _debug_on and _active >= 0
 	_arguments.clear()
 	InputMap.load_from_project_settings()
 

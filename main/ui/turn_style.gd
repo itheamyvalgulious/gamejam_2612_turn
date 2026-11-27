@@ -14,17 +14,25 @@ static func theme() -> Theme:
 	var skin := Theme.new()
 	skin.default_font = load("res://runtime/fonts/act/ui_font.tres") as Font
 	skin.default_font_size = 18
+	var normal := surface()
+	var hover := surface(Color("#392747"), FOCUS, FOCUS)
+	var pressed := surface(Color("#281834"), Color("#ca78c0"), FOCUS)
 	for control in ["Button", "CheckButton"]:
 		skin.set_color("font_color", control, TEXT)
 		skin.set_color("font_hover_color", control, TEXT)
 		skin.set_color("font_pressed_color", control, TEXT)
+		skin.set_color("font_hover_pressed_color", control, TEXT)
 		skin.set_color("font_focus_color", control, TEXT)
 		skin.set_color("font_disabled_color", control, Color("#858195"))
-		skin.set_stylebox("normal", control, surface())
-		skin.set_stylebox("hover", control, surface(Color("#392747"), FOCUS, FOCUS))
-		skin.set_stylebox("pressed", control, surface(Color("#281834"), Color("#ca78c0"), FOCUS))
+		skin.set_stylebox("normal", control, normal)
+		skin.set_stylebox("hover", control, hover)
+		skin.set_stylebox("pressed", control, pressed)
+		skin.set_stylebox("hover_pressed", control, hover)
 		skin.set_stylebox("focus", control, surface(Color.TRANSPARENT, Color("#c47ec4")))
 		skin.set_stylebox("disabled", control, surface(Color("#161421"), Color("#444257")))
+	skin.set_stylebox("pressed", "CheckButton", normal)
+	skin.set_color("button_checked_color", "CheckButton", FOCUS)
+	skin.set_color("button_unchecked_color", "CheckButton", MUTED)
 	skin.set_stylebox("slider", "HSlider", _slider_track(Color("#36304b")))
 	skin.set_stylebox("grabber_area", "HSlider", _slider_track(Color("#9d5ca8")))
 	skin.set_stylebox("grabber_area_highlight", "HSlider", _slider_track(FOCUS))
@@ -71,6 +79,15 @@ static func button(title: String, action := Callable()) -> Button:
 	result.custom_minimum_size.y = 47
 	if action.is_valid():
 		result.pressed.connect(action)
+	return result
+
+static func minimize_button(action: Callable) -> Button:
+	var result := button("最小化", action)
+	result.name = "MinimizeWindow"
+	result.tooltip_text = "最小化到任务栏"
+	result.accessibility_name = "最小化窗口"
+	result.custom_minimum_size.x = 140
+	result.add_theme_color_override("font_color", MUTED)
 	return result
 
 static func shade(colors: PackedColorArray, offsets: PackedFloat32Array, end := Vector2.RIGHT) -> TextureRect:
