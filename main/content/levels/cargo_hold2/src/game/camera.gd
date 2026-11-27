@@ -9,6 +9,7 @@ var camera: Camera3D
 var yaw := 0.0
 var pitch := -0.16
 var first_person := false
+var wake_offset := 0.0
 
 var _pos_smooth := Vector3.ZERO
 var _focus_smooth := Vector3.ZERO
@@ -67,7 +68,7 @@ func fp_transform() -> Transform3D:
 	if rig == null:
 		return Transform3D.IDENTITY
 	var anchor: Vector3 = rig.head_camera.global_position
-	anchor.y = rig.global_position.y + P.getf("cam.first_height")
+	anchor.y = rig.global_position.y + P.getf("cam.first_height") + wake_offset
 	var eye := anchor - flat_forward() * 0.22
 	return Transform3D(Basis.looking_at(forward(), Vector3.UP), eye)
 
@@ -143,7 +144,7 @@ func step(dt: float, arena: Dictionary) -> void:
 		return
 
 	# ---------------- 第三人称
-	var focus := base + Vector3(0, P.getf("cam.focus_height"), 0)
+	var focus := base + Vector3(0, P.getf("cam.focus_height") + wake_offset, 0)
 	var dist := P.getf("cam.distance")
 	var want_pos := focus - fwd * dist + Vector3(0, P.getf("cam.height"), 0)
 	if P.getb("cam.collision"):

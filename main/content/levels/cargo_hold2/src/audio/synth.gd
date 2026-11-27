@@ -326,6 +326,23 @@ static func samples(kind: String, variant: int) -> PackedFloat32Array:
 				{"osc": "sine", "f0": 150.0, "f1": 40.0, "fmode": "exp", "filt": "none",
 					"env": _exp_env(1.3, 0.24, 0.9), "gain": 1.0},
 			] + _metal_modes(900.0, 0.30, 0.9) as Array, seed_i)
+		"cargo_alarm":
+			buf = render_layers(0.94, [
+				{"osc": "sine", "f0": 480.0, "f1": 590.0, "fmode": "lin", "filt": "none",
+					"env": [[0.0, 0.0], [0.06, 0.8], [0.30, 0.55], [0.38, 0.0],
+						[0.48, 0.0], [0.56, 0.78], [0.81, 0.45], [0.94, 0.0]], "gain": 0.85},
+				{"osc": "sine", "f0": 960.0, "f1": 1180.0, "fmode": "lin", "filt": "none",
+					"env": [[0.0, 0.0], [0.07, 0.32], [0.36, 0.0],
+						[0.49, 0.0], [0.60, 0.31], [0.94, 0.0]], "gain": 0.6},
+			], seed_i)
+		"cargo_radio":
+			buf = render_layers(0.42, [
+				{"osc": "noise", "f0": 2500.0, "f1": 1700.0, "fmode": "lin", "filt": "bp", "q": 1.1,
+					"env": [[0.0, 0.0], [0.025, 0.6], [0.12, 0.05], [0.20, 0.38],
+						[0.29, 0.22], [0.42, 0.0]], "gain": 0.8},
+				{"osc": "sine", "f0": 550.0, "f1": 760.0, "fmode": "lin", "filt": "none",
+					"env": [[0.0, 0.0], [0.02, 0.32], [0.09, 0.0]], "gain": 1.0},
+			], seed_i)
 		# ---------------- 过关提示
 		"chime":
 			buf = render_layers(1.2, [

@@ -4,6 +4,8 @@ extends Node3D
 ## 手感参数全部来自 P（~ 面板实时改）；按键全部来自 B（Esc 面板重绑）。
 
 const GameHudScene = preload("res://src/game/hud.gd")
+const CargoLevel = preload("res://src/cargo_hold2/level.gd")
+const Briefing = preload("res://src/cargo_hold2/briefing.gd")
 const FpMaskScene = preload("res://src/game/fp_mask.gd")
 const ReplayScene = preload("res://src/game/replay.gd")
 const Tuning = preload("res://src/ui/tuning.gd")
@@ -11,7 +13,8 @@ const BindsPanel = preload("res://src/ui/binds_panel.gd")
 
 var player: PlayerUnit
 var cam: GameCam
-var level: LevelUnit
+var level: CargoLevel
+var briefing: Briefing
 var proj: Projectiles
 var hud
 var tuning
@@ -49,7 +52,7 @@ func _ready() -> void:
 	cam.pitch = -0.16
 	cam.set_first_person(P.gets("cam.mode") == "first")
 
-	level = preload("res://src/cargo_hold2/level.gd").new()
+	level = CargoLevel.new()
 	level.name = "Level"
 	add_child(level)
 	level.setup(player, proj, cam)
@@ -57,6 +60,12 @@ func _ready() -> void:
 	hud = GameHudScene.new()
 	hud.name = "Hud"
 	add_child(hud)
+	briefing = Briefing.new()
+	briefing.name = "CargoBriefing"
+	add_child(briefing)
+	level.opening_reset.connect(briefing.reset)
+	level.radio_line.connect(briefing.speak)
+	level.instruction_changed.connect(briefing.set_instruction)
 
 	tuning = Tuning.new()
 	tuning.name = "Tuning"
@@ -68,7 +77,6 @@ func _ready() -> void:
 
 	level.on_level_changed = func(i: int, name_cn: String, hint: String) -> void:
 		hud.set_level(i, name_cn, hint)
-		hud.show_banner("CARGO HOLD 02", "3 位移怪 + 1 基础怪 · 固定点位战斗", 3.0)
 		hud.clear_death()
 	hud.set_hint("左键攻击 · 配合 A/D/S 出方向斩 · 右键弹反 · V 视角 · Tab 第一人称视野 · ~ 参数 · Esc 暂停")
 
@@ -165,8 +173,6 @@ func _process(delta: float) -> void:
 				hud.show_banner("第一人称视野黑幕", "你已经就在第一人称画面里 —— 按 V 切第三人称再看", 1.8)
 		if B.just("restart"):
 			restart_level()
-		if B.just("next_level"):
-			next_level()
 		if B.just("hud_toggle"):
 			hud.set_hud_visible(not hud.visible)
 
@@ -213,15 +219,18 @@ func _process(delta: float) -> void:
 	# ---------------- 模拟
 	var ctx := level.context()
 	if player.alive:
-		player.step(dt, level.arena, level.enemies)
+		var threats: Array = level.enemies if level.state == "fight" else []
+		player.step(dt, level.arena, threats)
 		level.constrain_player()
 		player.blade_terrain.advance_player(player.rig, dt, player.swing_serial, Snd, Fx, level.get("geometry"))
 	level.step(dt, ctx)
+	level.check_practice_contact()
+	briefing.step(dt)
 	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []))
 	for ev in p_events:
 		_on_combat_event(ev)
 	for e in level.enemies:
-		if is_instance_valid(e) and e.alive and level.melee_clear(e.center(), player.rig.global_position + Vector3(0, 2.3, 0)):
+		if level.state == "fight" and e.alive and level.melee_clear(e.center(), player.rig.global_position + Vector3(0, 2.3, 0)):
 			var r := Combat.enemy_swing(e, player)
 			if bool(r.get("hit", false)):
 				Snd.play_at("hit", r.get("pos", Vector3.ZERO), {"gain": 1.1})
@@ -248,8 +257,9 @@ func _process(delta: float) -> void:
 
 	# ---------------- 相机 / HUD
 	cam.step(dt, level.arena)
+	level.constrain_camera()
 	_update_fp_mask()
-	hud.set_enemy_count(level.alive_count(), level.total_enemies)
+	hud.set_enemy_count(level.alive_count(), level.total_enemies if level.state == "fight" else 0)
 	hud.set_first_person(cam.first_person)
 	hud.set_markers(level.build_markers())
 	var blocking := 0
@@ -286,6 +296,7 @@ func _on_combat_event(ev: Dictionary) -> void:
 	replay.note_event(String(ev["kind"]), pos)
 	match String(ev["kind"]):
 		"block":
+			level.on_guard_contact()
 			# 被格挡 = 它在你画面里。反馈要醒目到不可能忽略：
 			Snd.play_at("clang", pos, {"gain": 1.6, "prio": 4})
 			if Fx != null:

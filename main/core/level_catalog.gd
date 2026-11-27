@@ -1,7 +1,7 @@
 extends RefCounted
 
 const LEVELS := [
-	["货舱 02", "利用集装箱遮挡，趁位移敌人重组时接近。", "cargo", "", [], "cargo_hold_02"],
+	["货舱 02", "适应义体，击倒巡检哨兵，沿指引撤离。", "cargo", "", [], "cargo_hold_02"],
 	["坠击中庭", "从高台跳下，落地前按左键发动范围坠击。", "galleria", "", [], "galleria"],
 	["回廊实验舱", "绕中央玻璃罐，经环形长廊抵达检修台。", "panopticon", "", [], "panopticon", "room_shared"],
 	["仓库", "沿货架、集装箱和环廊穿过装卸区。", "warehouse", "", [], "warehouse", "room_shared"],

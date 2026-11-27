@@ -84,7 +84,7 @@ def adapters(episode, enemies):
     }
     if episode in {"act", "city", "galleria"}:
         bindings["src/game/wheel_encounter.gd"] = "mobs/wheel_sentry/src/enemies/ranged/wheel_sentry_enemy.gd"
-    if episode in {"cargo", "city"}:
+    if episode == "city":
         bindings["src/game/shard_encounter.gd"] = "mobs/shard_phantom/integration/shard_encounter.gd"
     if episode == "galleria":
         bindings["src/game/duelist_encounter.gd"] = "mobs/mech_duelist/src/game/enemy_duelist.gd"

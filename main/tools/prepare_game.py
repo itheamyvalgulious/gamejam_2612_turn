@@ -195,8 +195,9 @@ def campaign_hud(text, episode, binds):
     text, count = re.subn(r'(?ms)^\tvar blocking := 0\n.*?^\t\thud\.set_state\(""\)\n',
                           '\thud.set_state("")\n', text, count=1)
     assert count == 1, episode
+    hud_enemies = 'level.enemies if level.state == "fight" else []' if episode == "cargo" else "level.enemies"
     text = text.replace('hud.set_markers(level.build_markers())',
-                        'hud.update_threats(level.enemies, proj.items, cam.camera, player)')
+                        f'hud.update_threats({hud_enemies}, proj.items, cam.camera, player)')
     if episode == "room_shared":
         marker = '\thud.update_threats(level.enemies, proj.items, cam.camera, player)\n'
         text = text.replace(marker, marker + f'\thud.set_room_key({binds}.event_text("next_level"))\n', 1)
