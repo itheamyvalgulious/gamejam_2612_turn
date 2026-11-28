@@ -24,7 +24,6 @@ var was_airborne := false
 var rng := RandomNumberGenerator.new()
 var player_previous := Vector3.ZERO
 var finishing_enemy: Node3D
-var _atrium_engaged := false
 var _plunge_demonstrated := false
 var _lab_lift := 0.0
 ## 碰撞预计算：把 walkables 的线性查找换成一次性标记，position_clear 每帧
@@ -51,7 +50,8 @@ func start_level(_idx: int) -> void:
 			preload("res://src/encounter/neon_gi.gd").install(arena_node, false)
 	else:
 		_set_lab_lift(0.0)
-	_atrium_engaged = arena["height_test"]
+		if arena.has("controls"):
+			arena["controls"].reset()
 	_plunge_demonstrated = false
 	_rebuild_collision_cache()
 	if projectiles != null:
@@ -120,14 +120,12 @@ func _spawn_encounters() -> void:
 
 func step(dt: float, ctx: Dictionary) -> void:
 	state_t += dt
-	if state == "fight":
-		_atrium_engaged = _atrium_engaged or player.rig.global_position.y < SceneArena.INTRO_CLEARANCE
-		if _atrium_engaged:
-			for enemy in enemies:
-				enemy.step(dt, ctx)
-	elif state == "clear":
+	if arena.has("controls"):
+		arena["controls"].step(dt, cam.fp_transform(), geometry, player.alive and state in ["fight", "clear"])
+	if state in ["fight", "clear"]:
 		for enemy in enemies:
 			enemy.step(dt, ctx)
+	if state == "clear":
 		if arena.has("lab"):
 			_step_lab_exit()
 		else:

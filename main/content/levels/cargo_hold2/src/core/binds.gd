@@ -6,7 +6,7 @@ extends Node
 ## user://actdemo_binds.json.  Events are serialised as plain dicts.
 
 const SAVE_PATH := "user://actdemo_binds.json"
-const INTERACTION_SAVE_PATH := "user://turn_cargo_interaction.json"
+const InteractionBindings = preload("res://core/interaction_bindings.gd")
 
 ## {id, label, group, ev:[{t:"key", k:KEY}, {t:"mouse", b:MOUSE_BUTTON_LEFT}]}
 const DEFS := [
@@ -194,12 +194,7 @@ func save() -> void:
 		shared.erase("interact")
 		f.store_string(JSON.stringify(shared, "  "))
 		f.close()
-	# Other levels save the shared controls independently of this action.
-	var interaction := FileAccess.open(INTERACTION_SAVE_PATH, FileAccess.WRITE)
-	if interaction != null:
-		interaction.store_string(JSON.stringify(_events["interact"]))
-		interaction.close()
-
+	InteractionBindings.save_events(_events["interact"])
 
 func load_from_disk() -> void:
 	if FileAccess.file_exists(SAVE_PATH):
@@ -210,15 +205,7 @@ func load_from_disk() -> void:
 					var events := _saved_events(parsed[id])
 					if not events.is_empty():
 						_events[id] = events
-	if FileAccess.file_exists(INTERACTION_SAVE_PATH):
-		var value = JSON.parse_string(FileAccess.get_file_as_string(INTERACTION_SAVE_PATH))
-		if value is Array:
-			var saved := _saved_events(value)
-			if saved.is_empty() or not _interaction_key_used(saved[0]):
-				_events["interact"] = saved
-				return
-	_default_interact_key()
-
+	_events["interact"] = InteractionBindings.load_events(_events, _same_desc)
 
 func _saved_events(value: Variant) -> Array:
 	var events: Array = []
@@ -227,22 +214,3 @@ func _saved_events(value: Variant) -> Array:
 			if d is Dictionary:
 				events.append({"t": String(d.get("t", "key")), "k": int(d.get("k", 0)), "b": int(d.get("b", 0))})
 	return events
-
-
-func _interaction_key_used(candidate: Dictionary) -> bool:
-	for action in _events:
-		if action == "interact":
-			continue
-		for existing in _events[action]:
-			if _same_desc(candidate, existing):
-				return true
-	return false
-
-
-func _default_interact_key() -> void:
-	for key in [KEY_F, KEY_G, KEY_T]:
-		var candidate := {"t": "key", "k": key}
-		if not _interaction_key_used(candidate):
-			_events["interact"] = [candidate]
-			return
-	_events["interact"] = []

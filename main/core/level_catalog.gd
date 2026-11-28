@@ -10,7 +10,7 @@ const LEVELS := [
 	["灯墙之厅", "持续注视折相会加快虚化充能。", "shadow_chamber", "", [], "shadow_chamber"],
 	["霓虹街区", "沿街边小巷绕到掩体后方，肃清街区。", "city", "", [], "neon_district"],
 	["病房 · 夜班", "穿过病床区、中央隔墙和镜面走廊。", "ward", "", [], "night_ward", "room_shared"],
-	["坠击中庭 · 高低差", "下层有一名刀客。可在右侧楼梯利用高低差交战。", "galleria", "", ["--galleria-height-test"], "galleria_height_test", "galleria", "galleria"],
+	["坠击中庭 · 高低差", "下层有一名刀客。可在右侧楼梯利用高低差交战。", "galleria", "", ["--galleria-height-test"], "galleria_height_test"],
 	["三号船坞", "空间样段：沿地面黄色走道绕到东南气闸。甲板中央是 Boss 占位。", "hangar", "", [], "hangar", "room_shared"],
 ]
 

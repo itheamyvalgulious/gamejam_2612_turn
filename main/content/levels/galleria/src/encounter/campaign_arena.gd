@@ -1,6 +1,7 @@
 extends "res://src/encounter/art.gd"
 ## The campaign deck keeps the established drop and stair heights.
 
+const Controls = preload("res://src/encounter/gallery_controls.gd")
 const HALF_WIDTH := 36.0
 const HALF_DEPTH := 32.0
 const CAMPAIGN_HALF_WIDTH := 41.5
@@ -17,7 +18,8 @@ const LAB_PASSAGE_HALF_WIDTH := 4.93
 const LAB_PASSAGE_BACK := -42.45
 const LAB_EXIT := Rect2(-LAB_PASSAGE_HALF_WIDTH, -39.0, LAB_PASSAGE_HALF_WIDTH * 2.0, 6.60)
 const LANDING := Vector3(0, 0, 12.1)
-const INTRO_CLEARANCE := 6.35
+
+var controls := Controls.new()
 
 
 func build_campaign() -> Dictionary:
@@ -33,6 +35,7 @@ func build_campaign() -> Dictionary:
 	_research_bulkhead()
 	var lab := _lab_access()
 	_lighting()
+	controls.attach(root)
 	var encounters := [
 		{"kind": "mob", "pos": LANDING + Vector3(-2.35, 0, -1.55)},
 		{"kind": "mob", "pos": LANDING + Vector3(2.35, 0, 0.55)},
@@ -45,6 +48,7 @@ func build_campaign() -> Dictionary:
 	result["player_bounds_managed_by_level"] = true
 	result["lab"] = lab
 	result["dynamic_solid_indices"] = [lab["index"]]
+	result["controls"] = controls
 	return result
 
 
@@ -217,7 +221,23 @@ func _upper_deck() -> void:
 	for y in [1.42, 1.22]:
 		block("cyan", Vector3(1.84 if y > 1.3 else 1.32, 0.026, 0.027),
 			directory + Vector3(-0.14, y, 0.185), false)
+	var key := directory + Vector3(1.02, 1.27, 0.227)
+	_station_switch(key, 0.0)
+	var destination := _sign("", directory + Vector3(0.04, 1.00, 0.20), 0.0039)
+	controls.directory = {"id": "directory", "at": key + Vector3.BACK * 0.11, "normal": Vector3.BACK,
+		"guide": _stair_guide(), "status": destination}
 	_bench(Vector3(-11.67, 8.0, 28.79), 4.2, "warm", PI)
+
+
+func _stair_guide() -> Node3D:
+	var guides := Kit.new()
+	guides.material("cyan", kit.mats["cyan"])
+	for x in [-7.0, -4.0, 4.0, 8.0, 12.0, 16.0, 20.0, 24.0, 28.0]:
+		guides.push_xf(Transform3D(Basis(Vector3.UP, -PI * 0.5), Vector3(x, 8.057, 25.13)))
+		_arrow(guides, Vector3.ZERO)
+		guides.pop_xf()
+	_arrow(guides, Vector3(29.0, 8.057, 22.76))
+	return guides.commit(root, "ReturnStairGuide", false)
 
 
 func _return_stairs() -> void:
@@ -343,6 +363,28 @@ func _pantry(at: Vector3) -> void:
 		block("metal", Vector3(0.105, 0.10, 0.28), at + Vector3(2.95, 1.17, z + 1.12), false)
 	block("worklight", Vector3(0.16, 0.06, 9.02), at + Vector3(1.86, 5.91, 0), false)
 	light(at + Vector3(3.48, 5.25, 0), Color("ffdba9"), 2.55, 10.0)
+	_supply_reader(at + Vector3(1.84, 1.83, -3.54))
+
+
+func _supply_reader(at: Vector3) -> void:
+	block("dark", Vector3(1.47, 0.11, 1.98), at + Vector3.UP * 0.055, false)
+	block("metal", Vector3(1.22, 0.08, 1.66), at + Vector3.UP * 0.112, false)
+	block("bronze", Vector3(0.67, 0.34, 0.92), at + Vector3(-0.05, 0.32, 0), false)
+	for z in [-0.29, 0.29]:
+		block("dark", Vector3(0.69, 0.034, 0.085), at + Vector3(-0.05, 0.504, z), false)
+	for z in [-0.87, 0.87]:
+		block("frame", Vector3(0.26, 0.88, 0.14), at + Vector3(-0.49, 0.51, z), false)
+	block("frame", Vector3(0.32, 0.15, 1.92), at + Vector3(-0.49, 0.93, 0), false)
+	block("teal", Vector3(0.038, 0.39, 1.45), at + Vector3(-0.31, 1.03, 0), false)
+	var status := _sign("", at + Vector3(-0.283, 1.03, 0), 0.00375, PI * 0.5)
+	var beam := Kit.new()
+	beam.material("cyan", kit.mats["cyan"])
+	beam.box("cyan", Vector3(1.09, 0.022, 0.06), Vector3.ZERO)
+	var scan := beam.commit(root, "SupplyScanLine", false)
+	var key := at + Vector3(1.21, -0.11, 0.82)
+	_station_switch(key, PI * 0.5)
+	controls.supply = {"id": "supply", "at": key + Vector3.RIGHT * 0.11, "normal": Vector3.RIGHT,
+		"beam": scan, "scan_start": at + Vector3(-0.05, 0.535, 0), "status": status}
 
 
 func _service_shutters(at: Vector3) -> void:
@@ -414,8 +456,21 @@ func _lounge(at: Vector3) -> void:
 		block("upholstery", Vector3(2.89, 1.83, 0.105), at + Vector3(x, 1.06, -3.93), false)
 	block("frame", Vector3(1.78, 0.77, 1.02), at + Vector3(0, 0.385, -0.52), true, true)
 	block("ceramic", Vector3(3.15, 0.18, 1.61), at + Vector3(0, 0.86, -0.52), true, true, 0.12)
+	var lamps: Array[OmniLight3D] = []
 	for x in [-2.35, 2.35]:
-		light(at + Vector3(x, 5.45, -0.50), Color("b8d3e2"), 2.7, 9.35)
+		lamps.append(light(at + Vector3(x, 5.45, -0.50), Color("b8d3e2"), Controls.LAMP_POWER, 9.35))
+	var key := at + Vector3(-4.42, 2.27, -3.75)
+	_station_switch(key, PI * 0.5)
+	controls.lounge = {"id": "lounge", "at": key + Vector3.RIGHT * 0.11, "normal": Vector3.RIGHT,
+		"material": kit.mats["lounge_light"], "lamps": lamps}
+
+
+func _station_switch(at: Vector3, yaw: float) -> void:
+	kit.push_xf(Transform3D(Basis(Vector3.UP, yaw), at))
+	kit.box_bevel("dark", Vector3(0.44, 0.49, 0.085), Vector3.ZERO, 0.024)
+	kit.box_bevel("metal", Vector3(0.27, 0.25, 0.052), Vector3(0, 0, 0.055), 0.013)
+	kit.box("paint", Vector3(0.12, 0.064, 0.025), Vector3(0, 0, 0.087))
+	kit.pop_xf()
 
 
 func _landing_bay() -> void:
@@ -629,7 +684,7 @@ func _arrow(batch, at: Vector3) -> void:
 		at + Vector3(0.45, 0, 0.29)], 0.036, 8)
 
 
-func _sign(text: String, at: Vector3, size: float, yaw := 0.0) -> void:
+func _sign(text: String, at: Vector3, size: float, yaw := 0.0) -> Label3D:
 	var label := Label3D.new()
 	label.text = text
 	label.font_size = 64
@@ -640,6 +695,7 @@ func _sign(text: String, at: Vector3, size: float, yaw := 0.0) -> void:
 	label.position = at
 	label.rotation.y = yaw
 	root.add_child(label)
+	return label
 
 
 func _lighting() -> void:

@@ -74,7 +74,7 @@ func ensure_neon_glass(key: String) -> void:
 	kit.material("glass_neon_"+key,shader_mat("neon_glass",{"tint":mat.get_shader_parameter("tint")}))
 
 
-func light(pos: Vector3, color: Color, energy: float, reach: float, shadow := false) -> void:
+func light(pos: Vector3, color: Color, energy: float, reach: float, shadow := false) -> OmniLight3D:
 	var lamp := OmniLight3D.new()
 	root.add_child(lamp)
 	lamp.position = pos
@@ -85,6 +85,7 @@ func light(pos: Vector3, color: Color, energy: float, reach: float, shadow := fa
 	lamp.light_size = 0.22
 	lamp.light_specular = 0.2
 	lamp.shadow_enabled = shadow
+	return lamp
 
 func cabinet(pos: Vector3, size: Vector3, color := "teal") -> void:
 	block(color,size,pos+Vector3(0,size.y*0.5,0))
