@@ -22,7 +22,9 @@ const SECURITY_DOOR_Z := -24.80
 const BASIC_SPAWN := Vector3(SECURITY_X, 0, -30.8)
 const EXIT_X := 27.0
 const EXIT_DOOR_Z := -32.0
-const EXIT_TRIGGER := Rect2(23.5, -43.0, 7.0, 4.5)
+const EXIT_INNER_Z := -44.83
+const EXIT_SPINE_BACK := -52.12
+const EXIT_TRIGGER := Rect2(23.5, -47.18, 7.0, 1.86)
 const EXIT_ROOF_Y := 8.475
 const WORK_BULKHEAD_Z := 11.60
 const WORK_PILLAR_FACE_Z := 11.98
@@ -78,15 +80,15 @@ func _build() -> Dictionary:
 		Vector3(-4.3, 0.08, 17.2), Vector3(-2.6, 0.08, 15.7), Vector3(-2.6, 0.08, 8.8)])
 	var guide := _guide("EvacuationRoute", [
 		Vector3(5.7, 0.08, -12), Vector3(8.2, 0.08, -19),
-		Vector3(27, 0.08, -23), Vector3(27, 0.08, -41)])
+		Vector3(27, 0.08, -23), Vector3(27, 0.08, -49.70)])
 	_build_alarm_fixtures()
 	_kit.commit(_root, "CargoStructure")
 	_lighting()
 	return {
 		"node": _root, "kind": "cargo_hold2", "name_cn": "货舱 02",
 		"hint": "适应义体，突破巡检哨兵，沿指引撤离。",
-		"floor_y": 0.0, "bounds": AABB(Vector3(-HALF_WIDTH, 0, -HALF_DEPTH),
-			Vector3(HALF_WIDTH * 2, CEILING, HALF_DEPTH * 2)),
+		"floor_y": 0.0, "bounds": AABB(Vector3(-HALF_WIDTH, 0, EXIT_SPINE_BACK),
+			Vector3(HALF_WIDTH * 2, CEILING, HALF_DEPTH - EXIT_SPINE_BACK)),
 		"walls": _walls, "cover": [], "solids": _solids, "camera_solids": _camera_solids,
 		"blade_boxes": _blade_boxes, "service_treads": _service_treads,
 		"inspection_crates": _inspection_crates, "interact_hint": _world_interact_hint(),
@@ -146,9 +148,16 @@ func _shell() -> void:
 	_kit.box("floor", floor_size, Vector3(0, -0.275, 0))
 	_body(Vector3(0, -0.275, 0), floor_size)
 	_box("metal_dark", Vector3(0, 20.25, 0), Vector3(85, 0.5, 93), true, false)
+	_box("wall", Vector3(0, 10, 46.4), Vector3(84, 20, 0.8), true)
+	_box("wall", Vector3(0, 13.85, -46.4), Vector3(84, 12.30, 0.8), true)
+	var left_edge := EXIT_X - 5.13
+	var right_edge := EXIT_X + 5.13
+	_box("wall", Vector3((left_edge - HALF_WIDTH) * 0.5, 3.85, -46.4),
+		Vector3(left_edge + HALF_WIDTH, 7.70, 0.8), true)
+	_box("wall", Vector3((right_edge + HALF_WIDTH) * 0.5, 3.85, -46.4),
+		Vector3(HALF_WIDTH - right_edge, 7.70, 0.8), true)
 	for side in [-1.0, 1.0]:
 		_box("wall", Vector3(side * 42.4, 10, 0), Vector3(0.8, 20, 93), true)
-		_box("wall", Vector3(0, 10, side * 46.4), Vector3(84, 20, 0.8), true)
 		for y in [4.8, 15.8]:
 			_kit.tube("orion_frame", [Vector3(side * 41.3, y, -44), Vector3(side * 41.3, y, 44)], 0.18, 8)
 		for z in range(-39, 40, 9):
@@ -1243,11 +1252,9 @@ func _airlock() -> Dictionary:
 	_kit.tube("track", [interlock + Vector3(0.17, 0.56, 0), interlock + Vector3(0.17, 2.95, 0),
 		interlock + Vector3(-0.63, 3.64, 0)], 0.066, 8)
 	var lamp := _door_indicator(Vector3(EXIT_X + 4.3, 8.05, EXIT_DOOR_Z + 0.60))
-	_kit.box_bevel("orion_frame", Vector3(9.43, 7.2, 0.34), Vector3(EXIT_X, 3.68, -45.55), 0.16)
-	_kit.box_bevel("metal_dark", Vector3(7.89, 6.14, 0.14), Vector3(EXIT_X, 3.34, -45.32), 0.10)
-	_kit.box("track", Vector3(6.24, 0.10, 0.08), Vector3(EXIT_X, 1.02, -45.20))
 	_panel("CENTRAL GALLERIA", Vector3(EXIT_X, 7.65, -44.34), 0.086)
 	_pressure_hatch_detail()
+	_handoff_spine()
 	_plate(Vector3(EXIT_X, 0.03, EXIT_DOOR_Z + 0.5), 9.7)
 	for z in [-35.9, -41.0]:
 		_kit.box_bevel("metal_dark", Vector3(7.78, 0.16, 0.52), Vector3(EXIT_X, 8.421, z), 0.046)
@@ -1278,11 +1285,31 @@ func _airlock() -> Dictionary:
 	at.z += 0.13
 	var collider := _body(at, size)
 	return {"panel": frame, "collider": collider, "box": AABB(at - size * 0.5, size),
-		"stroke": 7.95, "lamp": lamp}
+		"stroke": 7.95, "lamp": lamp, "inner": _inner_hatch()}
+
+
+func _inner_hatch() -> Dictionary:
+	var frame := Node3D.new()
+	frame.name = "GalleriaPressureHatch"
+	frame.position = Vector3(EXIT_X, 0, EXIT_INNER_Z - 0.32)
+	_root.add_child(frame)
+	var leaf := Kit.new()
+	for key in ["orion_frame", "metal_dark", "track"]:
+		leaf.material(key, _kit.mats[key])
+	leaf.box_bevel("orion_frame", Vector3(9.43, 7.2, 0.34), Vector3(0, 3.68, 0), 0.16)
+	leaf.box_bevel("metal_dark", Vector3(7.89, 6.14, 0.14), Vector3(0, 3.34, 0.23), 0.10)
+	leaf.box("track", Vector3(6.24, 0.10, 0.08), Vector3(0, 1.02, 0.35))
+	leaf.box_bevel("orion_frame", Vector3(0.12, 5.92, 0.11), Vector3(0, 3.36, 0.38), 0.026)
+	leaf.commit(frame, "PressureHatchLeaf")
+	var size := Vector3(9.43, 7.20, 0.64)
+	var at := frame.position + Vector3(0, 3.68, 0.12)
+	var lamp := _door_indicator(Vector3(EXIT_X + 3.73, 7.67, EXIT_INNER_Z + 0.52))
+	return {"panel": frame, "collider": _body(at, size), "box": AABB(at - size * 0.5, size),
+		"stroke": 7.55, "lamp": lamp}
 
 
 func _pressure_hatch_detail() -> void:
-	var rear_z := -44.83
+	var rear_z := EXIT_INNER_Z
 	for side in [-1.0, 1.0]:
 		var jamb_x: float = EXIT_X + side * 4.91
 		_box("orion_frame", Vector3(jamb_x, 3.89, rear_z), Vector3(0.40, 7.78, 0.85), true)
@@ -1305,7 +1332,25 @@ func _pressure_hatch_detail() -> void:
 	_kit.box("tread", Vector3(9.25, 0.042, 1.45), Vector3(EXIT_X, 0.036, -43.82))
 	for z in [-43.15, -44.43]:
 		_kit.box("bare_steel", Vector3(9.18, 0.025, 0.13), Vector3(EXIT_X, 0.06, z))
-	_kit.box_bevel("orion_frame", Vector3(0.12, 5.92, 0.11), Vector3(EXIT_X, 3.36, -45.17), 0.026)
+
+
+func _handoff_spine() -> void:
+	# A short, enclosed continuation is visible through the pressure hatch during handoff.
+	var depth := -48.48
+	_box("floor", Vector3(EXIT_X, -0.24, depth), Vector3(10.60, 0.48, 7.05), true, false)
+	_box("orion_frame", Vector3(EXIT_X, 7.69, depth), Vector3(10.64, 0.45, 7.05), true, false)
+	_box("wall", Vector3(EXIT_X, 3.85, EXIT_SPINE_BACK), Vector3(10.70, 7.70, 0.45), true, false)
+	for side in [-1.0, 1.0]:
+		var x: float = EXIT_X + side * 5.23
+		_box("wall", Vector3(x, 3.86, depth), Vector3(0.55, 7.72, 7.05), true, false)
+		_kit.box_bevel("track", Vector3(0.14, 0.31, 6.92), Vector3(x - side * 0.30, 0.18, depth), 0.025)
+		for z in [-46.75, -50.2]:
+			_kit.box_bevel("orion_frame", Vector3(0.35, 7.52, 0.47),
+				Vector3(x - side * 0.19, 3.78, z), 0.05)
+	for z in [-46.87, -50.46]:
+		_kit.box_bevel("metal_dark", Vector3(6.1, 0.24, 0.53), Vector3(EXIT_X, 7.35, z), 0.048)
+		_kit.box("white", Vector3(5.82, 0.044, 0.27), Vector3(EXIT_X, 7.217, z))
+	_light(Vector3(EXIT_X, 6.12, -48.37), Color("e3eaf1"), 2.15, 9.1)
 
 
 func _guide(route_name: String, waypoints: Array[Vector3]) -> Node3D:

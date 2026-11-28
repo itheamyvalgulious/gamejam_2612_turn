@@ -203,7 +203,13 @@ func _build_statics(arena: Dictionary) -> void:
 		_static_body.add_child(sh)
 	# solids / walkables：已是绝对 AABB。
 	var done := {}
-	for box in arena.get("solids", []):
+	var solids: Array = arena.get("solids", [])
+	var dynamic_indices: Array = arena.get("dynamic_solid_indices", [])
+	for i in solids.size():
+		# Moving doors own a body that follows the mesh. A static copy would block the open doorway.
+		if i in dynamic_indices:
+			continue
+		var box = solids[i]
 		if box is AABB:
 			done[box] = true
 			_add_aabb(box)

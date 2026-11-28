@@ -34,6 +34,7 @@ var _radio_cut := false
 var _radio_opened := false
 var _alarm_due := 0.0
 var _alarm_voice := -1
+var _inner_hatch_time := 0.0
 var _lift_phase := LiftPhase.IDLE
 var _lift_destination := 0
 var _lift_reserved_dock := -1
@@ -67,6 +68,7 @@ func start_level(_idx: int) -> void:
 	_radio_cut = false
 	_radio_opened = false
 	_alarm_due = 0.0
+	_inner_hatch_time = 0.0
 	_stop_alarm()
 	LevelDeathField.install(self)
 	var lift_was_blocked := _lift_reserved_dock >= 0
@@ -80,6 +82,7 @@ func start_level(_idx: int) -> void:
 	_set_lift_status("A 位悬停", false)
 	_move_passage(arena["security"], 0.0)
 	_move_passage(arena["gate"], 0.0)
+	_move_passage(arena["gate"]["inner"], 0.0)
 	if lift_was_blocked or crates_changed:
 		_refresh_navigation()
 	var amber: OmniLight3D = arena["security"]["warning"]
@@ -227,8 +230,13 @@ func _step_evacuation(dt: float, ctx: Dictionary) -> void:
 		_radio_cut = true
 		Snd.play_at("cargo_radio", player.rig.global_position, {"gain": 0.76, "prio": 4})
 	var at: Vector3 = player.rig.global_position
-	if not bool(gate["closed"]) and _route_sent and at.y < CargoArena.EXIT_ROOF_Y \
-			and CargoArena.EXIT_TRIGGER.has_point(Vector2(at.x, at.z)):
+	var inner: Dictionary = gate["inner"]
+	if _inner_hatch_time > 0.0 or (not bool(gate["closed"]) and at.y < CargoArena.EXIT_ROOF_Y
+			and at.z < -36.1 and absf(at.x - CargoArena.EXIT_X) < 4.20):
+		_inner_hatch_time = minf(_inner_hatch_time + dt, GATE_OPEN_TIME)
+		_move_passage(inner, inner["stroke"] * smoothstep(0.0, GATE_OPEN_TIME, _inner_hatch_time))
+	if (not bool(inner["closed"]) and _route_sent and at.y < CargoArena.EXIT_ROOF_Y
+			and CargoArena.EXIT_TRIGGER.has_point(Vector2(at.x, at.z))):
 		_stop_alarm()
 		_set_beacons(0.0)
 		instruction_changed.emit("")
@@ -269,7 +277,7 @@ func _move_passage(door: Dictionary, height: float) -> void:
 func _refresh_navigation() -> void:
 	var spec := CargoArena.nav_spec()
 	var blocks: Array = []
-	for entry: Dictionary in [arena["security"], arena["gate"]]:
+	for entry: Dictionary in [arena["security"], arena["gate"], arena["gate"]["inner"]]:
 		if entry.get("closed", true):
 			blocks.append({"aabb": entry["box"]})
 	for crate: Inspection in arena["inspection_crates"]:

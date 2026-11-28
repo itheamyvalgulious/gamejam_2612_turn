@@ -821,7 +821,7 @@ func _on_footstep(pos: Vector3, strength: float) -> void:
 
 
 func _clamp_to_arena(arena: Dictionary) -> void:
-	if arena.is_empty():
+	if arena.is_empty() or arena.get("player_bounds_managed_by_level", false):
 		return
 	var b: AABB = arena.get("bounds", AABB())
 	if b.size.length() > 0.1:

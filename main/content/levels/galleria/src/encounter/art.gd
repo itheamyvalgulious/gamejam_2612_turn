@@ -172,9 +172,11 @@ func environment(outside := false) -> void:
 		moon.shadow_enabled = true
 		root.add_child(moon)
 
-func finish(title: String, hint: String, half: Vector2, spawn: Vector3, encounters: Array, anchors: Array = []) -> Dictionary:
+func finish(title: String, hint: String, half: Vector2, spawn: Vector3, encounters: Array,
+		anchors: Array = [], spawn_ring := true) -> Dictionary:
 	floor_details(half.x,half.y)
-	neon_ring("amber",2.0,0.045,64,8,spawn+Vector3(0,0.065,0))
+	if spawn_ring:
+		neon_ring("amber",2.0,0.045,64,8,spawn+Vector3(0,0.065,0))
 	kit.commit(root,"EnvironmentGeometry",true,1 | STATIC_REFLECTION_LAYER)
 	var marker := Marker3D.new()
 	marker.name = "PlayerSpawn"

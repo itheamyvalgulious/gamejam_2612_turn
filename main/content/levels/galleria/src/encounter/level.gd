@@ -6,6 +6,8 @@ const Duelist = preload("res://src/game/duelist_encounter.gd")
 const LevelDeathField = preload("res://core/death_field.gd")
 const BladeTerrain = preload("res://core/blade_terrain.gd")
 const ACTOR_RADIUS := 1.75
+const PLAYER_RADIUS := 1.10
+const PLAYER_HEIGHT := 3.80
 const DUELIST_STEP_HEIGHT := 0.44
 const SENTRY_STEP_HEIGHT := 0.37
 const SENTINEL_STEP_HEIGHT := 0.38
@@ -22,6 +24,9 @@ var was_airborne := false
 var rng := RandomNumberGenerator.new()
 var player_previous := Vector3.ZERO
 var finishing_enemy: Node3D
+var _atrium_engaged := false
+var _plunge_demonstrated := false
+var _lab_lift := 0.0
 ## 碰撞预计算：把 walkables 的线性查找换成一次性标记，position_clear 每帧
 ## 会被寻路/移动调用上千次，这是 sentinel 寻路热点的根源。
 var _solid_boxes: Array = []
@@ -39,10 +44,15 @@ func start_level(_idx: int) -> void:
 	index = 0
 	var first_start := arena_node == null
 	if first_start:
-		arena = SceneArena.build("--galleria-height-test" in OS.get_cmdline_user_args())
+		arena = SceneArena.build("--galleria-height-test" in TurnSession.level_arguments())
 		arena_node = arena["node"]
 		add_child(arena_node)
-		preload("res://src/encounter/neon_gi.gd").install(arena_node,not arena["vertical"])
+		if arena["height_test"]:
+			preload("res://src/encounter/neon_gi.gd").install(arena_node, false)
+	else:
+		_set_lab_lift(0.0)
+	_atrium_engaged = arena["height_test"]
+	_plunge_demonstrated = false
 	_rebuild_collision_cache()
 	if projectiles != null:
 		projectiles.clear_all()
@@ -111,15 +121,19 @@ func _spawn_encounters() -> void:
 func step(dt: float, ctx: Dictionary) -> void:
 	state_t += dt
 	if state == "fight":
-		for enemy in enemies:
-			enemy.step(dt, ctx)
+		_atrium_engaged = _atrium_engaged or player.rig.global_position.y < SceneArena.INTRO_CLEARANCE
+		if _atrium_engaged:
+			for enemy in enemies:
+				enemy.step(dt, ctx)
 	elif state == "clear":
-		# Finish this independent room; never load the demo's next arena.
 		for enemy in enemies:
 			enemy.step(dt, ctx)
-		var clear_time := 1.60 if is_instance_valid(finishing_enemy) else 1.4
-		if state_t > clear_time:
-			state = "finished"
+		if arena.has("lab"):
+			_step_lab_exit()
+		else:
+			var clear_time := 1.60 if is_instance_valid(finishing_enemy) else 1.4
+			if state_t > clear_time:
+				state = "finished"
 	elif state == "dead" and state_t > P.getf("rules.death_delay"):
 		start_level(0)
 
@@ -128,6 +142,51 @@ func on_enemy_died(enemy) -> void:
 	super.on_enemy_died(enemy)
 	if was_fighting and state == "clear" and arena.get("height_test", false):
 		finishing_enemy = enemy
+
+
+func approach_hint() -> String:
+	if not arena.has("lab") or _plunge_demonstrated or state != "fight" or not player.alive:
+		return ""
+	var at: Vector3 = player.rig.global_position
+	if (at.y >= 4.0 and at.y <= SceneArena.DECK_HEIGHT + 5.0 and absf(at.x) < 5.2
+			and at.z >= 12.0 and at.z <= 22.0):
+		return "跃下后按 %s 坠击" % B.event_text("attack_light")
+	return ""
+
+
+func _step_lab_exit() -> void:
+	_set_lab_lift(SceneArena.LAB_GATE_STROKE * smoothstep(0.36, 1.54, state_t))
+	var at: Vector3 = player.rig.global_position
+	if (_lab_lift >= 4.65 and player.alive and at.y < 1.2
+			and SceneArena.LAB_EXIT.has_point(Vector2(at.x, at.z))):
+		state = "finished"
+
+
+func _set_lab_lift(height: float) -> void:
+	if not arena.has("lab") or is_equal_approx(_lab_lift, height):
+		return
+	var lab: Dictionary = arena["lab"]
+	var shutter: Node3D = lab["shutter"]
+	var base: AABB = lab["base"]
+	var index: int = lab["index"]
+	var before: AABB = arena["solids"][index]
+	var after := AABB(base.position + Vector3.UP * height, base.size)
+	arena["solids"][index] = after
+	# The shutter travels in Y only. The XZ broad-phase cells stay the same.
+	_solid_boxes[index] = after
+	shutter.position.y = height
+	if geometry != null and not geometry.translate_box(before, after.position - before.position):
+		geometry = LevelGeometry.build(arena)
+	var open := height >= 4.65
+	if open != (_lab_lift >= 4.65):
+		nav = NavField.build(arena, SceneArena.nav_spec(arena))
+		var route: Node3D = lab["route"]
+		route.visible = open
+		var lamp: StandardMaterial3D = lab["lamp"]
+		var color := Color("79d3d7") if open else Color("b68b63")
+		lamp.albedo_color = color
+		lamp.emission = color
+	_lab_lift = height
 
 
 func _duelist_cover() -> Array:
@@ -179,7 +238,11 @@ func constrain_player() -> void:
 	rig.global_position = resolved
 	player_previous = resolved
 
-func resolve_motion(from: Vector3, target: Vector3, can_step := true) -> Vector3:
+func resolve_motion(from: Vector3, target: Vector3, can_step := true, player_motion := true) -> Vector3:
+	var height_test: bool = arena.get("height_test", false)
+	var use_player_body := player_motion and not height_test
+	var radius := PLAYER_RADIUS if use_player_body else ACTOR_RADIUS
+	var body_height := PLAYER_HEIGHT if use_player_body else 4.6
 	var count := maxi(1,ceili(Vector2(target.x-from.x,target.z-from.z).length()/0.25))
 	var delta := (target-from)/float(count)
 	var pos := from
@@ -188,15 +251,17 @@ func resolve_motion(from: Vector3, target: Vector3, can_step := true) -> Vector3
 		for axis in [0,2]:
 			var next := pos
 			next[axis] += delta[axis]
-			next.x = clampf(next.x,-SceneArena.HALF_WIDTH+2.3,SceneArena.HALF_WIDTH-2.3)
-			next.z = clampf(next.z,-SceneArena.HALF_DEPTH+2.3,SceneArena.HALF_DEPTH-2.3)
-			if position_clear(next,ACTOR_RADIUS,can_step):
+			if height_test:
+				next.x = clampf(next.x,-SceneArena.HALF_WIDTH+2.3,SceneArena.HALF_WIDTH-2.3)
+				next.z = clampf(next.z,-SceneArena.HALF_DEPTH+2.3,SceneArena.HALF_DEPTH-2.3)
+			if position_clear(next, radius, can_step, body_height):
 				pos = next
-	pos.y = clampf(target.y,0,SceneArena.CEILING-5.0)
+	pos.y = clampf(target.y, 0.0, SceneArena.CEILING - 5.0) if height_test else maxf(0.0, target.y)
 	if target.y>from.y:
 		for box: AABB in arena["solids"]:
-			if from.y+4.6<=box.position.y and target.y+4.6>box.position.y and Rect2(box.position.x-ACTOR_RADIUS,box.position.z-ACTOR_RADIUS,box.size.x+ACTOR_RADIUS*2,box.size.z+ACTOR_RADIUS*2).has_point(Vector2(pos.x,pos.z)):
-				pos.y = minf(pos.y,box.position.y-4.6)
+			if from.y + body_height <= box.position.y and target.y + body_height > box.position.y \
+					and _overlaps_footprint(box, pos, radius):
+				pos.y = minf(pos.y, box.position.y - body_height)
 	# Downward sweep also lands on cover tops; no falling through vehicles or cabinets.
 	if target.y<from.y:
 		for box: AABB in arena["solids"]:
@@ -230,7 +295,7 @@ func _rebuild_collision_cache() -> void:
 	_collision_ready = true
 
 
-func position_clear(pos: Vector3, radius := ACTOR_RADIUS, can_step := true) -> bool:
+func position_clear(pos: Vector3, radius := ACTOR_RADIUS, can_step := true, body_height := 4.6) -> bool:
 	if not _collision_ready:
 		_rebuild_collision_cache()
 	_solid_stamp += 1
@@ -253,14 +318,20 @@ func position_clear(pos: Vector3, radius := ACTOR_RADIUS, can_step := true) -> b
 				var box: AABB = _solid_boxes[index]
 				var walk := _solid_walk[index] != 0
 				var step_height := 0.45 if can_step and walk else 0.05
-				if pos.y >= box.end.y - step_height or pos.y + 4.6 <= box.position.y:
+				if pos.y >= box.end.y - step_height or pos.y + body_height <= box.position.y:
 					continue
 				# Tread noses have zero horizontal padding: support is resolved at the actor center.
 				var padding := 0.0 if can_step and walk else radius
-				if Rect2(box.position.x-padding, box.position.z-padding,
-						box.size.x+padding*2, box.size.z+padding*2).has_point(Vector2(pos.x, pos.z)):
+				if _overlaps_footprint(box, pos, padding):
 					return false
 	return true
+
+func _overlaps_footprint(box: AABB, pos: Vector3, radius: float) -> bool:
+	if arena.get("height_test", false) or radius == 0.0:
+		return Rect2(box.position.x, box.position.z, box.size.x, box.size.z).grow(radius).has_point(Vector2(pos.x, pos.z))
+	var dx := pos.x - clampf(pos.x, box.position.x, box.end.x)
+	var dz := pos.z - clampf(pos.z, box.position.z, box.end.z)
+	return dx * dx + dz * dz < radius * radius
 
 func phase_visible(enemy) -> bool:
 	if cam == null or cam.camera == null:
@@ -309,9 +380,10 @@ func combat_targets() -> Array:
 func constrain_camera() -> void:
 	var focus: Vector3 = player.rig.global_position + Vector3(0,2.8,0)
 	var desired := cam.camera.global_position
-	desired.x = clampf(desired.x,-SceneArena.HALF_WIDTH+0.5,SceneArena.HALF_WIDTH-0.5)
-	desired.y = clampf(desired.y,0.3,SceneArena.CEILING-0.5)
-	desired.z = clampf(desired.z,-SceneArena.HALF_DEPTH+0.5,SceneArena.HALF_DEPTH-0.5)
+	if arena.get("height_test", false):
+		desired.x = clampf(desired.x,-SceneArena.HALF_WIDTH+0.5,SceneArena.HALF_WIDTH-0.5)
+		desired.y = clampf(desired.y,0.3,SceneArena.CEILING-0.5)
+		desired.z = clampf(desired.z,-SceneArena.HALF_DEPTH+0.5,SceneArena.HALF_DEPTH-0.5)
 	var direction := (desired-focus).normalized()
 	var nearest := focus.distance_to(desired)
 	for box: AABB in arena["solids"]:
@@ -444,6 +516,7 @@ func land_plunge(pos: Vector3) -> void:
 	plunge_armed = false
 	if drop_start_height-pos.y < 3.0:
 		return
+	_plunge_demonstrated = true
 	Fx.impact_ring(pos+Vector3(0,0.12,0),7.0,1.5)
 	Fx.shake(0.65)
 	Snd.play_at("hit",pos,{"gain":1.1})
@@ -466,12 +539,14 @@ func separate_enemies() -> void:
 			if dist<3.2:
 				if dist<0.001:
 					away = Vector3.RIGHT if enemy.get_instance_id()>other.get_instance_id() else Vector3.LEFT
-			pos = resolve_motion(pos,pos+away.normalized()*(3.2-dist)*0.55,false)
+			pos = resolve_motion(pos, pos + away.normalized() * (3.2 - dist) * 0.55, false, false)
 		enemy.rig.global_position = pos
 
 
 func clamp_enemy_position(point: Vector3, _scale_factor: float = 1.0) -> Vector3:
-	return resolve_motion(point, point, false) if position_clear(point, 1.8, false) else Vector3.INF
+	if not arena.get("height_test", false) and nav != null and nav.support_at(point, point.y + SENTRY_STEP_HEIGHT) == -INF:
+		return Vector3.INF
+	return resolve_motion(point, point, false, false) if position_clear(point, 1.8, false) else Vector3.INF
 
 
 func duelist_defeat_path(start: Vector3, direction: Vector3) -> Dictionary:

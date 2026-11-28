@@ -275,7 +275,8 @@ func _process(delta: float) -> void:
 		hud.flash_death(player.last_cause if player.last_cause != "" else "你死了")
 		hud.show_banner("", "", 0.01)
 	elif level.state == "clear" and _last_state != "clear":
-		hud.show_banner("本关通过", "区域已肃清", 1.4)
+		if level.arena.get("height_test", false):
+			hud.show_banner("本关通过", "区域已肃清", 1.4)
 	elif level.state == "finished" and _last_state != "finished":
 		hud.show_banner("全部通关", "按 R 重开本关", 6.0)
 	_last_state = level.state
@@ -306,6 +307,9 @@ func _process(delta: float) -> void:
 		hud.set_state("出刀中 · %s" % player.rig.attack_name)
 	else:
 		hud.set_state("")
+	var approach: String = level.approach_hint()
+	if not approach.is_empty():
+		hud.set_state(approach)
 
 
 func _advance_finishing_shot(delta: float) -> float:

@@ -1,19 +1,11 @@
-extends "res://src/encounter/art.gd"
-const HALF_WIDTH := 36.0
-const HALF_DEPTH := 32.0
-const CEILING := 25.0
-const STAIR_X := 29.0
-const STAIR_WIDTH := 6.0
-const STAIR_BOTTOM := -10.0
-const STAIR_TOP := 18.0
-const DECK_HEIGHT := 8.0
+extends "res://src/encounter/campaign_arena.gd"
 
 ## 导航元信息（NavField.build 的 spec）：
 ##   面 —— 地面 bounds 矩形 + walkable 顶面（两块高台甲板 + 28 级踏面）；
 ##   线 —— 南侧返程楼梯中线，a 端落地、b 端上台，沿中线插值高度；
 ##   障碍 —— 全部非 walkable solids（立面、栏杆、柜体、踏面护边）。
-static func nav_spec(_arena: Dictionary) -> Dictionary:
-	return {
+static func nav_spec(arena: Dictionary) -> Dictionary:
+	var spec := {
 		"floor_margin": 2.4,
 		"walls_obstacles": false,
 		"cover_obstacles": true,
@@ -29,11 +21,21 @@ static func nav_spec(_arena: Dictionary) -> Dictionary:
 			"width": STAIR_WIDTH, "kind": "stair",
 		}],
 	}
+	if not arena.get("height_test", false):
+		spec["floor_polys"] = [PackedVector2Array([
+			Vector2(-CAMPAIGN_HALF_WIDTH, -HALF_DEPTH), Vector2(CAMPAIGN_HALF_WIDTH, -HALF_DEPTH),
+			Vector2(CAMPAIGN_HALF_WIDTH, HALF_DEPTH), Vector2(-CAMPAIGN_HALF_WIDTH, HALF_DEPTH),
+		]), PackedVector2Array([
+			Vector2(-LAB_PASSAGE_HALF_WIDTH, LAB_PASSAGE_BACK), Vector2(LAB_PASSAGE_HALF_WIDTH, LAB_PASSAGE_BACK),
+			Vector2(LAB_PASSAGE_HALF_WIDTH, -HALF_DEPTH), Vector2(-LAB_PASSAGE_HALF_WIDTH, -HALF_DEPTH),
+		])]
+	return spec
 
 static func build(height_test := false) -> Dictionary:
-	return new().build_scene(height_test)
+	var arena := new()
+	return arena.build_height_test() if height_test else arena.build_campaign()
 
-func build_scene(height_test: bool) -> Dictionary:
+func build_height_test() -> Dictionary:
 	root.name = "GalleriaAtrium"
 	block("floor",Vector3(74,0.6,66),Vector3(0,-0.3,0))
 	block("dark",Vector3(74,0.7,66),Vector3(0,25.35,0))
@@ -139,18 +141,9 @@ func build_scene(height_test: bool) -> Dictionary:
 			tube("cyan",Vector3(x,0.055,z-4),Vector3(x,0.055,z+4),0.03)
 	interior_detail()
 	environment()
-	var title := "GALLERIA · 坠击中庭"
-	var hint := "高台跃下 → 空中左键坠击 / 4 近战 + 2 远程 / 右侧阶梯可返回"
-	var encounters := [
-		{"kind":"mob","pos":Vector3(0,0,10)}, {"kind":"mob","pos":Vector3(-6,0,5)},
-		{"kind":"mob","pos":Vector3(7,0,2)}, {"kind":"mob","pos":Vector3(0,0,-12)},
-		{"kind":"archer","pos":Vector3(-16,0,-20)}, {"kind":"archer","pos":Vector3(16,0,-20)},
-	]
-	if height_test:
-		title = "坠击中庭 · 高低差"
-		hint = "下层中央 · 1 生命刀客 · 侧斩终结触发慢放"
-		encounters = [{"kind": "duelist", "pos": Vector3(2, 0, -1), "health": 1.0}]
-	var result := finish(title, hint, Vector2(HALF_WIDTH, HALF_DEPTH), Vector3(0, 8, 25), encounters)
+	var encounters := [{"kind": "duelist", "pos": Vector3(2, 0, -1), "health": 1.0}]
+	var result := finish("坠击中庭 · 高低差", "下层中央 · 1 生命刀客 · 侧斩终结触发慢放",
+		Vector2(HALF_WIDTH, HALF_DEPTH), Vector3(0, 8, 25), encounters)
 	result["vertical"] = true
-	result["height_test"] = height_test
+	result["height_test"] = true
 	return result
