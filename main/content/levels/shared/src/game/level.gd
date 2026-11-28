@@ -90,6 +90,18 @@ func _clear_enemies() -> void:
 		projectiles.clear_all()
 
 
+func step_cinematic(_real_dt: float) -> bool:
+	return false
+
+
+func constrain_player(_previous: Vector3) -> void:
+	pass
+
+
+func can_advance() -> bool:
+	return true
+
+
 func _spawn_enemies() -> void:
 	pass
 

@@ -3,7 +3,7 @@ extends RefCounted
 const LEVELS := [
 	["货舱 02", "适应义体，击倒巡检哨兵，沿指引撤离。", "cargo", "", [], "cargo_hold_02"],
 	["坠击中庭", "从高台跳下，落地前按左键发动范围坠击。", "galleria", "", [], "galleria"],
-	["回廊实验舱", "绕中央玻璃罐，经环形长廊抵达检修台。", "panopticon", "", [], "panopticon", "room_shared"],
+	["回廊实验舱", "穿过中庭气闸，进入安置相位机的飞船实验室。", "panopticon", "", [], "panopticon", "room_shared"],
 	["仓库", "沿货架、集装箱和环廊穿过装卸区。", "warehouse", "", [], "warehouse", "room_shared"],
 	["霓虹窄巷", "移开视线，从侧面攻击。", "act", "", ["--act-level=1"], "neon_alley"],
 	["雨夜广场", "小激光可弹反。看到长束预警后横移。", "act", "", ["--act-level=2"], "rain_plaza"],

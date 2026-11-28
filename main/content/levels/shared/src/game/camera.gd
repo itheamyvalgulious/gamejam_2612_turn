@@ -209,8 +209,14 @@ func _avoid(want: Vector3, focus: Vector3, arena: Dictionary) -> Vector3:
 		var t2 := _circle_hit(f2, w2, Vector2(cc.x, cc.z), float(c["r"]))
 		if t2 >= 0.0 and t2 < max_u:
 			max_u = t2
+	var geometry: RefCounted = arena.get("camera_geometry")
+	if geometry != null:
+		var hit: Dictionary = geometry.raycast(focus, want, 0.20)
+		if not hit.is_empty():
+			max_u = minf(max_u, focus.distance_to(hit["point"]) / seg_len)
 	var used := seg_len * maxf(0.0, max_u - 0.03)
-	used = clampf(used, minf(1.4, seg_len), seg_len)
+	var min_gap := 0.24 if geometry != null else 1.4
+	used = clampf(used, minf(min_gap, seg_len), seg_len)
 	return focus + dir.normalized() * used
 
 

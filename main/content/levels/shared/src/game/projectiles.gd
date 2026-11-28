@@ -84,6 +84,7 @@ func step(dt: float, ctx: Dictionary) -> Array:
 	var cam: GameCam = ctx.get("cam")
 	var arena: Dictionary = ctx.get("arena", {})
 	var wall_segs: Array = arena.get("walls", [])
+	var geometry: RefCounted = ctx.get("projectile_geometry")
 	_ctx = ctx
 
 	for it in items:
@@ -120,6 +121,13 @@ func step(dt: float, ctx: Dictionary) -> Array:
 					node.rotate_y(dt * 9.0)
 				else:
 					node.look_at(pos + v, Vector3.UP)
+
+		if geometry != null:
+			var terrain: Dictionary = geometry.raycast(prev, pos)
+			if not terrain.is_empty():
+				events.append({"kind": "wall", "pos": terrain["point"], "it": it})
+				_kill(it)
+				continue
 
 		# ---------------- 与玩家的刀相交 → 弹反
 		# 刀的位置由弹反的「拦截规划」决定（player._plan_intercept 会把刀送到

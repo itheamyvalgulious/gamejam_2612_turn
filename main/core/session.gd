@@ -278,6 +278,8 @@ func advance_level() -> void:
 		return
 	var current := get_tree().current_scene
 	var level: Node = current.get("level")
+	if level == null or (level.has_method("can_advance") and not level.call("can_advance")):
+		return
 	var player: Node = current.get("player")
 	if level.get("state") in ["clear", "finished"] or (level.get("total_enemies") == 0 and player.get("alive")):
 		record_level_clear()

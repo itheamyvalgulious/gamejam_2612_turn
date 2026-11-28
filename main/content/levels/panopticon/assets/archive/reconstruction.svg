@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520">
+
+<rect width="960" height="520" fill="#111f29"/>
+<path d="M24 100V24h910v472H24v-76" fill="none" stroke="#334d5a" stroke-width="3"/>
+<path d="M43 99H918M43 427H918M44 105V421M917 105V421" stroke="#2a434f" stroke-width="2"/>
+<path d="M46 24h238M569 496h365" stroke="#6ba9b3" stroke-width="4"/>
+<path d="M60 118h24m792 0h24M60 405h24m792 0h24" stroke="#456572" stroke-width="3"/>
+
+
+<rect x="84" y="142" width="309" height="241" rx="7" fill="#182e37" stroke="#416574" stroke-width="3"/>
+<rect x="568" y="142" width="309" height="241" rx="7" fill="#182e37" stroke="#416574" stroke-width="3"/>
+<!-- Contactless scan frame at the ground station. -->
+<path d="M142 337V175h187v162m-196 15h207m-182-160h155" fill="none" stroke="#758e9a" stroke-width="7"/>
+<path d="M157 200v121m154-121v121" stroke="#426875" stroke-width="5"/>
+<g transform="translate(235 253) scale(.60)">
+<g stroke="#c7e2e4" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="m-24-102 13-17h22l13 17-4 35-11 12h-18l-11-12z" fill="#507480"/>
+<path d="M-20-86h40m-32 35v11m24-11v11" fill="none"/>
+<path d="m-17-45-30 11 10 55 21 26h32l21-26 10-55-30-11z" fill="#7395a1"/>
+<path d="m-43-33-18 16-15 63 7 28 12 5 12-30 16-31m72-51 18 16 15 63-7 28-12 5-12-30-16-31" fill="#456570"/>
+<path d="m-32 35-5 62 10 28-3 39h23l11-60-4-55m32-14 5 62-10 28 3 39h-23l-11-60 4-55" fill="#5c7f89"/>
+<path d="m-29-25 29 24 29-24M-15 6 0 20 15 6M-26 72h18m16 0h18" fill="none" stroke="#b9dcdf"/>
+</g></g>
+<path d="M159 250h151" stroke="#9ce2df" stroke-width="6"/>
+<path d="M166 216h39m66 72h35M176 298h24m69-80h30" stroke="#4f98a1" stroke-width="3"/>
+<!-- Body scan travels as data between the two stations. -->
+<path d="M407 263h140m-20-15 20 15-20 15" fill="none" stroke="#82cbcf" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M423 245h18v-18h-18zM456 242h18v-18h-18zM489 244h18v-18h-18z" fill="#39606b" stroke="#68929b" stroke-width="2"/>
+<!-- Enclosed deck printer in the ship's receiving compartment. -->
+<path d="M590 339V179h262v160m-250 3h235v16H600z" fill="none" stroke="#748d96" stroke-width="7"/>
+<path d="M604 195h237M612 323h224" stroke="#638891" stroke-width="5"/>
+<path d="M697 196h52v30h-52zm8 30h35v20l-9 14h-17l-9-14z" fill="#476979" stroke="#b2d1d4" stroke-width="4"/>
+<path d="M723 261v26m-11-18-10 12m32-12 10 12M694 287h56" fill="none" stroke="#9ee3df" stroke-width="3"/>
+<g transform="translate(724 301) rotate(-90) scale(.43)">
+<g stroke="#c7e2e4" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+<path d="m-24-102 13-17h22l13 17-4 35-11 12h-18l-11-12z" fill="#507480"/>
+<path d="M-20-86h40m-32 35v11m24-11v11" fill="none"/>
+<path d="m-17-45-30 11 10 55 21 26h32l21-26 10-55-30-11z" fill="#7395a1"/>
+<path d="m-43-33-18 16-15 63 7 28 12 5 12-30 16-31m72-51 18 16 15 63-7 28-12 5-12-30-16-31" fill="#456570"/>
+<path d="m-32 35-5 62 10 28-3 39h23l11-60-4-55m32-14 5 62-10 28 3 39h-23l-11-60 4-55" fill="#5c7f89"/>
+<path d="m-29-25 29 24 29-24M-15 6 0 20 15 6M-26 72h18m16 0h18" fill="none" stroke="#b9dcdf"/>
+</g></g>
+<path d="M618 326h207m-183 19h163" stroke="#4e6a75" stroke-width="3"/>
+</svg>

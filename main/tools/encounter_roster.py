@@ -88,6 +88,14 @@ def pack_designs(enemies, main=None):
 
 
 def adapters(episode, enemies):
+    if episode == "room_shared":
+        return {
+            path: (enemies / source).read_text(encoding="utf-8-sig")
+            for path, source in {
+                "src/game/encounter_unit.gd": "shared/encounter_unit.gd",
+                "src/game/shard_encounter.gd": "mobs/shard_phantom/integration/shard_encounter.gd",
+            }.items()
+        }
     if episode not in {"act", "cargo", "city", "galleria"}:
         return {}
     bindings = {
@@ -119,7 +127,7 @@ def adapt_duelist(text):
 
 
 def adapt_host(episode, relative, text, enemies):
-    if relative.as_posix() == "src/game/projectiles.gd" and episode in {"cargo", "city"}:
+    if relative.as_posix() == "src/game/projectiles.gd" and episode in {"cargo", "city", "room_shared"}:
         text += """
 
 func spawn_shard(pos: Vector3, direction: Vector3, speed: float, damage: float) -> Dictionary:

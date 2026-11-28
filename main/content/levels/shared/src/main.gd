@@ -10,6 +10,9 @@ const Tuning = preload("res://src/ui/tuning.gd")
 const BindsPanel = preload("res://src/ui/binds_panel.gd")
 
 @export var arena_builder: Script
+@export var level_implementation: Script
+@export var start_in_first_person := false
+@export var advance_on_finish := false
 @export var camera_distance := 20.0
 @export var camera_height := -1.0
 
@@ -49,13 +52,13 @@ func _ready() -> void:
 	player.projectiles = proj
 	cam.set_rig(player.rig)
 	cam.pitch = -0.16
-	P.set_value("cam.mode", "third")
+	P.set_value("cam.mode", "first" if start_in_first_person else "third")
 	P.set_value("cam.distance", camera_distance)
 	if camera_height >= 0.0:
 		P.set_value("cam.height", camera_height)
-	cam.set_first_person(false)
+	cam.set_first_person(start_in_first_person)
 
-	level = LevelUnit.new()
+	level = LevelUnit.new() if level_implementation == null else level_implementation.new()
 	level.name = "Level"
 	add_child(level)
 	level.setup(player, proj, cam, arena_builder)
@@ -179,6 +182,11 @@ func _process(delta: float) -> void:
 	if _menus_open() or (_mouse_capture_enabled and not _owns_mouse_capture):
 		return
 
+	if level.step_cinematic(minf(delta, 0.05)):
+		if level.state == "finished" and advance_on_finish:
+			next_level()
+		return
+
 	Snd.sync_params()
 	if B.just("audio_test"):
 		Snd.test_surround()
@@ -218,7 +226,9 @@ func _process(delta: float) -> void:
 	# ---------------- 模拟
 	var ctx := level.context()
 	if player.alive:
+		var previous: Vector3 = player.rig.global_position
 		player.step(dt, level.arena, level.enemies)
+		level.constrain_player(previous)
 		player.blade_terrain.advance_player(player.rig, dt, player.swing_serial, Snd, Fx, level.get("geometry"))
 	level.step(dt, ctx)
 	var p_events := Combat.player_swing(player, level.enemies, cam, level.arena.get("walls", []))
@@ -247,7 +257,10 @@ func _process(delta: float) -> void:
 	elif level.state == "clear" and _last_state != "clear":
 		hud.show_banner("本关通过", "下一关即将开始…", 1.4)
 	elif level.state == "finished" and _last_state != "finished":
-		hud.show_banner("全部通关", "按 R 重开本关 / N 下一关", 6.0)
+		if advance_on_finish:
+			next_level()
+		else:
+			hud.show_banner("全部通关", "按 R 重开本关 / N 下一关", 6.0)
 	_last_state = level.state
 
 	# ---------------- 相机 / HUD
@@ -361,4 +374,5 @@ func restart_level() -> void:
 
 
 func next_level() -> void:
-	TurnSession.advance_level()
+	if level.can_advance():
+		TurnSession.advance_level()

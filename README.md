@@ -34,7 +34,7 @@
 | 病房 · 夜班 | [levels/ward](main/content/levels/ward/README.md) |
 | 三号船坞 | [levels/hangar](main/content/levels/hangar/README.md) |
 
-仓库、回廊实验舱、病房和三号船坞的玩家控制、界面与公用材质工具放在 [levels/shared](main/content/levels/shared/README.md)。十一个关卡都从「关卡选择」进入。仓库、回廊实验舱、病房和三号船坞暂未配置敌人，可停留走动，按 **N** 继续到下一关，或按 **F1** 返回选关。
+仓库、回廊实验舱、病房和三号船坞的玩家控制、界面与公用材质工具放在 [levels/shared](main/content/levels/shared/README.md)。十一个关卡都从「关卡选择」进入。回廊实验舱设有三台 Shard Phantom，清场后可操作舱尾控制台。仓库、病房和三号船坞暂未配置敌人，可停留走动，按 **N** 继续到下一关。
 
 各关卡自带的合成音效源码在对应关卡的 `src/audio/`，构建时归到 `main/runtime/audio/`。编辑请从 `main/content/` 的原件开始。正式关卡使用 `main/project.godot` 启动。敌人与其他独立素材可以用各自的 `project.godot` 预览。
 
