@@ -24,11 +24,10 @@ const COVER := 0.62
 static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	if player == null or enemy == null or not player.alive or not enemy.alive:
 		return {"ok": false}
-	if enemy.has_method("melee_threat"):
-		return enemy.melee_threat(player, margin)
-	var rig = enemy.rig
+	# An encounter adapter can supply the weapon trajectory for a custom rig.
+	var rig = enemy if enemy.has_method("predict_weapon_xf") else enemy.rig
 	var prig = player.rig
-	if rig == null or prig == null or not rig.is_attacking:
+	if rig == null or prig == null or not rig.has_method("predict_weapon_xf") or not rig.is_attacking:
 		return {"ok": false}
 	if rig.blade_proxy == null or rig.blade_proxy.pieces.is_empty():
 		return {"ok": false}
@@ -38,23 +37,25 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 		return {"ok": false}
 	# Multi-cilindro del jugador: el arco de amenaza se evalúa contra cada
 	# pieza real (requirement #2), no contra una sola capsulota.
+	var v_p := Vector3.ZERO
+	if player.get("measured_velocity") is Vector3:
+		v_p = player.get("measured_velocity")
 	var parts: Array = player.rig.hit_parts() if player.rig != null \
 		and player.rig.has_method("hit_parts") else []
 	# 在剩余判定窗口里往前扫：刀最早什么时候进到「身上 + margin」以内
 	var e0: float = maxf(t_now, rig.attack_hit_from)
-	var n := 8
+	var n := 16
 	var lo := -1.0
 	var hi := -1.0
 	var prev := e0
-	# 全程 6ms 墙钟：每次 nearest_on_blade 前查；超时按「已算出的最好」
-	# 早退（扫描中断=取已扫到的最近边界），防 margin 边沿 GJK 爆迭代。
 	var dl := Time.get_ticks_usec() + 6000
 	var pr_hit := margin + 0.6
 	for i in n + 1:
 		if Time.get_ticks_usec() > dl:
 			break
 		var e: float = lerpf(e0, t_end, float(i) / float(n))
-		var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e), rig, parts, pr_hit)
+		var shift := v_p * maxf(e - t_now, 0.0)
+		var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e), rig, parts, pr_hit, shift)
 		if float(near["gap"]) <= margin:
 			lo = prev
 			hi = e
@@ -67,15 +68,13 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 		if Time.get_ticks_usec() > dl:
 			break
 		var mid: float = (lo + hi) * 0.5
-		var nm: Dictionary = nearest_on_blade(rig.predict_weapon_xf(mid), rig, parts, pr_hit)
+		var shift_m := v_p * maxf(mid - t_now, 0.0)
+		var nm: Dictionary = nearest_on_blade(rig.predict_weapon_xf(mid), rig, parts, pr_hit, shift_m)
 		if float(nm["gap"]) <= margin:
 			hi = mid
 		else:
 			lo = mid
 	var e_hit := hi
-	# 迎击时刻：不要等敌刀贴到身上才架。e_hit 那一刻敌刀离身体只剩 margin，
-	# 落点会落到「贴脸死角」——刀放过去也来不及、也挡不住。
-	# 往敌刀来路上提前到「还差 lead_gap」的位置迎上去。
 	var e_meet := e_hit
 	var lead_gap: float = clampf(0.85 + 0.30 * rig.weapon_scale, margin + 0.12, 1.8)
 	if lead_gap > margin + 0.02:
@@ -85,7 +84,8 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 			if Time.get_ticks_usec() > dl:
 				break
 			var e2: float = lerpf(e0, e_hit, float(i2) / float(n))
-			var nm2: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e2), rig, parts, pr_lead)
+			var shift2 := v_p * maxf(e2 - t_now, 0.0)
+			var nm2: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e2), rig, parts, pr_lead, shift2)
 			if float(nm2["gap"]) <= lead_gap:
 				var l2 := lo2
 				var h2 := e2
@@ -93,7 +93,8 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 					if Time.get_ticks_usec() > dl:
 						break
 					var m2: float = (l2 + h2) * 0.5
-					var n3: Dictionary = nearest_on_blade(rig.predict_weapon_xf(m2), rig, parts, pr_lead)
+					var shift_m2 := v_p * maxf(m2 - t_now, 0.0)
+					var n3: Dictionary = nearest_on_blade(rig.predict_weapon_xf(m2), rig, parts, pr_lead, shift_m2)
 					if float(n3["gap"]) <= lead_gap:
 						h2 = m2
 					else:
@@ -101,9 +102,10 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 				e_meet = h2
 				break
 			lo2 = e2
-	var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e_meet), rig, parts)
-	var blade_pt: Vector3 = near["blade_pt"]
-	var body_pt: Vector3 = near["body_pt"]
+	var shift_meet := v_p * maxf(e_meet - t_now, 0.0)
+	var near: Dictionary = nearest_on_blade(rig.predict_weapon_xf(e_meet), rig, parts, 1e9, shift_meet)
+	var blade_pt: Vector3 = (near["blade_pt"] as Vector3) - shift_meet
+	var body_pt: Vector3 = (near["body_pt"] as Vector3) - shift_meet
 	var y: float = near["y"]
 	var out_dir: Vector3 = blade_pt - body_pt
 	# 上段劈 / 下段扫的来向主要在竖直方向：压太多会把落点摊到侧面，
@@ -119,9 +121,15 @@ static func melee_threat(player, enemy, margin: float) -> Dictionary:
 	# 会出现「刀举上去了、也在路径上，但没挡住」的漏判。
 	var rr: float = 0.24 * rig.weapon_scale + 0.14
 	var ip: Vector3 = blade_pt - out_dir * clampf(rr, 0.05, margin)
-	# 那一刻敌人的刀在往哪走 → 刀轴横在它前面
+	# 那一刻敌人的刀轴与运动方向 → 刀轴尽量与敌刀轴垂直（b × out_dir）
 	var step := maxf(rig.last_dt, 1.0 / 120.0)
-	var p0: Vector3 = rig.predict_weapon_xf(e_meet) * Vector3(0.0, y, 0.0)
+	var e_xf: Transform3D = rig.predict_weapon_xf(e_meet)
+	var b_axis: Vector3 = (e_xf.basis * Vector3(0, 1, 0)).normalized()
+	var perp_axis: Vector3 = b_axis.cross(out_dir)
+	if perp_axis.length_squared() >= 0.05:
+		return {"ok": true, "point": ip, "axis": perp_axis.normalized(), "normal": out_dir,
+			"eta": maxf(e_meet - t_now, 0.0), "kind": "melee", "enemy": enemy, "b_axis": b_axis}
+	var p0: Vector3 = e_xf * Vector3(0.0, y, 0.0)
 	var p1: Vector3 = rig.predict_weapon_xf(e_meet + step) * Vector3(0.0, y, 0.0)
 	return _finish(ip, p1 - p0, out_dir, e_meet - t_now, "melee", enemy)
 

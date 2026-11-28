@@ -3,6 +3,7 @@ extends "res://scripts/mech/mech_rig.gd"
 
 const BladePath = preload("res://integration/blade_path.gd")
 const SwingPath = preload("res://integration/swing_path.gd")
+const JL = preload("res://core/joint_limits.gd")
 const CLIPS := {
 	"slash_fwd": "FRONT_R",
 	"slash_left": "SIDE_THRUST_L",
@@ -36,6 +37,8 @@ var _blade_path := BladePath.new()
 var _swing_path := SwingPath.new()
 var _first_person := false
 var _shoulder_rest: Array[Vector3] = []
+var _has_parry_basis := false
+var _parry_basis := Basis.IDENTITY
 
 
 func _ready() -> void:
@@ -276,15 +279,32 @@ func combat_capsule() -> Dictionary:
 	}
 
 
+func _parry_min_time(dist: float, v_max: float, a_max: float) -> float:
+	if dist <= 1e-4:
+		return 0.0
+	var d_tri := (v_max * v_max) / maxf(a_max, 1e-3)
+	if dist <= d_tri:
+		return 2.0 * sqrt(dist / maxf(a_max, 1e-3))
+	return dist / maxf(v_max, 1.0) + v_max / maxf(a_max, 1e-3)
+
+
 func plan_blade_intercept(point: Vector3, axis: Vector3, face: Vector3,
-		torso_turn: float, deadline: float, speed := 26.0) -> Dictionary:
-	var res := _solve_intercept(point, axis, face, torso_turn)
+		torso_turn: float, deadline: float, speed := 26.0,
+		prefer_axis := Vector3.ZERO) -> Dictionary:
+	var res := _solve_intercept(point, axis, face, torso_turn, -1.0, prefer_axis)
 	if res.is_empty():
 		return {}
 	var hilt: Vector3 = res["hilt"]
 	var yaw: float = res["yaw"]
-	var travel: float = weapon_root.position.distance_to(hilt) * float(res["torso_scale"])
-	var duration := clampf(travel / maxf(speed, 1.0), 0.015, maxf(deadline, 0.015))
+	var d_lin: float = weapon_root.position.distance_to(hilt)
+	var travel: float = d_lin * float(res["torso_scale"])
+	var cur_q: Quaternion = weapon_root.basis.orthonormalized().get_rotation_quaternion()
+	var tgt_q: Quaternion = (res["basis"] as Basis).orthonormalized().get_rotation_quaternion()
+	var d_ang: float = cur_q.angle_to(tgt_q)
+	var d_yaw: float = absf(angle_difference(torso.rotation.y, yaw))
+	var t_kin := maxf(_parry_min_time(d_lin, 18.0, 320.0),
+		maxf(_parry_min_time(d_ang, 18.0, 320.0), _parry_min_time(d_yaw, 14.0, 200.0)))
+	var duration := clampf(maxf(travel / maxf(speed, 1.0), t_kin), 0.025, maxf(deadline, 0.025))
 	last_intercept_miss = res["miss"]
 	_swing_path.cancel()
 	_blade_path.plan(weapon_root.position, weapon_root.basis, hilt, res["basis"], duration,
@@ -302,7 +322,8 @@ func plan_blade_intercept(point: Vector3, axis: Vector3, face: Vector3,
 ## 速度/行程都在躯干局部系计算 —— weapon_root 的坐标系；世界系量先除
 ## 躯干世界缩放再进来。
 func plan_strike(contact: Dictionary, e_world: Vector3, contact_in: float,
-		back_world := 0.26, after_world := 0.34, track_src = null) -> Dictionary:
+		back_world := 0.26, after_world := 0.34, track_src = null,
+		b_world := Vector3.ZERO) -> Dictionary:
 	var yaw: float = contact["yaw"]
 	var target_torso := _torso_transform(
 		Vector3(torso.rotation.x, yaw, torso.rotation.z))
@@ -316,51 +337,29 @@ func plan_strike(contact: Dictionary, e_world: Vector3, contact_in: float,
 	var scale_r := 1.0 / torso_scale_w
 	var back := back_world * scale_r
 	var after := after_world * scale_r
-	# strike 段：pre → P → post 匀速；提前 0.045s 进刀，保证迎击窗包住接触时刻
-	var approach_d := clampf(contact_in - 0.045, 0.008, 0.14)
-	var strike_d := maxf((back + after) * torso_scale_w / maxf(_strike_speed, 1.0), 0.085)
-	var recover_d := 0.13
+	var strike_d := maxf((back + after) * torso_scale_w / maxf(_strike_speed, 1.0), 0.14)
+	var pre_strike_t := strike_d * (back / maxf(back + after, 0.001))
+	var t_need := float(contact.get("t_need", 0.0))
+	var min_app := maxf(0.025, t_need - pre_strike_t)
+	var approach_d := clampf(maxf(contact_in - pre_strike_t - 0.03, min_app), 0.025, 0.50)
+	var recover_d := 0.11
 	last_intercept_miss = contact["miss"]
-	# 垂直跟踪：返回敌刀轴 b，按「距接触剩余 lead 秒」向前引 —
-	# 敌刀 10-20rad/s 时 1-2 帧滞后就 0.3-1.0 的 a·b 残差；预测表在
-	# lead≤0.12s 内就是动画本身。lead→0 时退化成当前轴。
+	# 稳定接触朝向跟踪：使用「预测接触时刻」的敌刀轴 b_world 随玩家躯干转动
+	# 转换到躯干局部系，不再读取敌方前摇实时自转并外推，彻底消除手部高频抽搐。
 	var tracker := Callable()
-	if track_src != null and track_src.has_method("predict_weapon_xf"):
-		# 混合：活轴（weapon_spin 每帧真值）+ 角速度外推一拍。
-		# 纯预测表 lead 与纯活轴都已验证有 0.3-0.9 残差（预测表只存
-		# 采样位姿、敌刀动画与表会漂；活轴则滞后一拍）。
-		var _tk := {"prev": Vector3.ZERO, "prev_t": -1.0}
-		tracker = func(lead: float) -> Vector3:
-			var bw := Vector3.ZERO
-			var live_spin = track_src.get("weapon_spin")
-			if live_spin != null and is_instance_valid(live_spin):
-				bw = (live_spin.global_transform.basis * Vector3(0, 1, 0)).normalized()
-			else:
-				var live_xf = track_src.get("_blade_now")
-				if live_xf is Transform3D \
-						and not live_xf.is_equal_approx(Transform3D.IDENTITY):
-					bw = (live_xf.basis * Vector3(0, 1, 0)).normalized()
-				elif track_src.get("weapon_xf") is Transform3D:
-					bw = (track_src.get("weapon_xf").basis * Vector3(0, 1, 0)).normalized()
-			if bw.length_squared() < 0.01:
-				var e_t = track_src.get("attack_elapsed")
-				if e_t == null:
-					return Vector3.ZERO
-				bw = (track_src.predict_weapon_xf(float(e_t)).basis
-					* Vector3(0, 1, 0)).normalized()
-			# 外推一拍：敌刀 _process 在我之后跑时，读到的是上帧轴，滞后恒为
-			# 一帧敌刀角位移（27fps×20rad/s≈0.7rad，正是观测残差量级）。
-			# 用实测轴差分补一整步；翻号/突变 >0.6 不外推（存原始值防累积）。
-			var now_t := Time.get_ticks_msec() / 1000.0
-			var prev: Vector3 = _tk["prev"]
-			var prev_t: float = float(_tk["prev_t"])
-			_tk["prev"] = bw
-			_tk["prev_t"] = now_t
-			if prev.length_squared() > 0.01 and now_t - prev_t < 0.1:
-				var d: Vector3 = bw - prev
-				if d.length() < 0.6:
-					bw = (bw + d).normalized()
-			return (_torso_transform(torso.rotation).affine_inverse().basis * bw).normalized()
+	var fixed_b: Vector3 = b_world.normalized() if b_world.length_squared() > 0.01 else Vector3.ZERO
+	if fixed_b == Vector3.ZERO and track_src != null and track_src.has_method("predict_weapon_xf"):
+		var e_t: float = float(contact.get("e_sample", -1.0))
+		if e_t < 0.0:
+			var wf = track_src.get("attack_hit_from")
+			var wt = track_src.get("attack_hit_to")
+			if wf != null and wt != null:
+				e_t = (float(wf) + float(wt)) * 0.5
+		if e_t >= 0.0:
+			fixed_b = (track_src.predict_weapon_xf(e_t).basis * Vector3(0, 1, 0)).normalized()
+	if fixed_b.length_squared() > 0.01:
+		tracker = func(_lead: float) -> Vector3:
+			return (_torso_transform(torso.rotation).affine_inverse().basis * fixed_b).normalized()
 	_blade_path.cancel()
 	_swing_path.plan(weapon_root.position, weapon_root.basis,
 		contact["hilt"], contact["basis"], e_local, back, after,
@@ -381,8 +380,8 @@ func set_strike_speed(v: float) -> void:
 ## 旧「架住等它来」的可达性/位姿求解对外接口（active_parry 复用同一套
 ## 求解器：a ⟂ b、e ⟂ a 的接触基在调用方已经拼好，传 face=敌刀轴 b 即可）。
 func solve_intercept_debug(point: Vector3, axis: Vector3, face: Vector3,
-		torso_turn: float, u_lock := -1.0) -> Dictionary:
-	var res := _solve_intercept(point, axis, face, torso_turn, u_lock)
+		torso_turn: float, u_lock := -1.0, prefer_axis := Vector3.ZERO) -> Dictionary:
+	var res := _solve_intercept(point, axis, face, torso_turn, u_lock, prefer_axis)
 	if res.is_empty():
 		return {}
 	res["along"] = float(res["t"]) * weapon_root.scale.y
@@ -426,7 +425,7 @@ func intercept_blade_segment(point: Vector3, axis: Vector3, face: Vector3,
 ## 纯几何求解：挑刀轴正/反两种握法里「刀身最贴近落点」的一种。
 ## 返回 hilt(躯干局部) / basis(weapon_root 局部基) / yaw / t / miss / torso_scale。
 func _solve_intercept(point: Vector3, axis: Vector3, face: Vector3,
-		torso_turn: float, u_lock := -1.0) -> Dictionary:
+		torso_turn: float, u_lock := -1.0, prefer_axis := Vector3.ZERO) -> Dictionary:
 	if axis.length_squared() < 0.000001:
 		return {}
 	var from_body := body.to_local(point)
@@ -435,14 +434,18 @@ func _solve_intercept(point: Vector3, axis: Vector3, face: Vector3,
 	var to_torso := target_torso.affine_inverse()
 	var point_local := to_torso * point
 	var up := (to_torso.basis * axis).normalized()
+	var prefer_local := (to_torso.basis * prefer_axis).normalized() if prefer_axis.length_squared() > 0.25 else Vector3.ZERO
 	var rest := Vector3(BASE_POSE["wpx"], BASE_POSE["wpy"], BASE_POSE["wpz"])
 	var hilt_scale := weapon_root.scale.y
 	var span := blade_span() * hilt_scale
+	# 强制落在剑刃段（避开护手/握把），绝不让剑柄/手部去挡敌剑
+	var safe_lo := span.x + (span.y - span.x) * 0.25
 	var best_score := INF
 	var hilt := rest
 	var root_basis := weapon_root.basis.orthonormalized()
 	var blade_point := 0.0
 	var best_miss := 1e9
+	var cur_q := weapon_root.basis.orthonormalized().get_rotation_quaternion()
 	for side in [1.0, -1.0]:
 		var blade_axis: Vector3 = up * side
 		var normal := (to_torso.basis * face).slide(blade_axis)
@@ -453,17 +456,31 @@ func _solve_intercept(point: Vector3, axis: Vector3, face: Vector3,
 		normal = normal.normalized()
 		var blade_basis := Basis(blade_axis.cross(normal).normalized(), blade_axis, normal)
 		var basis := blade_basis * weapon_spin.basis.inverse()
-		var along := clampf((point_local - rest).dot(blade_axis), span.x, span.y)
+		var along := clampf((point_local - rest).dot(blade_axis), safe_lo, span.y)
 		if u_lock >= 0.0:
 			along = u_lock
 		var candidate := _reachable_hilt(point_local - blade_axis * along, blade_axis)
 		# 钳位后的刀柄不一定回到 rest：覆盖点要按真实 hilt 重算，否则把可达
 		# 域边界上的落点误判成「还差一整条刀身」。
-		var along2 := clampf((point_local - candidate).dot(blade_axis), span.x, span.y)
+		var along2 := clampf((point_local - candidate).dot(blade_axis), safe_lo, span.y)
 		if u_lock >= 0.0:
 			along2 = u_lock
 		var miss := (candidate + blade_axis * along2).distance_to(point_local)
-		var score := miss * 3.0 + candidate.distance_to(rest) + 0.45 * candidate.distance_to(weapon_root.position)
+		var j_pen := float(JL.torso(yaw, torso.rotation.x, torso.rotation.z)["over"]) * 0.35
+		var hilt_y := basis.y.normalized()
+		for arm_i in arms.size():
+			var arm: Dictionary = arms[arm_i]
+			var s_pos: Vector3 = arm["shoulder"].position
+			var grip: Vector3 = candidate + hilt_y * (GRIP if arm_i == 1 else -GRIP)
+			var arm_dir: Vector3 = (grip - s_pos).normalized()
+			var sh: Dictionary = JL.shoulder(arm_dir)
+			var wr: Dictionary = JL.wrist(arm_dir, hilt_y)
+			j_pen += float(sh["over"]) * 0.4 + float(wr["over"]) * 0.3
+			if not bool(sh["hard_ok"]) or not bool(wr["hard_ok"]):
+				j_pen += 0.8
+		var score := miss * 3.0 + candidate.distance_to(rest) + 0.45 * candidate.distance_to(weapon_root.position) + j_pen
+		if prefer_local.length_squared() > 0.25:
+			score += (1.0 - blade_axis.dot(prefer_local)) * 0.8
 		if score < best_score:
 			best_score = score
 			hilt = candidate
@@ -501,6 +518,13 @@ func plan_blade_return(duration: float) -> void:
 func clear_blade_path() -> void:
 	_blade_path.cancel()
 	_swing_path.cancel()
+	_has_parry_basis = false
+
+
+func _update_weapon(pose: Dictionary) -> void:
+	super._update_weapon(pose)
+	if _has_parry_basis and weapon_root != null:
+		weapon_root.basis = _parry_basis.scaled(weapon_root.scale)
 
 
 func blade_path_active() -> bool:
@@ -524,27 +548,29 @@ func strike_in_recover() -> bool:
 func _current_pose(dt: float) -> Dictionary:
 	var pose := super._current_pose(dt)
 	if is_attacking or not (_blade_path.active or _swing_path.active or guard > 0.0):
+		_has_parry_basis = false
 		return pose
 	pose = pose.duplicate()
-	if _swing_path.active:
-		var step := _swing_path.sample(dt)
+	if _swing_path.active or _blade_path.active:
+		var step: Dictionary = _swing_path.sample(dt) if _swing_path.active else _blade_path.sample(dt)
 		var hilt: Vector3 = step["pos"]
-		var basis: Basis = step["basis"]
-		var angles := basis.get_euler()
+		var basis: Basis = (step["basis"] as Basis).orthonormalized()
+		var yaw: float = float(step["yaw"])
+		_parry_basis = basis
+		_has_parry_basis = true
 		pose.merge({
-			"wpx": hilt.x, "wpy": hilt.y, "wpz": hilt.z, "ty": float(step["yaw"]),
-			"wrx": angles.x, "wry": angles.y, "wrz": angles.z,
+			"wpx": hilt.x, "wpy": hilt.y, "wpz": hilt.z,
+			"ty": yaw,
 		}, true)
-	elif _blade_path.active:
-		var step := _blade_path.sample(dt)
-		var hilt: Vector3 = step["pos"]
-		var basis: Basis = step["basis"]
-		var angles := basis.get_euler()
-		pose.merge({
-			"wpx": hilt.x, "wpy": hilt.y, "wpz": hilt.z, "ty": float(step["yaw"]),
-			"wrx": angles.x, "wry": angles.y, "wrz": angles.z,
-		}, true)
+		if _blade_path.done and not _smooth_pose.is_empty():
+			var angles := basis.get_euler()
+			_smooth_pose.merge({
+				"wpx": hilt.x, "wpy": hilt.y, "wpz": hilt.z,
+				"wrx": angles.x, "wry": angles.y, "wrz": angles.z,
+				"ty": yaw,
+			}, true)
 	else:
+		_has_parry_basis = false
 		pose["wpy"] = lerpf(float(pose["wpy"]), 0.36, guard)
 		pose["wrx"] = lerpf(float(pose["wrx"]), -0.37, guard)
 	return pose
@@ -559,6 +585,7 @@ func set_first_person_view(on: bool) -> void:
 
 func reset_demo(pos: Vector3, new_heading: float) -> void:
 	clear_blade_path()
+	_has_parry_basis = false
 	guard = 0.0
 	attack_elapsed = 0.0
 	super.reset_demo(pos, new_heading)

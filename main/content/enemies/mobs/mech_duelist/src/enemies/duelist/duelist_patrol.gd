@@ -190,17 +190,20 @@ func _start_step(model, focus: Vector3, cover: Array, bounds: AABB) -> void:
 	var stairs: bool = on_stairs.is_valid() and on_stairs.call(_root_from)
 	var destination: Vector3 = focus
 	if following_route:
-		destination = route_goal if route_clearance > 0.0 else route_point.call(_root_from, route_goal, bursting)
+		var both_on_stairs: bool = stairs and on_stairs.is_valid() and bool(on_stairs.call(route_goal))
+		destination = route_goal if (route_clearance > 0.0 and both_on_stairs) \
+			else route_point.call(_root_from, route_goal, bursting)
 	var sight := (destination - _root_from).slide(Vector3.UP)
 	var distance := sight.length()
 	_yaw_from = model.global_rotation.y
 	var wanted := atan2(-sight.x, -sight.z) if distance > 0.10 else _yaw_from
 	var turn := angle_difference(_yaw_from, wanted)
+	var goal_dist := (route_goal - _root_from).slide(Vector3.UP).length() if following_route else distance
 	var previous := motion
 	motion = _choose_step(distance, turn)
 	if following_route:
 		motion = Step.TURN if not bursting and absf(turn) > deg_to_rad(52.0) else Step.PURSUE
-		if distance - route_clearance < 0.12 and motion != Step.TURN:
+		if goal_dist - route_clearance < 0.12 and motion != Step.TURN:
 			motion = Step.BRAKE
 	if not bursting and _is_forward_step(previous) and not _is_forward_step(motion):
 		motion = Step.BRAKE
@@ -227,7 +230,7 @@ func _start_step(model, focus: Vector3, cover: Array, bounds: AABB) -> void:
 	var radius := 1.1 * scale
 	if following_route:
 		# The waypoint owns travel, while the turn is still driven by the planted feet.
-		var reach := maxf(0.0, distance - route_clearance)
+		var reach := maxf(0.0, goal_dist - route_clearance)
 		var stride_limit := 1.65 if stairs else 3.35
 		if stairs and distance < 6.2:
 			stride_limit = 0.80
@@ -254,10 +257,14 @@ func _start_step(model, focus: Vector3, cover: Array, bounds: AABB) -> void:
 		_step_duration = 0.16 if motion == Step.TURN or stairs else 0.19
 	var travel := _root_to - _root_from
 	if bursting:
-		var pace := STAIR_BURST_PACE if stairs else BURST_PACE
-		# Lean into a new heading in stride. Keep a positive speed through the bend.
-		pace *= lerpf(1.0, 0.66, smoothstep(0.40, 2.45, absf(turn)))
-		_step_duration = clampf(travel.slide(Vector3.UP).length() / pace, 0.042, 0.146) / ROUTED_BURST_SPEED_MULTIPLIER
+		var travel_len := travel.slide(Vector3.UP).length()
+		if travel_len < 0.15:
+			_step_duration = 0.18
+		else:
+			var pace := STAIR_BURST_PACE if stairs else BURST_PACE
+			# Lean into a new heading in stride. Keep a positive speed through the bend.
+			pace *= lerpf(1.0, 0.66, smoothstep(0.40, 2.45, absf(turn)))
+			_step_duration = clampf(travel_len / pace, 0.042, 0.146) / ROUTED_BURST_SPEED_MULTIPLIER
 	var carries_momentum := motion != Step.BRAKE and motion != Step.TURN
 	_entry_speed = maxf(0.0, _exit_velocity.dot(travel.normalized()))
 	if bursting and carries_momentum:

@@ -124,6 +124,48 @@ static func sphere_pair(p0: Vector3, p1: Vector3, r0: float,
 	return {"hit": false}
 
 
+## Rewind the confirmed blade contact to its most recent outside-to-inside crossing.
+## The combat sweep still decides damage. This selects the reaction and shot timing.
+static func blade_entry(samples: Array, hit: Dictionary, proxy: BladeProxy) -> Dictionary:
+	var a: Vector3 = hit["capsule_a"]
+	var b: Vector3 = hit["capsule_b"]
+	var blade_local: Vector3 = hit["blade_local"]
+	for frame in range(samples.size() - 2, -1, -1):
+		var from: Vector3 = samples[frame]["pose"] * blade_local
+		var to: Vector3 = samples[frame + 1]["pose"] * blade_local
+		if dist_point_segment(from, a, b) <= 0.0 or from.distance_squared_to(to) < EPS:
+			continue
+		var outside := 0.0
+		var inside := 1.0
+		if BladeProxy.gap_to_capsule(samples[frame + 1]["pose"], proxy, a, b,
+				float(hit["capsule_r"]))["gap"] > 0.0:
+			continue
+		for refinement in 10:
+			var middle := (outside + inside) * 0.5
+			var xf: Transform3D = samples[frame]["pose"].interpolate_with(
+				samples[frame + 1]["pose"], middle)
+			if float(BladeProxy.gap_to_capsule(xf, proxy, a, b,
+					float(hit["capsule_r"]))["gap"]) > 0.0:
+				outside = middle
+			else:
+				inside = middle
+		var xf2: Transform3D = samples[frame]["pose"].interpolate_with(
+			samples[frame + 1]["pose"], inside)
+		var blade := xf2 * blade_local
+		var axis := Geometry3D.get_closest_point_to_segment(blade, a, b)
+		var outward := axis.direction_to(blade)
+		var cut := from.direction_to(to)
+		if cut.dot(outward) >= -0.02:
+			continue
+		return {"contact": axis + outward * float(hit["capsule_r"]), "normal": outward,
+			"force": cut.lerp(-outward, 0.58).normalized(), "travel": to - from,
+			"contact_time": lerpf(samples[frame]["time"], samples[frame + 1]["time"], inside)}
+	return {}
+
+
+## 球体扫掠 vs 一组判定件（弹回的飞行物打怪）
+
+
 ## 球体扫掠 vs 一组判定件（弹回的飞行物打怪）
 static func sweep_sphere_parts(p0: Vector3, p1: Vector3, r: float, parts: Array) -> Dictionary:
 	var best := {"hit": false, "depth": 0.0}

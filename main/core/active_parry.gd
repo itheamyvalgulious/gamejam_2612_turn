@@ -12,16 +12,27 @@ extends RefCounted
 ## 单位：世界单位（u），速度 u/s，弧度制。
 const JL = preload("res://core/joint_limits.gd")
 
-const SAMPLES := 10            # 敌刀轨迹采样数
+const SAMPLES := 12            # 敌刀轨迹采样数
 const TRAVERSE := 0.55         # 我方剑穿过接触面后还顺势走出的世界行程
 const PRE_TRAVEL := 0.35       # 我方剑在接触前的反向行程（strike 段总长 = 两者和）
-const U_OPTIONS := [0.62, 0.40, 0.80]                # 接触点落在我方刀身的比例（刀柄=0）
+const U_OPTIONS := [0.64, 0.48, 0.36, 0.78]          # 接触点落在我方刀身的比例（刀柄=0，避开护手/握把）
 const E_VARIANTS := [0.0, 0.70, -0.70]               # e 绕敌刀轴 b 的偏转（rad）
 const MIN_DIST := 0.48
 const OMEGA_INFO := 12.0      # 敌刀轴角速度遥测阈值 rad/s（只计数，不 gate）
-const BUDGET_MS := 10.0       # find() 墙钟预算：超时立即退出枚举
-const REACH_HARD := 0.24       # IK 不可达硬阈值
+const BUDGET_MS := 14.0       # find() 墙钟预算：超时立即退出枚举
+const REACH_HARD := 0.26       # IK 不可达硬阈值
 const SELF_HIT_SLACK := -0.008 # 扫掠自碰容差：> 该值才算碰（BladeProxy 体胀已含边距）
+
+# 关节/末端速度与加速度限位（躯干局部系 / 弧度制），用于规划到达时间与轨迹平滑
+const HILTS_V_MAX := 18.0
+const HILTS_A_MAX := 320.0
+const ANG_V_MAX := 22.0
+const ANG_A_MAX := 360.0
+const YAW_V_MAX := 14.0
+const YAW_A_MAX := 200.0
+const PERP_DOT_MAX := 0.18
+const LOCK_POS_DEV := 0.45
+const LOCK_AXIS_DOT := 0.88
 
 # 性能遥测：parry_bench 汇总 find() 的调用频率与耗时
 static var calls := 0
@@ -42,19 +53,54 @@ static func strike_source(enemy):
 	return null
 
 
-## 枚举敌刀轨迹上的全部可行迎击候选，按 可行→距离降序→关节分升序→eta 返回最优。
+## 梯形/bang-bang 最小移动时间：给定最大速度与加速度，计算走完 dist 的最短时间。
+static func min_move_time(dist: float, v_max: float, a_max: float) -> float:
+	if dist <= 1e-4:
+		return 0.0
+	var d_tri := (v_max * v_max) / maxf(a_max, 1e-3)
+	if dist <= d_tri:
+		return 2.0 * sqrt(dist / maxf(a_max, 1e-3))
+	return dist / maxf(v_max, 1e-3) + v_max / maxf(a_max, 1e-3)
+
+
+## 估算从当前刀位姿走到迎击接触点 P 的最短物理时间（approach + pre_strike）。
+static func estimate_travel_time(rig, cand: Dictionary, e_world: Vector3, speed: float) -> float:
+	var yaw: float = float(cand["yaw"])
+	var target_torso: Transform3D = rig._torso_transform(
+		Vector3(rig.torso.rotation.x, yaw, rig.torso.rotation.z))
+	var torso_scale: float = maxf(target_torso.basis.get_scale().x, 0.001)
+	var e_local := target_torso.affine_inverse().basis * e_world
+	e_local = e_local.normalized() if e_local.length_squared() > 1e-6 else Vector3.FORWARD
+	var pre_pos: Vector3 = (cand["hilt"] as Vector3) - e_local * (PRE_TRAVEL / torso_scale)
+	var d_lin: float = rig.weapon_root.position.distance_to(pre_pos)
+	var cur_q: Quaternion = rig.weapon_root.basis.orthonormalized().get_rotation_quaternion()
+	var cand_q: Quaternion = (cand["basis"] as Basis).orthonormalized().get_rotation_quaternion()
+	var d_ang: float = cur_q.angle_to(cand_q)
+	var d_yaw: float = absf(angle_difference(rig.torso.rotation.y, yaw))
+	var v_local: float = maxf(speed / torso_scale, HILTS_V_MAX)
+	var t_approach := maxf(min_move_time(d_lin, v_local, HILTS_A_MAX),
+		maxf(min_move_time(d_ang, ANG_V_MAX, ANG_A_MAX),
+			min_move_time(d_yaw, YAW_V_MAX, YAW_A_MAX)))
+	var t_pre_strike := PRE_TRAVEL / maxf(speed, 1.0)
+	return t_approach + t_pre_strike
+
+
+## 枚举敌刀轨迹上的全部可行迎击候选，按 可行→时间可达→距离降序→关节分升序→eta 返回最优。
+## lock 非空时仅在锁定位置附近微调，禁止跨握法翻转或大幅瞬移。
 ## 返回 {} = 没有可行候选（调用方回退到「架住等它来」的旧方案）。
-static func find(player, enemy, margin: float, torso_turn: float, speed: float) -> Dictionary:
+static func find(player, enemy, margin: float, torso_turn: float, speed: float,
+		lock: Dictionary = {}) -> Dictionary:
 	var t0 := Time.get_ticks_usec()
 	calls += 1
-	var out := _find_inner(player, enemy, margin, torso_turn, speed)
+	var out := _find_inner(player, enemy, margin, torso_turn, speed, lock)
 	var dt_ms := (Time.get_ticks_usec() - t0) / 1000.0
 	usec_total += dt_ms
 	usec_list.append(snappedf(dt_ms, 0.01))
 	return out
 
 
-static func _find_inner(player, enemy, margin: float, torso_turn: float, speed: float) -> Dictionary:
+static func _find_inner(player, enemy, margin: float, torso_turn: float, speed: float,
+		lock: Dictionary = {}) -> Dictionary:
 	var t_deadline := Time.get_ticks_usec() + int(BUDGET_MS * 1000.0)
 	var src = strike_source(enemy)
 	var rig = player.rig
@@ -123,12 +169,16 @@ static func _find_inner(player, enemy, margin: float, torso_turn: float, speed: 
 	var c_seen := 0
 	var c_spin := 0
 	var enum_over := false
+	var has_lock := not lock.is_empty()
+	var lock_p: Vector3 = lock.get("P", Vector3.ZERO)
+	var lock_hilt: Vector3 = lock.get("hilt", Vector3.ZERO)
+	var lock_axis: Vector3 = lock.get("axis_w", Vector3.ZERO)
 	for i in range(1, n):
 		if Time.get_ticks_usec() > t_deadline:
 			enum_over = true
 			break
 		var e: float = times[i]
-		if e >= e_contact:
+		if e > e_contact:
 			break
 		var xf: Transform3D = xfs[i]
 		var xf_prev: Transform3D = xfs[i - 1]
@@ -144,6 +194,8 @@ static func _find_inner(player, enemy, margin: float, torso_turn: float, speed: 
 		# 敌刀轴线段上离身件最近的点 → 接触点 P（解析近似，够规划用）
 		var P_raw := _nearest_on_seg(segs[i][0], segs[i][1], parts)
 		var P := P_raw - v_p * maxf(e - t_now, 0.0)
+		if has_lock and P.distance_to(lock_p) > LOCK_POS_DEV:
+			continue
 		var n_dir := P - chest
 		n_dir.y *= 0.55                       # 迎击优先横切；上段劈时自然抬起
 		if n_dir.length_squared() < 0.0001:
@@ -177,7 +229,7 @@ static func _find_inner(player, enemy, margin: float, torso_turn: float, speed: 
 					enum_over = true
 					break
 				c_seen += 1
-				var cand := _try_contact(rig, P, a_dir, b, e_dir, u, torso_turn, dist)
+				var cand := _try_contact(rig, P, a_dir, b, e_dir, u, torso_turn, dist, lock_axis)
 				if cand.is_empty():
 					continue
 				if cand.get("reject", "") == "joints":
@@ -186,8 +238,16 @@ static func _find_inner(player, enemy, margin: float, torso_turn: float, speed: 
 				if cand.get("reject", "") == "reach":
 					c_reach += 1
 					continue
+				if has_lock and (cand["axis_w"] as Vector3).dot(lock_axis) < LOCK_AXIS_DOT:
+					continue
+				var eta := e - t_now
+				var t_need := estimate_travel_time(rig, cand, e_dir, speed)
+				var time_ok := eta >= t_need - 0.02
+				var lock_dev := (P.distance_to(lock_p) + 0.5 * (cand["hilt"] as Vector3).distance_to(lock_hilt)) if has_lock else 0.0
 				feas.append({"contact": cand, "e_world": e_dir, "P": P,
-					"eta": e - t_now, "e_sample": e,
+					"eta": eta, "e_sample": e, "t_need": t_need, "time_ok": time_ok,
+					"time_deficit": maxf(t_need - eta, 0.0), "lock_dev": lock_dev,
+					"b_world": b, "axis_w": cand["axis_w"],
 					"m_world": m / maxf(step_dt, 1e-4), "src": src,
 					"dist": cand["dist"], "score": cand["joint_score"],
 					"miss": float(cand["miss"])})
@@ -199,12 +259,22 @@ static func _find_inner(player, enemy, margin: float, torso_turn: float, speed: 
 		return {"gate": "budget" if enum_over else "none",
 			"seen": c_seen, "self": c_self,
 			"joints": c_joints, "reach": c_reach, "spin": c_spin}
-	# 排序：先保必中（miss ≤ 0.10），再距离降序 → 关节分升序 → eta 升序
+	# 排序：先保必中（miss ≤ 0.10）→ 时间可达（t_need ≤ eta）→ 锁定微调距离 / 距离降序 → 关节分升序 → eta 升序
 	feas.sort_custom(func(x, y):
 		var xm_ok := float(x["miss"]) <= 0.10
 		var ym_ok := float(y["miss"]) <= 0.10
 		if xm_ok != ym_ok:
 			return xm_ok
+		var xt_ok := bool(x["time_ok"])
+		var yt_ok := bool(y["time_ok"])
+		if xt_ok != yt_ok:
+			return xt_ok
+		if not xt_ok and absf(float(x["time_deficit"]) - float(y["time_deficit"])) > 0.015:
+			return float(x["time_deficit"]) < float(y["time_deficit"])
+		if has_lock and absf(float(x["lock_dev"]) - float(y["lock_dev"])) > 0.01:
+			return float(x["lock_dev"]) < float(y["lock_dev"])
+		if absf(float(x["eta"]) - float(y["eta"])) > 0.04:
+			return float(x["eta"]) < float(y["eta"])
 		if absf(x["dist"] - y["dist"]) > 0.001:
 			return x["dist"] > y["dist"]
 		if absf(x["score"] - y["score"]) > 0.001:
@@ -292,22 +362,31 @@ static func _seg_seg(p1: Vector3, q1: Vector3, p2: Vector3, q2: Vector3) -> Dict
 	return {"d": c0.distance_to(c1), "c0": c0, "c1": c1}
 
 
-## 评估一个接触位姿：IK 可达 + 不穿模自身 + 关节限位。
+## 评估一个接触位姿：IK 可达 + 刀刃非刀柄 + 垂直度 + 不穿模自身 + 关节限位。
 ## 返回 {hilt,basis,yaw,miss,joint_score,dist,u} 或 {}。
 static func _try_contact(rig, P: Vector3, a_dir: Vector3, b_dir: Vector3,
-		e_dir: Vector3, u: float, torso_turn: float, dist: float) -> Dictionary:
+		e_dir: Vector3, u: float, torso_turn: float, dist: float,
+		prefer_axis := Vector3.ZERO) -> Dictionary:
 	# 把「刀身 u 处落在 P」钉在求解器里：u_lock 之后 miss = 刀身 u 处到 P
 	# 的真实残差，不再是「离落点最近的那一段刀刃」。
 	var span: Vector2 = rig.blade_span()
 	var hilt_scale: float = rig.weapon_root.scale.y
 	var along_target := (span.x + (span.y - span.x) * u) * hilt_scale
-	var res: Dictionary = rig.solve_intercept_debug(P, a_dir, b_dir, torso_turn, along_target)
+	var res: Dictionary = rig.solve_intercept_debug(P, a_dir, b_dir, torso_turn, along_target, prefer_axis)
 	if res.is_empty():
 		return {}
 	if float(res["miss"]) > REACH_HARD:
 		return {"reject": "reach"}
 	var hilt_w: Vector3 = _hilt_world(rig, res)
 	var hilt_y_w: Vector3 = _blade_axis_world(rig, res)
+	# 必须用刀刃（u >= 0.28）挡对方，绝不能让接触点落在护手/握把附近
+	var torso_scale: float = maxf(float(res.get("torso_scale", 1.0)), 0.001)
+	var min_blade_d: float = (span.x + (span.y - span.x) * 0.28) * hilt_scale * torso_scale
+	if (P - hilt_w).dot(hilt_y_w) < min_blade_d - REACH_HARD * torso_scale:
+		return {"reject": "reach"}
+	# 两剑必须近乎垂直（|a·b| <= PERP_DOT_MAX）
+	if absf(hilt_y_w.dot(b_dir.normalized())) > PERP_DOT_MAX:
+		return {"reject": "joints"}
 	# ---- 关节自然度 ----
 	var joints := _joint_eval(rig, res, u)
 	if not bool(joints["hard_ok"]):

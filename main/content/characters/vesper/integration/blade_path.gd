@@ -58,7 +58,7 @@ func sample(dt: float) -> Dictionary:
 		return {}
 	_t = minf(_t + dt, _dur)
 	var u := _t / _dur
-	var e := u * u * (3.0 - 2.0 * u)
+	var e := u * u * u * (10.0 + u * (-15.0 + 6.0 * u))
 	var u2 := 1.0 - e
 	var pos := _from_pos * (u2 * u2) + _ctl * (2.0 * u2 * e) + _to_pos * (e * e)
 	done = u >= 1.0

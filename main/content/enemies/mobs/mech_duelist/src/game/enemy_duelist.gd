@@ -38,6 +38,9 @@ var _bounds := AABB()
 var _opening_pursuit := false
 var _used_ground_motion := false
 var _player_floor := Vector3.ZERO
+var _fall_speed := 0.0
+var _fall_horiz := Vector3.ZERO
+var _airborne := false
 var terrain_blade_step: Callable
 var terrain_blade_reset: Callable
 var _terrain_blocked_serial := -1
@@ -92,6 +95,9 @@ func _on_respawn() -> void:
 	phase = Phase.PACING
 	_opening_pursuit = false
 	_used_ground_motion = false
+	_fall_speed = 0.0
+	_fall_horiz = Vector3.ZERO
+	_airborne = false
 	_player_floor = player.rig.global_position
 	rig.cancel_strike()
 	_normal_strike = 0
@@ -176,6 +182,8 @@ func step(dt: float, ctx: Dictionary) -> void:
 	if not player.alive:
 		sequence.sync_audio(true)
 		return
+	if not _settle_on_ground(dt):
+		return
 	if player.rig.jump_state != "AIR":
 		_player_floor = player.rig.global_position
 	var previous_blade: Transform3D = rig.weapon_spin.global_transform
@@ -202,6 +210,39 @@ func step(dt: float, ctx: Dictionary) -> void:
 	sequence.advance_guard(dt, _focus())
 	if terrain_blade_step.is_valid():
 		_finish_terrain_pose(previous_root, previous_blade, dt)
+
+
+func _settle_on_ground(dt: float) -> bool:
+	if rig == null:
+		return true
+	var at: Vector3 = rig.global_position
+	var floor_y: float = rig.floor_height(at, at.y + 0.55)
+	if at.y > floor_y + 0.55:
+		if not _airborne:
+			_airborne = true
+			_fall_speed = 0.0
+			var fwd: Vector3 = (-rig.global_basis.z).slide(Vector3.UP)
+			_fall_horiz = fwd.normalized() * 3.5 if fwd.length_squared() > 0.01 else Vector3.ZERO
+			rig.cancel_strike()
+		_fall_speed += P.getf("jump.gravity") * dt
+		var next := at + _fall_horiz * dt
+		next.y = maxf(floor_y, at.y - _fall_speed * dt)
+		if level != null and level.has_method("position_clear"):
+			var test_p := Vector3(next.x, at.y, next.z)
+			if not level.position_clear(test_p, 1.75, false):
+				next.x = at.x
+				next.z = at.z
+				_fall_horiz = Vector3.ZERO
+		rig.global_position = next
+		return false
+	if _airborne:
+		rig.global_position.y = floor_y
+		_fall_speed = 0.0
+		_fall_horiz = Vector3.ZERO
+		_airborne = false
+		if sequence.patrol.active:
+			sequence.patrol.begin(rig, 0.10)
+	return true
 
 
 func _finish_terrain_pose(previous_root: Vector3, previous_blade: Transform3D, dt: float) -> void:

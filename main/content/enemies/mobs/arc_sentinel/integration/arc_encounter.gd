@@ -335,10 +335,12 @@ func resolve_attack(target) -> Dictionary:
 	if target.rig == null or rig.global_position.distance_squared_to(target.rig.global_position) > 9.0 * 9.0:
 		return {"hit": false}
 	var push: Vector3 = (target.rig.global_position - rig.global_position).slide(Vector3.UP).normalized()
-	if P.getb("parry.melee_block"):  # 碰到刀即格挡：不再要求先举起
+	# 只有格挡姿态才判剑挡剑：挥砍/收刀途中碰到刀不能再白嫖挡刀。
+	if P.getb("parry.melee_block") and (not target.has_method("is_guard_up") or target.is_guard_up()):
+		var clash_slack := 0.18
 		var guard: Dictionary = Hit.blade_vs_blade_swept(
 			target.rig.weapon_prev_xf, target.rig.weapon_xf, target.rig.blade_proxy,
-			_blade_prev, _blade_now, blade_proxy, 0.05,
+			_blade_prev, _blade_now, blade_proxy, clash_slack,
 			target.rig.blade_span(), Vector2(0.0, _blade_length),
 			3, 4, -1)
 		if guard.get("hit", false):

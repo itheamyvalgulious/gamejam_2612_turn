@@ -11,7 +11,8 @@ class_name Combat
 
 
 ## 玩家一次挥砍的结算。每次攻击对同一敌人只生效一次（用 swing_serial 去重）。
-static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_segs: Array = []) -> Array:
+static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_segs: Array,
+		replay, dt: float) -> Array:
 	var events: Array = []
 	var rig = player.rig
 	if rig == null or not rig.in_hit_window():
@@ -32,7 +33,8 @@ static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_
 		var point: Vector3 = res.get("point", rig.global_position)
 		var normal: Vector3 = res.get("normal", Vector3.UP)
 		# —— 视野格挡：只要它在你画面里，这一刀就 100% 被挡
-		var seen := cam != null and Vision.is_visible(cam.camera, e.center(), e.mark_radius())
+		var seen: bool = cam != null and (e.is_in_view(cam.camera) if e.has_method("is_in_view")
+			else Vision.is_visible(cam.camera, e.center(), e.mark_radius()))
 		if seen and P.getb("rules.vision_occlusion") and cam != null:
 			var ca := Vector2(cam.camera.global_position.x, cam.camera.global_position.z)
 			var ec: Vector3 = e.center()
@@ -41,16 +43,35 @@ static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_
 		if e.blocks_when_seen() and seen:
 			if e.has_method("on_seen_block"):
 				e.on_seen_block(rig.global_position)
+			elif e.has_method("on_attack_blocked"):
+				e.on_attack_blocked()
 			events.append({"kind": "block", "pos": point, "normal": normal, "enemy": e, "damage": 0.0})
 			continue
 		var dmg: float = P.getf("attack.%s.damage" % player.last_attack)
 		var knock: float = P.getf("attack.%s.knockback" % player.last_attack)
+		var travel: Vector3 = res.get("travel", Vector3.ZERO)
+		var entry := {}
 		if e.has_method("hurt_by_blade"):
-			e.hurt_by_blade(dmg, normal, knock, res.get("travel", Vector3.ZERO), res)
+			if dmg >= e.hp:
+				var lvl_ref: Variant = e.get("level")
+				var use_death_field := lvl_ref is Node and (lvl_ref as Node).get_meta(&"death_field", null) != null
+				# blade_samples 只有接入 frame_times 录像的 replay（galleria）才有；
+				# 其余关走惯性推算的切入判定，不再白嫖刀帧采样。
+				if not use_death_field and replay != null and replay.has_method("blade_samples"):
+					entry = Hit.blade_entry(replay.blade_samples(rig, dt), res, rig.blade_proxy)
+				if entry.is_empty():
+					var cut := travel.normalized()
+					var inward := -normal
+					entry["force"] = inward if cut.dot(normal) >= 0.0 else cut.lerp(inward, 0.58).normalized()
+				res.merge(entry, true)
+			e.hurt_by_blade(dmg, normal, knock, travel, res)
 		else:
 			e.hurt(dmg, normal, knock)
-		events.append({"kind": "kill" if not e.alive else "hit", "pos": point, "normal": normal,
-			"enemy": e, "damage": dmg})
+		var event := {"kind": "kill" if not e.alive else "hit", "pos": point, "normal": normal,
+			"enemy": e, "damage": dmg, "contact": res.get("blade_point", point),
+			"contact_fraction": res.get("t", 1.0), "travel": travel}
+		event.merge(entry, true)
+		events.append(event)
 	return events
 
 
@@ -58,7 +79,7 @@ static func player_swing(player: PlayerUnit, enemies: Array, cam: GameCam, wall_
 ##
 ## 先判「剑挡剑」：只要两把刀的真几何真的交在一起（且玩家在弹反窗口里），
 ## 这一刀就被架掉 —— 免伤，但人会被推开。否则才走命中判定。
-static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
+static func enemy_swing(enemy, player: PlayerUnit, terrain_clear := Callable()) -> Dictionary:
 	if enemy == null or not enemy.alive or not player.alive:
 		return {"hit": false}
 	if enemy.has_method("resolve_attack"):
@@ -74,20 +95,19 @@ static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
 		return {"hit": false}
 	if rig.global_position.distance_squared_to(player.rig.global_position) > 10.0 * 10.0:
 		return {"hit": false}
-	# 碰到刀即格挡：不要求先举起；格挡成功立刻消耗这一刀。
-	if P.getb("parry.melee_block"):
-		# 格挡判定墙钟 5ms：双刀 12 组凸体 GJK 在贴脸时会爆炸成 100ms+，
-		# 超时返回已扫到最近（hit=false → 走受击判定兜底）。
+	# 只有格挡姿态才判剑挡剑：挥砍/收刀途中碰到刀不能再白嫖挡刀。
+	if P.getb("parry.melee_block") and player.is_guard_up():
 		var _cl0 := Time.get_ticks_usec()
+		var clash_slack := 0.18
 		var clash: Dictionary = Hit.blade_vs_blade_swept(
 			player.rig.weapon_prev_xf, player.rig.weapon_xf, player.rig.blade_proxy,
-			rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy, 0.05,
+			rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy, clash_slack,
 			player.rig.blade_span(), rig.blade_span(), 3, 4, -1)
 		if player.get("parry_stats") is Dictionary:
 			player.parry_stats["ms_clash"] = maxf(
 				float(player.parry_stats.get("ms_clash", 0.0)),
 				(Time.get_ticks_usec() - _cl0) / 1000.0)
-		if bool(clash.get("hit", false)):
+		if bool(clash.get("hit", false)) and _blade_path_is_clear(rig, clash, terrain_clear):
 			if serials is Dictionary:
 				serials[eid] = enemy.swung_serial
 			player.hurt_serial = enemy.swung_serial
@@ -97,6 +117,8 @@ static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
 				push = -rig.global_transform.basis.z
 			push = push.normalized()
 			player.on_block(push, P.getf("parry.block_knockback"))
+			if enemy.has_method("on_attack_parried"):
+				enemy.on_attack_parried(clash.get("normal", Vector3.UP))
 			return {"hit": false, "parried": true, "melee": true,
 				"pos": clash.get("point", Vector3.ZERO),
 				"normal": clash.get("normal", Vector3.UP),
@@ -105,7 +127,7 @@ static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
 	# 高过头顶的横斩不会蹭到空气判定，贴腿扫过来的刀也打得到。
 	var res: Dictionary = Hit.sweep_blade_parts(rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy,
 			player.rig.hit_parts())
-	if not bool(res.get("hit", false)):
+	if not bool(res.get("hit", false)) or not _blade_path_is_clear(rig, res, terrain_clear):
 		return {"hit": false}
 	if serials is Dictionary:
 		serials[eid] = enemy.swung_serial
@@ -114,6 +136,14 @@ static func enemy_swing(enemy, player: PlayerUnit) -> Dictionary:
 	player.hurt(dmg, res.get("normal", Vector3.UP))
 	return {"hit": true, "pos": res.get("point", Vector3.ZERO),
 		"normal": res.get("normal", Vector3.UP)}
+
+
+static func _blade_path_is_clear(rig, contact: Dictionary, clear: Callable) -> bool:
+	if not clear.is_valid():
+		return true
+	var at: float = contact.get("t", 1.0)
+	var hilt: Vector3 = rig.weapon_prev_xf.origin.lerp(rig.weapon_xf.origin, at)
+	return clear.call(hilt, contact.get("blade_point", contact["point"])) and clear.call(hilt, contact["point"])
 
 
 ## 飞行物这一帧从 prev 走到 pos，是否被刀身挡住（线段 vs 真实圆盘剖面）

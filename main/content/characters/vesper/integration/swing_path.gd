@@ -110,14 +110,15 @@ func sample(dt: float) -> Dictionary:
 	var yaw := _from_yaw
 	var u := 0.0
 	if _t <= _ta:
-		# approach：二次贝塞尔 + smoothstep
+		# approach：二次贝塞尔 + C²五次缓动（无反向过冲）
 		u = _t / _ta
-		var e := u * u * (3.0 - 2.0 * u)
+		var e := u * u * u * (10.0 + u * (-15.0 + 6.0 * u))
 		var u2 := 1.0 - e
 		pos = _from_pos * (u2 * u2) + _ctl * (2.0 * u2 * e) + _pre_pos * (e * e)
-		var k := smoothstep(0.55, 1.0, u)      # 姿态只在尾段贴到接触解
-		q = _from_q.slerp(_contact_q, k)
-		yaw = lerpf(_from_yaw, _contact_yaw, k)
+		var r := clampf((u - 0.15) / 0.85, 0.0, 1.0)
+		var e_rot := r * r * r * (10.0 + r * (-15.0 + 6.0 * r))
+		q = _from_q.slerp(_contact_q, e_rot)
+		yaw = lerpf(_from_yaw, _contact_yaw, e_rot)
 	elif _t <= _ta + _tb:
 		# strike：匀速横切，姿态/腰环保持接触解
 		u = (_t - _ta) / _tb
@@ -129,53 +130,10 @@ func sample(dt: float) -> Dictionary:
 		u = (_t - _ta - _tb) / _tc
 		var e := 1.0 - (1.0 - u) * (1.0 - u)
 		pos = _post_pos.lerp(_hold_pos, e)
-		var k := smoothstep(0.35, 1.0, u)
-		var rest := Basis.from_euler(Vector3(-1.05, 0.0, 0.08))
-		var rq := rest.get_rotation_quaternion()
-		if q.dot(rq) < 0.0:
-			rq = Quaternion(-rq.x, -rq.y, -rq.z, -rq.w)
-		q = _contact_q.slerp(rq, k)
-		yaw = lerpf(_contact_yaw, _from_yaw, k)
+		q = _contact_q
+		yaw = _contact_yaw
 	done = _t >= total
 	var basis := Basis(q)
-	# 垂直跟踪：敌刀在挥砍途中继续转，接触帧 a·b 会漂 —— 每帧用敌刀轴的
-	# 实际值重拼有效目标基（X≈e、Y=a_des=b×e、Z≈b），乘 spin⁻¹ 换回 root
-	# 基后 slerp 过去。approach 尾段渐入、strike 段完全贴到。
-	# 接触也可能落在 strike 之后（阻挡判定窗口比预测宽），跟踪延伸到
-	# recover 前 35% 再逐渐退出；approach 从 35% 处就开始贴目标基。
-	if _track_b.is_valid() and _t <= _ta + _tb + _tc * 0.35:
-		# 给 tracker 传「距接触剩余秒数」：敌刀轴取预测表 lookahead，
-		# lead→0 时落在当前轴 —— 消掉 10-20rad/s 自转的帧滞后残差。
-		var b_now: Vector3 = _track_b.call(maxf(_ta + _tb - _t, 0.0))
-		if b_now.length_squared() > 0.01:
-			b_now = b_now.normalized()
-			if b_now.dot((basis * _spin).z) < 0.0:
-				b_now = -b_now
-			# a_des = b×e；退化（b 与 e 近平行）时用 a_plan 在 b⊥ 平面
-			# 的投影兜底 —— 静默放弃会把接触帧刀轴停在非垂直姿态。
-			var a_des: Vector3 = b_now.cross(strike_dir)
-			if a_des.length_squared() <= 0.01:
-				a_des = _a_plan - b_now * _a_plan.dot(b_now)
-			if a_des.length_squared() > 0.01:
-				a_des = a_des.normalized()
-				if a_des.dot(_a_plan) < 0.0:
-					a_des = -a_des
-				var x_axis := a_des.cross(b_now).normalized()
-				var eff := Basis(x_axis, a_des, b_now)
-				var target: Basis = eff * _spin_inv
-				var w := 1.0
-				if _t <= _ta:
-					w = smoothstep(0.35, 1.0, _t / _ta)
-				elif _t > _ta + _tb:
-					w = 1.0 - smoothstep(0.0, 0.35, (_t - _ta - _tb) / _tc)
-				var q2 := basis.get_rotation_quaternion().slerp(
-					target.get_rotation_quaternion(), w)
-				basis = Basis(q2)
-				if _along > 0.01:
-					var eff_a: Vector3 = (basis * _spin).y.normalized()
-					var p_cur := pos + _a_plan * _along
-					pos = p_cur - eff_a * _along
-					pos.z = minf(pos.z, -0.25)
 	return {"pos": pos, "basis": basis, "yaw": yaw, "u": u, "done": done,
 		"phase": (0 if _t <= _ta else (1 if _t <= _ta + _tb else 2))}
 

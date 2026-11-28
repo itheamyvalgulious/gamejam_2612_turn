@@ -93,12 +93,13 @@ static func enemy_swing(enemy, player: PlayerUnit, terrain_clear := Callable()) 
 		return {"hit": false}
 	if rig.global_position.distance_squared_to(player.rig.global_position) > 10.0 * 10.0:
 		return {"hit": false}
-	# 碰到刀即格挡：不要求先举起；格挡成功立刻消耗这一刀。
-	if P.getb("parry.melee_block"):
+	# 只有格挡姿态才判剑挡剑：挥砍/收刀途中碰到刀不能再白嫖挡刀。
+	if P.getb("parry.melee_block") and player.is_guard_up():
 		var _cl0 := Time.get_ticks_usec()
+		var clash_slack := 0.18
 		var clash: Dictionary = Hit.blade_vs_blade_swept(
 			player.rig.weapon_prev_xf, player.rig.weapon_xf, player.rig.blade_proxy,
-			rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy, 0.05,
+			rig.weapon_prev_xf, rig.weapon_xf, rig.blade_proxy, clash_slack,
 			player.rig.blade_span(), rig.blade_span(), 3, 4, -1)
 		if player.get("parry_stats") is Dictionary:
 			player.parry_stats["ms_clash"] = maxf(

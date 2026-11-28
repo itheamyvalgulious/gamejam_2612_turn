@@ -133,7 +133,7 @@ func step(dt: float, ctx: Dictionary) -> Array:
 		# 刀的位置由弹反的「拦截规划」决定（player._plan_intercept 会把刀送到
 		# 飞行物的必经之路上），所以这里只认真实刀身几何：刀真的在，才弹得回去。
 		if String(it["owner"]) == "enemy" and not bool(it["spent"]) and player != null and player.alive:
-			if Combat.blade_blocks(player.rig, prev, pos, float(it["radius"])):  # 碰到刀即格挡
+			if player.is_guard_up() and Combat.blade_blocks(player.rig, prev, pos, float(it["radius"])):  # 格挡姿态下刀才弹反
 				_reflect(it, player, events)
 				continue
 

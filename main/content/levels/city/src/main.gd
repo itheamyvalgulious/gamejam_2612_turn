@@ -222,7 +222,7 @@ func _process(delta: float) -> void:
 		level.constrain_player()
 		player.blade_terrain.advance_player(player.rig, dt, player.swing_serial, Snd, Fx, level.get("geometry"))
 	level.step(dt, ctx)
-	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []))
+	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []), replay, dt)
 	for ev in p_events:
 		_on_combat_event(ev)
 	for e in level.enemies:
