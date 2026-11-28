@@ -1,5 +1,6 @@
 extends LevelUnit
 const SceneArena = preload("res://src/encounter/arena.gd")
+const MoveSolver = preload("res://core/move_solver.gd")
 const Sentinel = preload("res://src/game/arc_encounter.gd")
 const Sentry = preload("res://src/game/wheel_encounter.gd")
 const Duelist = preload("res://src/game/duelist_encounter.gd")
@@ -63,6 +64,8 @@ func start_level(_idx: int) -> void:
 	drop_start_height = player.rig.global_position.y
 	if nav == null:
 		nav = NavField.build(arena, SceneArena.nav_spec(arena))
+		nav.phys_clear = _nav_phys_clear
+		nav.clear_graphs()
 		# 刀客（1.75 半径 + 上半身圆柱）的图只有高低差关用得上：普通中庭只有
 		# 哨兵/单轮，预建这棵树在进关时白吃 ~76ms。按实际阵容决定。非高低差时
 		# 另按哨兵半径预建一张（上游在哨兵楼梯穿模修复里引入）。
@@ -215,10 +218,17 @@ func _duelist_cover() -> Array:
 
 func constrain_player() -> void:
 	var rig = player.rig
-	var resolved := resolve_motion(player_previous,rig.global_position)
+	var spec := {
+		"solids": arena["solids"], "radius": PLAYER_RADIUS, "height": PLAYER_HEIGHT,
+		"step_up": 0.5, "clamp_y": Vector2(0.0, SceneArena.CEILING - 5.0),
+	}
+	if arena.get("height_test", false):
+		spec["clamp_xz"] = Vector4(-SceneArena.HALF_WIDTH + 2.3, SceneArena.HALF_WIDTH - 2.3,
+			-SceneArena.HALF_DEPTH + 2.3, SceneArena.HALF_DEPTH - 2.3)
+	var resolved: Vector3 = MoveSolver.solve(player_previous, rig.global_position, spec)
 	if resolved.y < rig.global_position.y-0.01 and rig.vertical_velocity>0:
 		rig.vertical_velocity = 0
-	var floor_y := floor_at(resolved,maxf(player_previous.y,resolved.y)+0.45)
+	var floor_y := maxf(MoveSolver.floor_at(resolved, arena["solids"], PLAYER_RADIUS), 0.0)
 	if rig.jump_state in ["GROUND","LANDING"]:
 		if resolved.y-floor_y > 0.5:
 			rig.jump_state = "AIR"
@@ -404,19 +414,23 @@ func constrain_camera() -> void:
 			nearest = minf(nearest, maxf(0.1, focus.distance_to(hit)-0.15))
 	cam.camera.global_position = focus + direction*nearest
 
-## 在任意一条楼梯/坡道走廊内都算「在楼梯上」。
+## 仅真正踩在楼梯斜坡上时才算「在楼梯上」（避免一楼平地楼梯口外误判触发楼梯急停循环）。
 func duelist_on_stairs(at: Vector3) -> bool:
-	return nav != null and nav.stair_at(at) >= 0
+	return nav != null and nav.stair_at(at, 0.0) >= 0 \
+		and at.z >= SceneArena.STAIR_BOTTOM + 0.2 and at.y >= 0.15
 
 
 func duelist_stair_lane(at: Vector3) -> Vector2:
 	if nav == null:
 		return Vector2.INF
-	# 可挥刀的窗口照旧包含楼梯口与上平台边（旧行为），但边界来自 nav 线元信息。
-	var li: int = nav.stair_at(at, 0.4)
+	if at.z < SceneArena.STAIR_BOTTOM + 0.1 and at.y < 0.15:
+		return Vector2.INF
+	var li: int = nav.stair_at(at, 0.35)
 	if li < 0:
-		var wide: int = nav.stair_at(at, 1.9)
-		if wide < 0 or at.z > STAIR_EXIT.z + 1.7 or at.z < SceneArena.STAIR_BOTTOM - 1.4:
+		if at.z < SceneArena.STAIR_TOP - 0.5 or at.z > STAIR_EXIT.z + 1.5:
+			return Vector2.INF
+		var wide: int = nav.stair_at(at, 1.8)
+		if wide < 0:
 			return Vector2.INF
 		li = wide
 	var line: Dictionary = nav.lines[li]
@@ -458,19 +472,73 @@ func terrain_blade_clear(from: Vector3, to: Vector3) -> bool:
 	return _terrain_blade_endpoint(from, to).is_equal_approx(to)
 
 
+func _nav_phys_clear(pos: Vector3, radius: float, allow_air: bool) -> bool:
+	if absf(pos.x) > SceneArena.HALF_WIDTH - 2.3 or absf(pos.z) > SceneArena.HALF_DEPTH - 2.3:
+		return false
+	if not position_clear(pos, radius + 0.12, true):
+		return false
+	if not allow_air:
+		var fy := floor_at(pos, pos.y + DUELIST_STEP_HEIGHT)
+		if absf(fy - pos.y) > 0.55:
+			return false
+	return true
+
+
+func duelist_floor(at: Vector3, ceiling: float) -> float:
+	return floor_at(at, ceiling)
+
+
 func duelist_ground_move(from: Vector3, goal: Vector3) -> Vector3:
-	return nav.move_slide(from, goal, ACTOR_RADIUS,
-		DUELIST_STEP_HEIGHT, DUELIST_STEP_HEIGHT, DUELIST_UPPER)
+	var offset := (goal - from).slide(Vector3.UP)
+	var total := offset.length()
+	if total < 1e-4:
+		return from
+	var dir := offset / total
+	var steps := maxi(1, ceili(total / 0.25))
+	var step_len := total / float(steps)
+	var pos := from
+	for _i in steps:
+		var moved := false
+		for ang in [0.0, 0.45, -0.45, 0.90, -0.90, 1.30, -1.30]:
+			var sdir := dir if ang == 0.0 else dir.rotated(Vector3.UP, ang)
+			var cand := pos + sdir * (step_len if ang == 0.0 else step_len * 0.85)
+			cand.x = clampf(cand.x, -SceneArena.HALF_WIDTH + 2.3, SceneArena.HALF_WIDTH - 2.3)
+			cand.z = clampf(cand.z, -SceneArena.HALF_DEPTH + 2.3, SceneArena.HALF_DEPTH - 2.3)
+			if not position_clear(cand, ACTOR_RADIUS, true):
+				continue
+			var phys_y := floor_at(cand, pos.y + DUELIST_STEP_HEIGHT)
+			if pos.y - phys_y <= 0.65:
+				cand.y = phys_y
+				pos = cand
+				moved = true
+				break
+			else:
+				# 踏出高台边缘：保持当前高度，交给物理重力自然跌落（绝不瞬间下移）
+				cand.y = pos.y
+				pos = cand
+				return pos
+		if not moved:
+			break
+	return pos
+
+
+func duelist_nav_goal(goal: Vector3) -> Vector3:
+	return nav.project_goal(goal, ACTOR_RADIUS, DUELIST_STEP_HEIGHT, DUELIST_UPPER)
 
 
 func duelist_can_strike(from: Vector3, goal: Vector3) -> bool:
 	if absf(from.y - goal.y) > DUELIST_STRIKE_HEIGHT:
-		if from.distance_to(goal) > 6.0 or not nav.move_clear(from, goal, ACTOR_RADIUS,
-				DUELIST_STEP_HEIGHT, DUELIST_STEP_HEIGHT, DUELIST_UPPER):
-			var landed: Vector3 = nav.move_supported(from, goal, ACTOR_RADIUS,
-				DUELIST_STEP_HEIGHT, DUELIST_STEP_HEIGHT, DUELIST_UPPER)
-			if landed.distance_to(goal) > 0.28:
-				return false
+		return false
+	var nav_goal: Vector3 = duelist_nav_goal(goal)
+	if absf(from.y - nav_goal.y) > DUELIST_STRIKE_HEIGHT:
+		return false
+	if (nav_goal - goal).slide(Vector3.UP).length() > 3.5:
+		return false
+	var nav_from: Vector3 = nav.depenetrate(from, ACTOR_RADIUS, DUELIST_STEP_HEIGHT, DUELIST_UPPER)
+	if (nav_from - from).length() > 1.0:
+		nav_from = from
+	if not nav.move_clear(nav_from, nav_goal, ACTOR_RADIUS, DUELIST_STEP_HEIGHT, 0.6, DUELIST_UPPER):
+		return false
 	return nav.segment_clear(from + Vector3.UP * 2.3, goal + Vector3.UP * 2.3)
 
 
@@ -490,10 +558,11 @@ func duelist_needs_route(from: Vector3, goal: Vector3) -> bool:
 
 
 func duelist_route_point(from: Vector3, goal: Vector3, flowing := false) -> Vector3:
+	var nav_goal: Vector3 = duelist_nav_goal(goal)
 	if flowing:
-		return nav.route_pull(from, goal, ACTOR_RADIUS, 3.2,
+		return nav.route_pull(from, nav_goal, ACTOR_RADIUS, 3.2,
 			DUELIST_STEP_HEIGHT, DUELIST_UPPER)
-	return nav.next_waypoint(from, goal, ACTOR_RADIUS,
+	return nav.next_waypoint(from, nav_goal, ACTOR_RADIUS,
 		DUELIST_STEP_HEIGHT, 0.0, DUELIST_UPPER)
 
 

@@ -2,6 +2,7 @@ extends "res://src/game/level.gd"
 
 const Phantom = preload("res://src/game/shard_encounter.gd")
 const Ending = preload("res://panopticon/src/arena/panopticon_ending.gd")
+const MoveSolver = preload("res://core/move_solver.gd")
 const BODY_RADIUS := 1.10
 const BODY_HEIGHT := 3.80
 
@@ -191,28 +192,16 @@ func _step_checkpoint(dt: float) -> void:
 func constrain_player(previous: Vector3) -> void:
 	var rig = player.rig
 	var target: Vector3 = rig.global_position
-	var resolved := previous
-	var steps := maxi(1, ceili((target - previous).slide(Vector3.UP).length() / 0.30))
-	var stride := (target - previous) / float(steps)
-	for i in steps:
-		resolved.y = maxf(0.0, previous.y + (i + 1) * stride.y)
-		var next := resolved + Vector3(stride.x, 0, stride.z)
-		if _body_clear(next):
-			resolved = next
-		else:
-			next = resolved + Vector3(stride.x, 0, 0)
-			if _body_clear(next):
-				resolved = next
-			next = resolved + Vector3(0, 0, stride.z)
-			if _body_clear(next):
-				resolved = next
-	var support := _support_height(resolved, maxf(previous.y, resolved.y) + 0.055)
-	if target.y > previous.y:
-		for box: AABB in arena["solids"]:
-			if previous.y + BODY_HEIGHT <= box.position.y and resolved.y + BODY_HEIGHT > box.position.y \
-					and _touches_box(resolved, box, BODY_RADIUS):
-				resolved.y = minf(resolved.y, box.position.y - BODY_HEIGHT)
-				rig.vertical_velocity = 0.0
+	var tank: Vector2 = arena["blade_center_cylinder"]
+	var spec := {
+		"solids": arena["solids"], "radius": BODY_RADIUS, "height": BODY_HEIGHT,
+		"step_up": 0.5, "clamp_y": Vector2(0.0, 1e9),
+		"circles": [{"c": Vector2(0, 0), "r": tank.x, "y1": tank.y}],
+	}
+	var resolved: Vector3 = MoveSolver.solve(previous, target, spec)
+	var support := maxf(MoveSolver.floor_at(resolved, arena["solids"], BODY_RADIUS), 0.0)
+	if target.y > previous.y and resolved.y < target.y - 0.025:
+		rig.vertical_velocity = 0.0
 	elif rig.jump_state == "AIR" and rig.vertical_velocity <= 0.0 and resolved.y <= support + 0.025:
 		resolved.y = support
 		rig.jump_state = "LANDING"

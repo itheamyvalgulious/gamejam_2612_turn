@@ -4,7 +4,10 @@ const Sentinel = preload("res://src/game/arc_encounter.gd")
 const Sentry = preload("res://src/game/wheel_encounter.gd")
 const Phase = preload("res://src/game/shard_encounter.gd")
 const LevelDeathField = preload("res://core/death_field.gd")
+const MoveSolver = preload("res://core/move_solver.gd")
 const ACTOR_RADIUS := 1.75
+const PLAYER_RADIUS := 1.10
+const PLAYER_HEIGHT := 3.80
 var plunge_armed := false
 var drop_start_height := 0.0
 var was_airborne := false
@@ -88,10 +91,15 @@ func step(dt: float, ctx: Dictionary) -> void:
 
 func constrain_player() -> void:
 	var rig = player.rig
-	var resolved := resolve_motion(player_previous,rig.global_position)
+	var resolved: Vector3 = MoveSolver.solve(player_previous, rig.global_position, {
+		"solids": arena["solids"], "radius": PLAYER_RADIUS, "height": PLAYER_HEIGHT,
+		"step_up": 0.5, "clamp_y": Vector2(0.0, SceneArena.CEILING - 5.0),
+		"clamp_xz": Vector4(-SceneArena.HALF_WIDTH + 2.3, SceneArena.HALF_WIDTH - 2.3,
+			-SceneArena.HALF_DEPTH + 2.3, SceneArena.HALF_DEPTH - 2.3),
+	})
 	if resolved.y < rig.global_position.y-0.01 and rig.vertical_velocity>0:
 		rig.vertical_velocity = 0
-	var floor_y := floor_at(resolved,maxf(player_previous.y,resolved.y)+0.45)
+	var floor_y := maxf(MoveSolver.floor_at(resolved, arena["solids"], PLAYER_RADIUS), 0.0)
 	if rig.jump_state in ["GROUND","LANDING"]:
 		if resolved.y-floor_y > 0.5:
 			rig.jump_state = "AIR"
@@ -118,7 +126,9 @@ func constrain_player() -> void:
 				offset = Vector3.FORWARD
 			var separation: Vector3 = enemy.ground_position()+offset.normalized()*2.6
 			separation.y = resolved.y
-			resolved = resolve_motion(resolved,separation)
+			resolved = MoveSolver.solve(resolved, separation, {
+				"solids": arena["solids"], "radius": PLAYER_RADIUS, "height": PLAYER_HEIGHT,
+				"step_up": 0.5, "clamp_y": Vector2(0.0, SceneArena.CEILING - 5.0)})
 	rig.weapon_xf.origin += resolved-rig.global_position
 	rig.global_position = resolved
 	player_previous = resolved

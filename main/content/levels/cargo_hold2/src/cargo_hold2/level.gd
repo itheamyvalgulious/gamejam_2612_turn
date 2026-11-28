@@ -11,6 +11,7 @@ const ServiceLadder = preload("res://src/cargo_hold2/service_ladder.gd")
 const Inspection = preload("res://src/cargo_hold2/inspection_crate.gd")
 const Sentinel = preload("res://src/game/arc_encounter.gd")
 const LevelDeathField = preload("res://core/death_field.gd")
+const MoveSolver = preload("res://core/move_solver.gd")
 const PLAYER_RADIUS := 0.85
 const PLAYER_HEIGHT := 3.8
 const CONTACT_EPS := 0.015
@@ -516,8 +517,11 @@ func on_player_died() -> void:
 
 func constrain_player() -> void:
 	var rig = player.rig
-	var grounded: bool = rig.jump_state in ["GROUND", "LANDING"]
-	var resolved := resolve_motion(player_previous, rig.global_position, grounded)
+	var spec := {
+		"solids": arena["camera_solids"], "radius": PLAYER_RADIUS, "height": PLAYER_HEIGHT,
+		"step_up": 0.5, "clamp_y": Vector2(float(arena["floor_y"]), 1e9),
+	}
+	var resolved: Vector3 = MoveSolver.solve(player_previous, rig.global_position, spec)
 	if state == "fight" and enemies[0].alive:
 		var enemy_at: Vector3 = enemies[0].ground_position()
 		var offset := (resolved - enemy_at) * Vector3(1, 0, 1)
@@ -526,10 +530,11 @@ func constrain_player() -> void:
 				offset = Vector3.FORWARD
 			var separation := enemy_at + offset.normalized() * 2.6
 			separation.y = resolved.y
-			resolved = resolve_motion(resolved, separation)
+			resolved = MoveSolver.solve(resolved, separation, spec)
 	if resolved.y < rig.global_position.y - CONTACT_EPS and rig.vertical_velocity > 0.0:
 		rig.vertical_velocity = 0.0
-	rig.ground_height = _floor_at(resolved)
+	rig.ground_height = maxf(MoveSolver.floor_at(resolved, arena["camera_solids"], PLAYER_RADIUS),
+		float(arena["floor_y"]))
 	var supported: bool = resolved.y <= rig.ground_height + CONTACT_EPS
 	if not supported and rig.jump_state in ["GROUND", "LANDING"]:
 		rig.jump_state = "AIR"
