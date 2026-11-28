@@ -40,6 +40,10 @@ uniform float env_sheen : hint_range(0.0, 0.5) = 0.10;
 varying vec3 opos;
 varying vec3 onrm;
 varying vec3 wnrm;
+varying vec3 fabrication_pos;
+
+// World-space tool contact (xyz) and deposition heat (w), used by the cargo opening.
+instance uniform vec4 cargo_fabrication = vec4(0.0);
 
 // ---------------------------------------------------------------------------
 // Noise
@@ -119,10 +123,13 @@ vec2 scratch_cell(vec2 p) {
 void vertex() {
 	opos = VERTEX;
 	onrm = normalize(NORMAL);
+	fabrication_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	wnrm = normalize((MODEL_NORMAL_MATRIX * NORMAL));
 }
 
 void fragment() {
+	float contact_heat = cargo_fabrication.w
+		* (1.0 - smoothstep(0.022, 0.176, distance(fabrication_pos, cargo_fabrication.xyz)));
 	// triplanar weights from the object-space normal
 	vec3 tw = pow(abs(onrm), vec3(4.0));
 	tw /= max(tw.x + tw.y + tw.z, 0.0001);
@@ -186,9 +193,9 @@ void fragment() {
 	base = mix(base, edge_color.rgb, edge * 0.60); // worn bright edge
 	base += edge_color.rgb * sc_lip * 0.10;        // bright burr lip
 
-	ALBEDO = base;
+	ALBEDO = base * mix(vec3(1.0), vec3(0.77, 0.66, 0.57), contact_heat);
 	METALLIC = clamp(metallic, 0.0, 1.0);
-	ROUGHNESS = clamp(rough, 0.05, 0.95);
+	ROUGHNESS = clamp(rough + 0.12 * contact_heat, 0.05, 0.95);
 	SPECULAR = 0.5;
 	AO = clamp(1.0 - pit * 0.10 - sc_core * 0.28, 0.0, 1.0);
 
@@ -198,4 +205,5 @@ void fragment() {
 	float sky = smoothstep(-0.55, 0.95, dot(wnrm, vec3(0.15, 1.0, 0.25)));
 	float sheen = env_sheen * (0.30 + 0.70 * fres) * (0.40 + 0.60 * sky);
 	EMISSION = tint_blue.rgb * sheen + edge_color.rgb * edge * env_sheen * 1.4;
+	EMISSION += vec3(1.0, 0.42, 0.10) * contact_heat * 2.1;
 }

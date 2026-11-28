@@ -6,6 +6,7 @@ extends Node
 ## user://actdemo_binds.json.  Events are serialised as plain dicts.
 
 const SAVE_PATH := "user://actdemo_binds.json"
+const INTERACTION_SAVE_PATH := "user://turn_cargo_interaction.json"
 
 ## {id, label, group, ev:[{t:"key", k:KEY}, {t:"mouse", b:MOUSE_BUTTON_LEFT}]}
 const DEFS := [
@@ -20,6 +21,7 @@ const DEFS := [
 	{"id": "parry", "label": "弹反 / 举刀", "group": "动作", "ev": [{"t": "mouse", "b": MOUSE_BUTTON_RIGHT}]},
 	{"id": "attack_heavy", "label": "重斩", "group": "动作", "ev": [{"t": "key", "k": KEY_Q}]},
 	{"id": "attack_spin", "label": "回旋斩", "group": "动作", "ev": [{"t": "key", "k": KEY_E}]},
+	{"id": "interact", "label": "交互", "group": "动作", "ev": [{"t": "key", "k": KEY_F}]},
 	{"id": "cam_mode", "label": "切换第一/第三人称", "group": "视角", "ev": [{"t": "key", "k": KEY_V}]},
 	{"id": "fp_mask", "label": "第一人称视野黑幕（第三人称）", "group": "视角",
 		"ev": [{"t": "key", "k": KEY_TAB}]},
@@ -187,28 +189,60 @@ func mouse_attack() -> bool:
 # ------------------------------------------------------------------ persist
 func save() -> void:
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
-	if f == null:
-		return
-	f.store_string(JSON.stringify(_events, "  "))
-	f.close()
+	if f != null:
+		var shared := _events.duplicate()
+		shared.erase("interact")
+		f.store_string(JSON.stringify(shared, "  "))
+		f.close()
+	# Other levels save the shared controls independently of this action.
+	var interaction := FileAccess.open(INTERACTION_SAVE_PATH, FileAccess.WRITE)
+	if interaction != null:
+		interaction.store_string(JSON.stringify(_events["interact"]))
+		interaction.close()
 
 
 func load_from_disk() -> void:
-	if not FileAccess.file_exists(SAVE_PATH):
-		return
-	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
-	if f == null:
-		return
-	var txt := f.get_as_text()
-	f.close()
-	var parsed = JSON.parse_string(txt)
-	if typeof(parsed) != TYPE_DICTIONARY:
-		return
-	for id in parsed.keys():
-		if _events.has(id) and typeof(parsed[id]) == TYPE_ARRAY:
-			var arr: Array = []
-			for d in parsed[id]:
-				if typeof(d) == TYPE_DICTIONARY:
-					arr.append({"t": String(d.get("t", "key")), "k": int(d.get("k", 0)), "b": int(d.get("b", 0))})
-			if not arr.is_empty():
-				_events[id] = arr
+	if FileAccess.file_exists(SAVE_PATH):
+		var parsed = JSON.parse_string(FileAccess.get_file_as_string(SAVE_PATH))
+		if parsed is Dictionary:
+			for id in parsed:
+				if _events.has(id):
+					var events := _saved_events(parsed[id])
+					if not events.is_empty():
+						_events[id] = events
+	if FileAccess.file_exists(INTERACTION_SAVE_PATH):
+		var value = JSON.parse_string(FileAccess.get_file_as_string(INTERACTION_SAVE_PATH))
+		if value is Array:
+			var saved := _saved_events(value)
+			if saved.is_empty() or not _interaction_key_used(saved[0]):
+				_events["interact"] = saved
+				return
+	_default_interact_key()
+
+
+func _saved_events(value: Variant) -> Array:
+	var events: Array = []
+	if value is Array:
+		for d in value:
+			if d is Dictionary:
+				events.append({"t": String(d.get("t", "key")), "k": int(d.get("k", 0)), "b": int(d.get("b", 0))})
+	return events
+
+
+func _interaction_key_used(candidate: Dictionary) -> bool:
+	for action in _events:
+		if action == "interact":
+			continue
+		for existing in _events[action]:
+			if _same_desc(candidate, existing):
+				return true
+	return false
+
+
+func _default_interact_key() -> void:
+	for key in [KEY_F, KEY_G, KEY_T]:
+		var candidate := {"t": "key", "k": key}
+		if not _interaction_key_used(candidate):
+			_events["interact"] = [candidate]
+			return
+	_events["interact"] = []

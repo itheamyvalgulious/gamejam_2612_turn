@@ -326,6 +326,35 @@ static func samples(kind: String, variant: int) -> PackedFloat32Array:
 				{"osc": "sine", "f0": 150.0, "f1": 40.0, "fmode": "exp", "filt": "none",
 					"env": _exp_env(1.3, 0.24, 0.9), "gain": 1.0},
 			] + _metal_modes(900.0, 0.30, 0.9) as Array, seed_i)
+		"fabricator_servo":
+			buf = render_layers(6.10, [
+				{"osc": "sine", "filt": "none", "f0": 111.0, "f1": 178.0, "gain": 0.36,
+					"env": [[0.0, 0.0], [0.19, 0.80], [1.0, 0.54], [1.63, 0.8], [2.52, 0.55],
+						[3.06, 0.80], [4.0, 0.53], [4.92, 0.72], [5.20, 0.1], [5.36, 0.0]]},
+				{"osc": "noise", "filt": "bp", "f0": 900.0, "f1": 1380.0, "q": 1.4, "gain": 0.31,
+					"env": [[0.0, 0.0], [0.23, 0.80], [1.30, 0.50], [4.92, 0.58],
+						[5.26, 0.0], [5.37, 0.59], [5.67, 0.22], [5.85, 0.0], [5.90, 0.78], [6.10, 0.0]]},
+				{"osc": "sine", "filt": "none", "f0": 136.0, "f1": 88.0, "gain": 0.25,
+					"env": [[0.0, 0.0], [5.37, 0.0], [5.53, 0.66], [5.85, 0.60], [6.10, 0.0]]},
+			], seed_i)
+		"fabricator_contact":
+			buf = render_layers(0.40, [
+				{"osc": "noise", "filt": "bp", "f0": 3200.0, "f1": 1800.0, "q": 0.74, "gain": 0.67,
+					"env": [[0.0, 0.0], [0.012, 1.0], [0.065, 0.38], [0.081, 0.72],
+						[0.14, 0.28], [0.17, 0.47], [0.32, 0.12], [0.40, 0.0]]},
+				{"osc": "sine", "filt": "none", "f0": 660.0, "f1": 420.0, "gain": 0.23,
+					"env": [[0.0, 0.0], [0.008, 0.64], [0.057, 0.21], [0.20, 0.0]]},
+			], seed_i)
+		"fabricator_transfer":
+			var packets: Array = [[0.0, 0.0]]
+			for i in 8:
+				var tick := 0.15 + i * 0.31
+				packets.append_array([[tick, 0.0], [tick + 0.025, 1.0], [tick + 0.12, 0.0]])
+			buf = render_layers(2.83, [
+				{"osc": "sine", "filt": "none", "f0": 480.0, "f1": 890.0, "gain": 0.41, "env": packets},
+				{"osc": "sine", "filt": "none", "f0": 142.0, "f1": 210.0, "gain": 0.18,
+					"env": [[0.0, 0.0], [0.23, 0.41], [2.52, 0.65], [2.75, 0.0]]},
+			], seed_i)
 		"cargo_alarm":
 			buf = render_layers(0.94, [
 				{"osc": "sine", "f0": 480.0, "f1": 590.0, "fmode": "lin", "filt": "none",

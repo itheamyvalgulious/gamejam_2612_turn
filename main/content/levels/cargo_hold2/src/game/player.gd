@@ -10,7 +10,7 @@ class_name PlayerUnit
 ## 尺度：本文件里的硬编码距离 / 速度都是**世界单位**（1 u = 0.547 m，见 src/core/units.gd）；
 ## 玩家可见的数值一律走 P.getm()（真实米）。
 
-const Rig = preload("res://team/vesper/integration/campaign_rig.gd")
+const Rig = preload("res://src/cargo_hold2/opening_rig.gd")
 const Units = preload("res://src/core/units.gd")
 # 直接 preload：不依赖全局类缓存，headless / 首次 clone 都能跑
 const InterceptS = preload("res://src/game/intercept.gd")
@@ -968,6 +968,30 @@ func hurt(_amount: float, _from_dir := Vector3.FORWARD, cause := "") -> void:
 		Fx.death_burst(rig.global_position + Vector3(0, 2.0, 0))
 		Fx.screen_flash(0.55, Color(0.8, 0.05, 0.05))
 		Fx.shake(1.2)
+
+
+func begin_service_climb() -> void:
+	_end_intercept()
+	parry_timer = 0.0
+	jump_buffer_dt = 0.0
+	block_push = Vector3.ZERO
+	blade_terrain.reset()
+	rig.begin_ladder_pose()
+
+
+func step_service_climb(dt: float, at: Vector3, yaw: float, weight: float, attached: bool) -> void:
+	invuln = maxf(0.0, invuln - dt)
+	hurt_flash = maxf(0.0, hurt_flash - dt)
+	parry_cd = maxf(0.0, parry_cd - dt)
+	measured_velocity = (at - _prev_rig_pos) / maxf(dt, 0.0001)
+	rig.step_ladder_pose(dt, at, yaw, weight, attached)
+	_prev_rig_pos = at
+
+
+func sync_opening_handoff() -> void:
+	_prev_rig_pos = rig.global_position
+	measured_velocity = Vector3.ZERO
+	rig.weapon_prev_xf = rig.weapon_xf
 
 
 func reset(pos: Transform3D) -> void:

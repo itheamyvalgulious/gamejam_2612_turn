@@ -158,7 +158,7 @@ func _bake(node: Node3D, parts: Array) -> void:
 		node.add_child(mi)
 
 
-func _p(parts: Array, mesh: Mesh, mat: Material, pos := Vector3.ZERO,
+static func _p(parts: Array, mesh: Mesh, mat: Material, pos := Vector3.ZERO,
 		rot_deg := Vector3.ZERO, scl := Vector3.ONE) -> void:
 	if mesh == null:
 		return
@@ -168,13 +168,13 @@ func _p(parts: Array, mesh: Mesh, mat: Material, pos := Vector3.ZERO,
 	parts.append({"mesh": mesh, "mat": mat, "xf": Transform3D(b, pos)})
 
 
-func _disc(parts: Array, r: float, t: float, sides: int, pos: Vector3,
+static func _disc(parts: Array, r: float, t: float, sides: int, pos: Vector3,
 		axis: Vector3, mat: Material, bevel := 0.0, hint := Vector3.RIGHT) -> void:
 	parts.append({"mesh": MK.disc(r, t, sides, bevel), "mat": mat,
 		"xf": Transform3D(SK.basis_y(axis, hint), pos)})
 
 
-func _ring(parts: Array, r_in: float, r_out: float, t: float, sides: int,
+static func _ring(parts: Array, r_in: float, r_out: float, t: float, sides: int,
 		pos: Vector3, axis: Vector3, mat: Material, bevel := 0.0,
 		hint := Vector3.RIGHT) -> void:
 	parts.append({"mesh": MK.ring(r_in, r_out, t, sides, bevel), "mat": mat,
@@ -411,7 +411,7 @@ func _shoe_mesh(w: float, l: float, t: float) -> ArrayMesh:
 	return st.commit()
 
 
-func _build_track(side: int) -> void:
+func _build_track(side: int, powered := true) -> void:
 	var nm := "trackL" if side > 0 else "trackR"
 	var node: Node3D = J[nm]
 	var hull := AM.hull()
@@ -421,7 +421,7 @@ func _build_track(side: int) -> void:
 	var orange := AM.orange_panel()
 	var tread := AM.tread()
 	var belt := AM.belt()
-	var emis := AM.signal_orange()
+	var emis := AM.signal_orange() if powered else orange
 	var joint := AM.joint()
 	var path := _track_path(kin.track_poly, kin.track_belt_r, 0.016)
 	_belts[nm] = path
@@ -493,9 +493,9 @@ func _build_track(side: int) -> void:
 	var frame: Array = []
 	var poly: Array = kin.track_poly
 	var out_x := float(side)
-	var track_glow := AM.emissive(AM.ORANGE, 3.4)
-	var marker_glow := AM.emissive(Color(1.0, 0.42, 0.06), 3.6)
-	var wheel_glow := AM.emissive(AM.ORANGE, 2.8)
+	var track_glow := AM.emissive(AM.ORANGE, 3.4) if powered else orange
+	var marker_glow := AM.emissive(Color(1.0, 0.42, 0.06), 3.6) if powered else orange
+	var wheel_glow := AM.emissive(AM.ORANGE, 2.8) if powered else orange
 	var centroid := Vector2.ZERO
 	for p in poly:
 		centroid += p
@@ -590,53 +590,81 @@ func _build_track(side: int) -> void:
 		rollers.append(rn)
 	path["rollers"] = rollers
 	_bake(node, frame)
-	# subtle warm interior track light
-	var t_light := OmniLight3D.new()
-	t_light.light_color = Color(1.0, 0.28, 0.05)
-	t_light.light_energy = 0.50
-	t_light.omni_range = 0.95
-	t_light.shadow_enabled = false
-	t_light.position = ctr + Vector3(out_x * 0.04, 0.0, 0.0)
-	node.add_child(t_light)
+	if powered:
+		# subtle warm interior track light
+		var t_light := OmniLight3D.new()
+		t_light.light_color = Color(1.0, 0.28, 0.05)
+		t_light.light_energy = 0.50
+		t_light.omni_range = 0.95
+		t_light.shadow_enabled = false
+		t_light.position = ctr + Vector3(out_x * 0.04, 0.0, 0.0)
+		node.add_child(t_light)
 	# --- corner wheels (hollow machined drums + recessed spokes + rim LED rings)
 	for i in 3:
 		var wn: Node3D = J["wheel_%s%d" % [nm, i]]
 		var c2: Vector2 = poly[i]
 		wn.position = Vector3(0, c2.y, c2.x)
-		var wp: Array = []
-		_ring(wp, wheel_r - 0.024, wheel_r, 0.170, 44, Vector3.ZERO, Vector3.RIGHT, steel_d, 0.008)
-		_disc(wp, wheel_r - 0.020, 0.056, 36, Vector3.ZERO, Vector3.RIGHT, joint, 0.004)
-		_disc(wp, 0.054, 0.172, 28, Vector3.ZERO, Vector3.RIGHT, hull, 0.005)
-		for sx in [1, -1]:
-			var sxf := float(sx)
-			var x := sxf * 0.088
-			_ring(wp, 0.112, 0.136, 0.012, 36, Vector3(sxf * 0.086, 0, 0),
-				Vector3.RIGHT, steel, 0.002)
-			_ring(wp, 0.100, 0.110, 0.008, 36, Vector3(sxf * 0.083, 0, 0),
-				Vector3.RIGHT, wheel_glow, 0.001)
-			_ring(wp, 0.056, 0.072, 0.010, 28, Vector3(x, 0, 0),
-				Vector3.RIGHT, orange, 0.002)
-			_disc(wp, 0.052, 0.018, 24, Vector3(sxf * 0.089, 0, 0),
-				Vector3.RIGHT, hull2, 0.003)
-			_ring(wp, 0.022, 0.032, 0.010, 20, Vector3(sxf * 0.097, 0, 0),
-				Vector3.RIGHT, steel_d, 0.001)
-			_disc(wp, 0.020, 0.010, 18, Vector3(sxf * 0.100, 0, 0),
-				Vector3.RIGHT, emis, 0.002)
-			for b in 6:
-				var a2 := TAU * float(b) / 6.0 + 0.3
-				_p(wp, MK.prism(6, 0.009, 0.007, 0.014, 0.0), steel,
-					Vector3(sxf * 0.096, cos(a2) * 0.040, sin(a2) * 0.040),
-					Vector3(0, 0, -90.0 * sxf))
-			for b2 in 5:
-				var a3 := TAU * float(b2) / 5.0 + 0.2
-				_p(wp, SK.beam(Vector3(sxf * 0.052, cos(a3) * 0.044, sin(a3) * 0.044),
-					Vector3(sxf * 0.052, cos(a3) * (wheel_r - 0.018), sin(a3) * (wheel_r - 0.018)),
-					0.034, 0.038, 0.022, 0.030, 0.30, Vector3.RIGHT, 0.003), steel)
-				if b2 == 0:
-					_p(wp, SK.beam(Vector3(sxf * 0.070, cos(a3) * 0.054, sin(a3) * 0.054),
-						Vector3(sxf * 0.070, cos(a3) * (wheel_r - 0.022), sin(a3) * (wheel_r - 0.022)),
-						0.014, 0.008, 0.010, 0.008, 0.25, Vector3.RIGHT, 0.002), orange)
-		_bake(wn, wp)
+		_bake(wn, track_wheel_parts(wheel_r, wheel_glow, emis))
+
+
+## An inert track uses the same bearings, frame and belt as the live model.
+static func service_track() -> Node3D:
+	var builder := ArcRig3.new()
+	builder.kin = KIN.new({})
+	builder._dims()
+	var holder := Node3D.new()
+	builder._belt_node(holder, 1)
+	var track: Node3D = builder.J["trackL"]
+	builder._build_track(1, false)
+	builder._update_belt("trackL", 0.0)
+	holder.remove_child(track)
+	holder.free()
+	builder.free()
+	MK.merge_child_meshes(track)
+	return track
+
+
+static func track_wheel_parts(radius: float, wheel_glow: Material, emis: Material) -> Array:
+	var steel := AM.steel()
+	var steel_d := AM.steel_dark()
+	var joint := AM.joint()
+	var hull := AM.hull()
+	var hull2 := AM.hull_soft()
+	var orange := AM.orange_panel()
+	var wp: Array = []
+	_ring(wp, radius - 0.024, radius, 0.170, 44, Vector3.ZERO, Vector3.RIGHT, steel_d, 0.008)
+	_disc(wp, radius - 0.020, 0.056, 36, Vector3.ZERO, Vector3.RIGHT, joint, 0.004)
+	_disc(wp, 0.054, 0.172, 28, Vector3.ZERO, Vector3.RIGHT, hull, 0.005)
+	for sx in [1, -1]:
+		var sxf := float(sx)
+		var x := sxf * 0.088
+		_ring(wp, 0.112, 0.136, 0.012, 36, Vector3(sxf * 0.086, 0, 0),
+			Vector3.RIGHT, steel, 0.002)
+		_ring(wp, 0.100, 0.110, 0.008, 36, Vector3(sxf * 0.083, 0, 0),
+			Vector3.RIGHT, wheel_glow, 0.001)
+		_ring(wp, 0.056, 0.072, 0.010, 28, Vector3(x, 0, 0),
+			Vector3.RIGHT, orange, 0.002)
+		_disc(wp, 0.052, 0.018, 24, Vector3(sxf * 0.089, 0, 0),
+			Vector3.RIGHT, hull2, 0.003)
+		_ring(wp, 0.022, 0.032, 0.010, 20, Vector3(sxf * 0.097, 0, 0),
+			Vector3.RIGHT, steel_d, 0.001)
+		_disc(wp, 0.020, 0.010, 18, Vector3(sxf * 0.100, 0, 0),
+			Vector3.RIGHT, emis, 0.002)
+		for b in 6:
+			var a2 := TAU * float(b) / 6.0 + 0.3
+			_p(wp, MK.prism(6, 0.009, 0.007, 0.014, 0.0), steel,
+				Vector3(sxf * 0.096, cos(a2) * 0.040, sin(a2) * 0.040),
+				Vector3(0, 0, -90.0 * sxf))
+		for b2 in 5:
+			var a3 := TAU * float(b2) / 5.0 + 0.2
+			_p(wp, SK.beam(Vector3(sxf * 0.052, cos(a3) * 0.044, sin(a3) * 0.044),
+				Vector3(sxf * 0.052, cos(a3) * (radius - 0.018), sin(a3) * (radius - 0.018)),
+				0.034, 0.038, 0.022, 0.030, 0.30, Vector3.RIGHT, 0.003), steel)
+			if b2 == 0:
+				_p(wp, SK.beam(Vector3(sxf * 0.070, cos(a3) * 0.054, sin(a3) * 0.054),
+					Vector3(sxf * 0.070, cos(a3) * (radius - 0.022), sin(a3) * (radius - 0.022)),
+					0.014, 0.008, 0.010, 0.008, 0.25, Vector3.RIGHT, 0.002), orange)
+	return wp
 
 
 # ================================================================== turret
@@ -1023,29 +1051,34 @@ func _build_arm() -> void:
 			Vector3(float(sx) * 0.056, -0.070, 0.0), Vector3(90, 0, 0))
 	_bake(wr, wp)
 	# --- emitter head (arc blade coil)
+	_bake(tool, emitter_parts(L3))
+
+
+## Mechanical head and its four jaws, without the blade effect.
+static func emitter_parts(length: float) -> Array:
 	var tp: Array = []
 	# black emitter hilt: machined black body, steel collars, no red shell
-	_p(tp, SK.beam(Vector3(0, 0, 0), Vector3(0, -L3, 0),
-		0.098, 0.100, 0.070, 0.072, 0.32, Vector3.FORWARD, 0.006), hull2)
+	_p(tp, SK.beam(Vector3(0, 0, 0), Vector3(0, -length, 0),
+		0.098, 0.100, 0.070, 0.072, 0.32, Vector3.FORWARD, 0.006), AM.hull_soft())
 	for i in 3:
 		_ring(tp, 0.040, 0.060, 0.012, 22,
-			Vector3(0, -0.026 - float(i) * 0.030, 0), Vector3.UP, steel_d, 0.002)
+			Vector3(0, -0.026 - float(i) * 0.030, 0), Vector3.UP, AM.steel_dark(), 0.002)
 		_ring(tp, 0.034, 0.044, 0.005, 22,
-			Vector3(0, -0.026 - float(i) * 0.030, 0), Vector3.UP, steel, 0.001)
-	_p(tp, SK.beam(Vector3(0, -L3 + 0.012, 0), Vector3(0, -L3 - 0.052, 0),
-		0.058, 0.058, 0.042, 0.042, 0.30, Vector3.FORWARD, 0.004), steel_d)
+			Vector3(0, -0.026 - float(i) * 0.030, 0), Vector3.UP, AM.steel(), 0.001)
+	_p(tp, SK.beam(Vector3(0, -length + 0.012, 0), Vector3(0, -length - 0.052, 0),
+		0.058, 0.058, 0.042, 0.042, 0.30, Vector3.FORWARD, 0.004), AM.steel_dark())
 	for i in 4:
 		var a := TAU * float(i) / 4.0 + 0.785
-		_p(tp, SK.beam(Vector3(cos(a) * 0.040, -L3 - 0.030, sin(a) * 0.040),
-			Vector3(cos(a) * 0.062, -L3 - 0.082, sin(a) * 0.062),
-			0.018, 0.016, 0.010, 0.010, 0.30, Vector3.FORWARD, 0.002), steel)
-		_p(tp, MK.sphere(0.012, 10, 8, true), steel_d,
-			Vector3(cos(a) * 0.062, -L3 - 0.084, sin(a) * 0.062))
+		_p(tp, SK.beam(Vector3(cos(a) * 0.040, -length - 0.030, sin(a) * 0.040),
+			Vector3(cos(a) * 0.062, -length - 0.082, sin(a) * 0.062),
+			0.018, 0.016, 0.010, 0.010, 0.30, Vector3.FORWARD, 0.002), AM.steel())
+		_p(tp, MK.sphere(0.012, 10, 8, true), AM.steel_dark(),
+			Vector3(cos(a) * 0.062, -length - 0.084, sin(a) * 0.062))
 	# emitter mouth (black; the arc blade itself is the only light here)
-	_disc(tp, 0.042, 0.016, 24, Vector3(0, -L3 - 0.010, 0), Vector3.DOWN, joint, 0.002)
-	_ring(tp, 0.042, 0.052, 0.010, 24, Vector3(0, -L3 - 0.020, 0), Vector3.DOWN,
-		steel, 0.001)
-	_bake(tool, tp)
+	_disc(tp, 0.042, 0.016, 24, Vector3(0, -length - 0.010, 0), Vector3.DOWN, AM.joint(), 0.002)
+	_ring(tp, 0.042, 0.052, 0.010, 24, Vector3(0, -length - 0.020, 0), Vector3.DOWN,
+		AM.steel(), 0.001)
+	return tp
 
 
 # ================================================================== blade FX

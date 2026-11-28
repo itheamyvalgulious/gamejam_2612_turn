@@ -137,7 +137,8 @@ var _prewarm_thread: Thread = null
 var _prewarm_result: Dictionary = {}
 var _prewarm_kinds: Array = ["step", "swing_light", "swing_heavy", "arrow_whistle",
 	"arrow_hit", "clang", "parry", "hit", "qi", "qi_loop", "sentry_charge",
-	"laser", "slam", "death", "player_death", "chime", "ping"]
+	"laser", "slam", "death", "player_death", "chime", "ping",
+	"fabricator_servo", "fabricator_contact", "fabricator_transfer", "cargo_radio", "cargo_alarm"]
 
 
 func _start_prewarm() -> void:

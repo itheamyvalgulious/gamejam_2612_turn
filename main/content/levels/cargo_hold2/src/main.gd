@@ -66,6 +66,7 @@ func _ready() -> void:
 	level.opening_reset.connect(briefing.reset)
 	level.radio_line.connect(briefing.speak)
 	level.instruction_changed.connect(briefing.set_instruction)
+	level.interaction_changed.connect(briefing.set_interaction)
 
 	tuning = Tuning.new()
 	tuning.name = "Tuning"
@@ -91,6 +92,7 @@ func _ready() -> void:
 	replay.setup(player, level, proj)
 
 	level.start_level(0)
+	hud.hide()
 	set_process(true)
 	Snd.set_arena(level.arena)
 	get_window().focus_exited.connect(_release_mouse)
@@ -134,7 +136,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			tuning.handle_input(event)
 		return
-	if event is InputEventMouseMotion and _owns_mouse_capture:
+	if event is InputEventMouseMotion and _owns_mouse_capture and not level.opening.active:
 		cam.look(event.relative)
 	elif event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
@@ -158,6 +160,15 @@ func _open_pause() -> void:
 
 func _process(delta: float) -> void:
 	var frames := Engine.get_process_frames()
+	if level.opening.active:
+		if not _menus_open():
+			hud.hide()
+			var film_dt := minf(delta, 0.05)
+			level.step_cinematic(film_dt)
+			briefing.step(film_dt)
+			if not level.opening.active:
+				hud.show()
+		return
 	if not _menus_open() and frames != _open_frame:
 		if B.just("tuning"):
 			tuning.open()
@@ -173,6 +184,7 @@ func _process(delta: float) -> void:
 				hud.show_banner("第一人称视野黑幕", "你已经就在第一人称画面里 —— 按 V 切第三人称再看", 1.8)
 		if B.just("restart"):
 			restart_level()
+			return
 		if B.just("hud_toggle"):
 			hud.set_hud_visible(not hud.visible)
 
@@ -218,13 +230,12 @@ func _process(delta: float) -> void:
 
 	# ---------------- 模拟
 	var ctx := level.context()
-	if player.alive:
+	if player.alive and not level.step_service_ladder(dt):
 		var threats: Array = level.enemies if level.state == "fight" else []
 		player.step(dt, level.arena, threats)
 		level.constrain_player()
 		player.blade_terrain.advance_player(player.rig, dt, player.swing_serial, Snd, Fx, level.get("geometry"))
 	level.step(dt, ctx)
-	level.check_practice_contact()
 	briefing.step(dt)
 	var p_events := Combat.player_swing(player, level.combat_targets(), cam, level.arena.get("walls", []))
 	for ev in p_events:
@@ -362,6 +373,7 @@ func _on_projectile_event(ev: Dictionary) -> void:
 
 func restart_level() -> void:
 	level.start_level(level.index)
+	hud.hide()
 	hitstop = 0.0
 
 

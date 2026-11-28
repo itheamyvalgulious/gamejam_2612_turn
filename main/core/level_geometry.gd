@@ -101,6 +101,56 @@ static func build(arena: Dictionary) -> RefCounted:
 	return geo
 
 
+## Translate a registered box and update only the broad-phase cells it enters or leaves.
+func translate_box(bounds: AABB, offset: Vector3) -> bool:
+	for i in obstacles.size():
+		var obstacle: Dictionary = obstacles[i]
+		var box: AABB = obstacle["aabb"]
+		if (obstacle["kind"] != "solid" or not box.position.is_equal_approx(bounds.position)
+				or not box.size.is_equal_approx(bounds.size)):
+			continue
+		var verts: PackedVector3Array = obstacle["v"]
+		for v in verts.size():
+			verts[v] += offset
+		var planes: Array = obstacle["planes"]
+		for j in planes.size():
+			var plane: Plane = planes[j]
+			plane.d += plane.normal.dot(offset)
+			planes[j] = plane
+		var moved := AABB(box.position + offset, box.size)
+		obstacle["v"] = verts
+		obstacle["aabb"] = moved
+		_reindex_translation(i, _box_cells(box), _box_cells(moved))
+		return true
+	return false
+
+
+func _reindex_translation(index: int, old: Rect2i, current: Rect2i) -> void:
+	if old == current:
+		return
+	for x in range(old.position.x, old.end.x):
+		for z in range(old.position.y, old.end.y):
+			var cell := Vector2i(x, z)
+			if not current.has_point(cell):
+				var entries: Array = _grid[cell]
+				entries.erase(index)
+				if entries.is_empty():
+					_grid.erase(cell)
+	for x in range(current.position.x, current.end.x):
+		for z in range(current.position.y, current.end.y):
+			var cell := Vector2i(x, z)
+			if not old.has_point(cell):
+				if not _grid.has(cell):
+					_grid[cell] = []
+				(_grid[cell] as Array).append(index)
+
+
+static func _box_cells(box: AABB) -> Rect2i:
+	var first := Vector2i(floori(box.position.x / GRID_CELL), floori(box.position.z / GRID_CELL))
+	var last := Vector2i(floori(box.end.x / GRID_CELL), floori(box.end.z / GRID_CELL))
+	return Rect2i(first, last - first + Vector2i.ONE)
+
+
 static func _circle_ring(center: Vector2, radius: float, sides: int) -> PackedVector2Array:
 	var ring := PackedVector2Array()
 	for i in sides:
