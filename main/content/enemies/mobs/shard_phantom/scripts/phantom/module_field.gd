@@ -19,6 +19,8 @@ enum State { ASSEMBLED, DISPERSING, FLYING, REFORMING }
 const PK := preload("res://scripts/phantom/phantom_kit.gd")
 const PM := preload("res://scripts/phantom/phantom_materials.gd")
 const STREAK_SHADER := preload("res://shaders/motion_streak.gdshader")
+const INACTIVE_INSTANCE := Transform3D(
+	Vector3(0.0001, 0, 0), Vector3(0, 0.0001, 0), Vector3(0, 0, 0.0001), Vector3(0, -100, 0))
 
 const MESH_REF := [
 	Vector3(0.100, 0.100, 0.024),
@@ -29,7 +31,10 @@ const MESH_REF := [
 ]
 
 var rig: PhantomRig
-var state: int = State.ASSEMBLED
+var state: int = State.ASSEMBLED:
+	set(value):
+		state = value
+		_sync_streak_visibility()
 var mods: Array = []            # {node, plume_i, slot, joint, base_scale, seed}
 var meshes: Array = []
 var plume_mm: MultiMesh
@@ -152,6 +157,7 @@ func build(p_rig: PhantomRig, slots: Array, count: int) -> void:
 	plume_mm.mesh = PK.plume_cross(1.0, 1.0)
 	plume_mm.instance_count = active * 2
 	for i in active * 2:
+		plume_mm.set_instance_transform(i, INACTIVE_INSTANCE)
 		var sd = _plume_custom[(i % active) * 4]
 		plume_mm.set_instance_custom_data(i, Color(sd, 0.0, 0.0, 1.0))
 	plume_node.multimesh = plume_mm
@@ -166,17 +172,17 @@ func build(p_rig: PhantomRig, slots: Array, count: int) -> void:
 	# flight motion streaks (one wide additive quad per module)
 	streak_node = MultiMeshInstance3D.new()
 	streak_node.name = "Streaks"
+	streak_node.visible = false
 	streak_node.top_level = true
 	streak_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	streak_node.custom_aabb = AABB(Vector3(-8, -1, -8), Vector3(16, 9, 16))
 	streak_mm = MultiMesh.new()
 	streak_mm.transform_format = MultiMesh.TRANSFORM_3D
-	streak_mm.use_custom_data = true
-	var q := QuadMesh.new()
-	q.size = Vector2(1.0, 1.0)
-	# shift the quad so its origin is the head edge
 	streak_mm.mesh = _head_quad()
 	streak_mm.instance_count = active
+	# The renderer needs a valid transform for every slot, even before the first dispersal.
+	for i in active:
+		streak_mm.set_instance_transform(i, INACTIVE_INSTANCE)
 	streak_node.multimesh = streak_mm
 	var smat := ShaderMaterial.new()
 	smat.shader = STREAK_SHADER
@@ -224,8 +230,12 @@ func set_thruster_intensity(v: float) -> void:
 		plume_mat.set_shader_parameter("intensity", 1.35 * thruster_intensity)
 	if plume_node:
 		plume_node.visible = thruster_intensity > 0.015
+	_sync_streak_visibility()
+
+
+func _sync_streak_visibility() -> void:
 	if streak_node:
-		streak_node.visible = thruster_intensity > 0.015
+		streak_node.visible = thruster_intensity > 0.015 and state in [State.DISPERSING, State.REFORMING]
 
 
 func set_geometry_scale(hs: float) -> void:
@@ -286,7 +296,7 @@ func update_plumes(_dt: float) -> void:
 			plume_mm.set_instance_transform(outer_i, Transform3D(ob * Basis().scaled(Vector3(ow, ow, ol)), op))
 			plume_mm.set_instance_custom_data(outer_i, Color(float(m["seed"]) + 3.3, _boost, 0.0, 1.0))
 		else:
-			plume_mm.set_instance_transform(outer_i, Transform3D(Basis().scaled(Vector3(0.0001, 0.0001, 0.0001)), Vector3(0, -100, 0)))
+			plume_mm.set_instance_transform(outer_i, INACTIVE_INSTANCE)
 			plume_mm.set_instance_custom_data(outer_i, Color(0.0, 0.0, 0.0, 0.0))
 
 
@@ -404,8 +414,7 @@ func eval_disperse(t: float) -> void:
 		_update_streak(i, p, u)
 		phase = maxf(phase, u)
 	_set_phase(clampf(0.18 + 0.42 * phase, 0.0, 1.0), 0.55 + 0.45 * phase)
-	if arrived >= mods.size():
-		state = State.FLYING
+	state = State.FLYING if arrived >= mods.size() else State.DISPERSING
 	update_plumes(0.0)
 
 
@@ -503,7 +512,7 @@ func _update_streak(i: int, p: Vector3, u: float) -> void:
 	var vel := (p - prev)
 	var speed := vel.length() / maxf(dt, 0.001)
 	if speed < 0.6 or u >= 0.999:
-		streak_mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3(0.0001, 0.0001, 0.0001)), Vector3(0, -100, 0)))
+		streak_mm.set_instance_transform(i, INACTIVE_INSTANCE)
 		return
 	var dir := vel.normalized()
 	var side := dir.cross(Vector3.UP)
@@ -515,7 +524,6 @@ func _update_streak(i: int, p: Vector3, u: float) -> void:
 	var ln := clampf(speed * 0.035, 0.06, 0.34)
 	var wd := 0.012
 	streak_mm.set_instance_transform(i, Transform3D(b * Basis().scaled(Vector3(wd, wd, ln)), p))
-	streak_mm.set_instance_custom_data(i, Color(float(mods[i]["seed"]), 0.0, 0.0, 1.0))
 
 
 func is_assembled() -> bool:

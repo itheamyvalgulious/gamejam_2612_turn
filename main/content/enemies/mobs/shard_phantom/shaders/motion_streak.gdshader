@@ -5,7 +5,6 @@ render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabl
 uniform vec4 tint : source_color = vec4(1.0, 0.20, 0.03, 1.0);
 uniform vec4 hot : source_color = vec4(1.0, 0.70, 0.38, 1.0);
 uniform float intensity = 2.2;
-instance uniform float fx_seed = 0.0;
 
 void fragment() {
 	float across = 1.0 - abs(UV.x - 0.5) * 2.0;
