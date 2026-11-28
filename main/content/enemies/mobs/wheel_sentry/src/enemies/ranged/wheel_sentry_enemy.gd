@@ -43,6 +43,8 @@ var _retreating := false
 var _steer_delay := 0.0
 var _escape_yaw := 0.0
 var _ground_roll: Callable
+var _ground_pose: Callable
+var _ground_lift := 0.0
 var _wheel_speed := 0.0
 var _brace_amount := 0.0
 var _beam_hit := false
@@ -89,6 +91,7 @@ func _on_respawn() -> void:
 	_orbit_gear = 1.0
 	_retreating = false
 	_wheel_speed = 0.0
+	_ground_lift = 0.0
 	_brace_amount = 0.0
 	_beam_hit = false
 	_locked_turret = Transform3D.IDENTITY
@@ -322,22 +325,32 @@ func _drive(facing: float, steer: float, desired_speed: float, dt: float, evadin
 	if is_zero_approx(speed) or absf(speed) < absf(_wheel_speed):
 		acceleration = BRAKE_DECELERATION
 	_wheel_speed = move_toward(_wheel_speed, speed, acceleration * dt)
+	var from: Vector3 = rig.global_position - Vector3.UP * _ground_lift
 	if is_zero_approx(_wheel_speed):
+		_fit_ground_pose(from, yaw)
 		return
 	var forward := -Vector3(sin(yaw), 0.0, cos(yaw))
 	var travel := forward * _wheel_speed * dt
-	var from: Vector3 = rig.global_position
 	var goal: Vector3 = _ground_roll.call(from, from + travel) if _ground_roll.is_valid() \
 		else from + travel * _clear_roll(travel)
-	rig.global_position = goal
+	_fit_ground_pose(goal, yaw)
 	var distance := from.distance_to(goal) * signf(_wheel_speed)
 	rig.wheel.rotation.x = wrapf(rig.wheel.rotation.x - distance / rig.WHEEL_RADIUS, -PI, PI)
+
+
+func use_ground_pose(solve: Callable) -> void:
+	_ground_pose = solve
+
+
+func _fit_ground_pose(at: Vector3, yaw: float) -> void:
+	_ground_lift = _ground_pose.call(at, yaw, rig.WHEEL_RADIUS) if _ground_pose.is_valid() else 0.0
+	rig.global_position = at + Vector3.UP * _ground_lift
 
 
 func _clear_roll(travel: Vector3) -> float:
 	if level == null:
 		return 1.0
-	var from: Vector3 = rig.global_position
+	var from: Vector3 = rig.global_position - Vector3.UP * _ground_lift
 	var goal := from + travel
 	if _ground_roll.is_valid():
 		if travel.is_zero_approx():

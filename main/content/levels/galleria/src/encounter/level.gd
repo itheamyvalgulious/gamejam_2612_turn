@@ -12,6 +12,7 @@ const DUELIST_STEP_HEIGHT := 0.44
 const SENTRY_STEP_HEIGHT := 0.37
 const SENTINEL_STEP_HEIGHT := 0.38
 const SENTINEL_TRACK_RADIUS := 1.20
+const GALLERIA_SENTINEL_RADIUS := 1.62
 const SENTRY_ROLL_RADIUS := 1.58
 const DUELIST_STRIKE_HEIGHT := 0.87
 const STAIR_BLADE_MARGIN := 0.22
@@ -62,8 +63,10 @@ func start_level(_idx: int) -> void:
 	drop_start_height = player.rig.global_position.y
 	if nav == null:
 		nav = NavField.build(arena, SceneArena.nav_spec(arena))
-		if bool(arena.get("vertical", false)):
+		if arena["height_test"]:
 			nav.prewarm_graph(ACTOR_RADIUS, DUELIST_STEP_HEIGHT, DUELIST_UPPER)
+		else:
+			nav.prewarm_graph(GALLERIA_SENTINEL_RADIUS, NAV_SENTINEL_STEP)
 		geometry = LevelGeometry.build(arena)
 	player.rig.arena_bounds = Vector2.ZERO
 	player_previous = player.rig.global_position
@@ -109,10 +112,14 @@ func _spawn_encounters() -> void:
 			"archer":
 				enemy.global_position = entry["pos"]
 				enemy.setup_sentry(PI, 0.95 + float(archers.size()) * 0.35)
+				if not arena["height_test"]:
+					enemy.use_ground_pose(_wheel_stair_pose)
 				archers.append(enemy)
 			_:
 				enemy.global_position = arena["anchors"][entry["pad"]] if entry["kind"] == "phase" else entry["pos"]
 				enemy.use_ground_routes(sentinel_ground_move, sentinel_support_floor, sentinel_waypoint)
+				if not arena["height_test"]:
+					enemy.use_ground_pose(_tracked_stair_pose)
 		enemy.spawn_xf = enemy.global_transform
 		if enemy.rig != null:
 			enemy.spawn_rig_xf = enemy.rig.transform
@@ -121,7 +128,8 @@ func _spawn_encounters() -> void:
 func step(dt: float, ctx: Dictionary) -> void:
 	state_t += dt
 	if arena.has("controls"):
-		arena["controls"].step(dt, cam.fp_transform(), geometry, player.alive and state in ["fight", "clear"])
+		arena["controls"].step(dt, cam.fp_transform(), geometry,
+			player.alive and state in ["fight", "clear"], enemies, _lab_lift >= 4.65)
 	if state in ["fight", "clear"]:
 		for enemy in enemies:
 			enemy.step(dt, ctx)
@@ -136,6 +144,8 @@ func step(dt: float, ctx: Dictionary) -> void:
 		start_level(0)
 
 func on_enemy_died(enemy) -> void:
+	if arena.has("controls"):
+		arena["controls"].mark_defeat(enemies.find(enemy), enemy.ground_position())
 	var was_fighting := state == "fight"
 	super.on_enemy_died(enemy)
 	if was_fighting and state == "clear" and arena.get("height_test", false):
@@ -489,6 +499,63 @@ func floor_at(pos: Vector3, max_height: float) -> float:
 		if box.end.y <= max_height and Rect2(box.position.x,box.position.z,box.size.x,box.size.z).has_point(Vector2(pos.x,pos.z)):
 			height = maxf(height,box.end.y)
 	return height
+
+
+func sentinel_ground_move(from: Vector3, goal: Vector3) -> Vector3:
+	if arena["height_test"]:
+		return super.sentinel_ground_move(from, goal)
+	return nav.move_slide(from, goal, GALLERIA_SENTINEL_RADIUS, NAV_SENTINEL_STEP, NAV_SENTINEL_STEP)
+
+
+func sentinel_waypoint(from: Vector3, goal: Vector3) -> Vector3:
+	if arena["height_test"]:
+		return super.sentinel_waypoint(from, goal)
+	return nav.next_waypoint(from, goal, GALLERIA_SENTINEL_RADIUS, NAV_SENTINEL_STEP)
+
+
+func _near_stair_treads(at: Vector3) -> bool:
+	return (absf(at.x - SceneArena.STAIR_X) < SceneArena.STAIR_WIDTH * 0.5
+		and at.z >= SceneArena.STAIR_BOTTOM - 1.45 and at.z <= SceneArena.STAIR_TOP + 1.45)
+
+
+func _stair_support(at: Vector3, offset: Vector3) -> float:
+	# Only walkable surfaces can support the running gear. Rails never become footholds.
+	return maxf(0.0, nav.support_at(at + offset, at.y + 0.8))
+
+
+func _tracked_stair_pose(at: Vector3, yaw: float) -> Vector2:
+	if not _near_stair_treads(at):
+		return Vector2.ZERO
+	var basis := Basis(Vector3.UP, yaw)
+	var fore_z := clampf(at.z + basis.z.z * 1.15, SceneArena.STAIR_BOTTOM, SceneArena.STAIR_TOP)
+	var aft_z := clampf(at.z - basis.z.z * 1.15, SceneArena.STAIR_BOTTOM, SceneArena.STAIR_TOP)
+	var slope := SceneArena.DECK_HEIGHT / (SceneArena.STAIR_TOP - SceneArena.STAIR_BOTTOM)
+	var pitch := -atan((fore_z - aft_z) * slope / 2.3)
+	var tilted := Basis.from_euler(Vector3(pitch, yaw, 0))
+	var lift := 0.0
+	for side in [-1.0, 1.0]:
+		for z in [-1.21, -1.04, -0.83, -0.55, -0.28, 0.0, 0.28, 0.55, 0.83, 1.04, 1.21]:
+			var nose := maxf(0.0, absf(z) - 0.85)
+			var rise := nose * nose * 1.38
+			var offset := tilted * Vector3(side * 1.03, rise, z)
+			lift = maxf(lift, _stair_support(at, offset) - at.y - offset.y)
+	return Vector2(pitch, lift + 0.013 if lift > 0.0 else 0.0)
+
+
+func _wheel_stair_pose(at: Vector3, yaw: float, radius: float) -> float:
+	if not _near_stair_treads(at):
+		return 0.0
+	# The armor segments of the tire sit outside the nominal rolling radius.
+	var tread_radius := radius + 0.043
+	var axes := Basis(Vector3.UP, yaw)
+	var lift := 0.0
+	for side in [-0.39, 0.0, 0.39]:
+		for fraction in [-0.98, -0.85, -0.68, -0.51, -0.34, -0.17, 0.0, 0.17, 0.34, 0.51, 0.68, 0.85, 0.98]:
+			var z: float = tread_radius * fraction
+			var bottom := radius - sqrt(tread_radius * tread_radius - z * z)
+			var offset := axes * Vector3(side, 0, z)
+			lift = maxf(lift, _stair_support(at, offset) - at.y - bottom)
+	return lift
 
 func prepare_player() -> void:
 	var rig = player.rig

@@ -22,6 +22,9 @@ static func nav_spec(arena: Dictionary) -> Dictionary:
 		}],
 	}
 	if not arena.get("height_test", false):
+		# The line still connects the floors for pathfinding. The 28 solid treads supply the height.
+		spec.erase("ignore_box")
+		spec["lines"][0]["interpolate_support"] = false
 		spec["floor_polys"] = [PackedVector2Array([
 			Vector2(-CAMPAIGN_HALF_WIDTH, -HALF_DEPTH), Vector2(CAMPAIGN_HALF_WIDTH, -HALF_DEPTH),
 			Vector2(CAMPAIGN_HALF_WIDTH, HALF_DEPTH), Vector2(-CAMPAIGN_HALF_WIDTH, HALF_DEPTH),

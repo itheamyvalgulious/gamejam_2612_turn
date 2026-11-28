@@ -2,14 +2,16 @@ extends RefCounted
 
 const Geometry = preload("res://core/level_geometry.gd")
 const USE_REACH := 5.6
-const SCAN_TIME := 1.20
-const LAMP_POWER := 2.7
+const SCAN_TIME := 0.78
+const MAP_SCALE := 0.039
+const CONTACT_DEPTH := 0.10
 
 var directory: Dictionary
 var supply: Dictionary
-var lounge: Dictionary
+var interlock: Dictionary
 var _prompt: Label3D
 var _scan_left := 0.0
+var _door_open := false
 
 
 func attach(root: Node3D) -> void:
@@ -27,34 +29,46 @@ func attach(root: Node3D) -> void:
 
 func reset() -> void:
 	_prompt.hide()
-	_set_directory(false)
-	_set_lounge(true)
 	_scan_left = 0.0
-	supply["beam"].hide()
-	supply["status"].text = "等待验收"
+	_door_open = false
+	directory["model"].hide()
+	for contact: Dictionary in directory["contacts"]:
+		contact["dot"].hide()
+		contact["cross"].hide()
+	supply["open"] = false
+	supply["cover"].position.y = 0.0
+	supply["status"].text = "货舱 02  /  补给查验"
+	interlock["screen"].hide()
+	interlock["trace"].hide()
 
 
-func step(dt: float, eye: Transform3D, geometry: Geometry, enabled: bool) -> void:
-	_step_scan(dt)
-	_prompt.hide()
+func step(dt: float, eye: Transform3D, geometry: Geometry, enabled: bool,
+		enemies: Array, door_open: bool) -> void:
+	_door_open = door_open
+	_step_supply(dt)
+	if directory["model"].visible:
+		_update_deck_contacts(enemies)
+	if interlock["screen"].visible:
+		_update_interlock(enemies)
 	var key := B.event_text("interact")
 	if not enabled or key == "—":
+		_prompt.hide()
 		return
 	var selected: Dictionary = {}
 	var distance := USE_REACH
-	for station in [directory, supply, lounge]:
+	for station in [directory, supply, interlock]:
 		var at: Vector3 = station["at"]
 		var normal: Vector3 = station["normal"]
 		var toward := at - eye.origin
 		var length := toward.length()
 		if length < 0.05 or length >= distance or toward.dot(normal) >= 0.0:
 			continue
-		# The blade collision shell extends slightly in front of the button housing.
 		if toward.dot(-eye.basis.z) < length * 0.76 or not geometry.segment_clear(eye.origin, at + normal * 0.12):
 			continue
 		selected = station
 		distance = length
 	if selected.is_empty():
+		_prompt.hide()
 		return
 	if B.just("interact"):
 		_activate(selected["id"])
@@ -67,36 +81,64 @@ func step(dt: float, eye: Transform3D, geometry: Geometry, enabled: bool) -> voi
 func _activate(id: String) -> void:
 	match id:
 		"directory":
-			_set_directory(not directory["guide"].visible)
+			var map: Node3D = directory["model"]
+			map.visible = not map.visible
 		"supply":
-			if _scan_left <= 0.0:
-				_scan_left = SCAN_TIME
-				supply["status"].text = "正在验收"
-				_step_scan(0.0)
-		"lounge":
-			var material: StandardMaterial3D = lounge["material"]
-			_set_lounge(material.emission_energy_multiplier < 0.5)
+			supply["open"] = not supply["open"]
+			_scan_left = SCAN_TIME if supply["open"] else 0.0
+			supply["status"].text = "读取运输标签" if supply["open"] else "货舱 02  /  补给查验"
+		"interlock":
+			interlock["screen"].visible = not interlock["screen"].visible
+			if not interlock["screen"].visible:
+				interlock["trace"].hide()
 
 
-func _set_directory(show_stairs: bool) -> void:
-	directory["guide"].visible = show_stairs
-	directory["status"].text = "返程楼梯 →" if show_stairs else "坠击入口"
+static func map_point(at: Vector3, depth: float) -> Vector3:
+	return Vector3(at.x * MAP_SCALE, -at.z * MAP_SCALE, depth)
 
 
-func _set_lounge(on: bool) -> void:
-	var material: StandardMaterial3D = lounge["material"]
-	material.emission_energy_multiplier = 1.22 if on else 0.08
-	for lamp: OmniLight3D in lounge["lamps"]:
-		lamp.light_energy = LAMP_POWER if on else 0.0
-
-
-func _step_scan(dt: float) -> void:
-	if _scan_left <= 0.0:
+func mark_defeat(index: int, at: Vector3) -> void:
+	var contacts: Array = directory["contacts"]
+	if index < 0 or index >= contacts.size():
 		return
+	var contact: Dictionary = contacts[index]
+	contact["anchor"].position = map_point(at, CONTACT_DEPTH)
+	contact["dot"].hide()
+	contact["cross"].show()
+
+
+func _update_deck_contacts(enemies: Array) -> void:
+	var contacts: Array = directory["contacts"]
+	for i in contacts.size():
+		var contact: Dictionary = contacts[i]
+		var alive: bool = i < enemies.size() and enemies[i].alive
+		contact["dot"].visible = alive
+		if alive:
+			var at: Vector3 = enemies[i].ground_position()
+			contact["anchor"].position = map_point(at, CONTACT_DEPTH)
+
+
+func _step_supply(dt: float) -> void:
+	var cover: Node3D = supply["cover"]
+	var scan := _scan_left > 0.0
 	_scan_left = maxf(0.0, _scan_left - dt)
-	var beam: Node3D = supply["beam"]
-	var home: Vector3 = supply["scan_start"]
-	beam.position = home + Vector3.BACK * lerpf(-0.55, 0.55, 1.0 - _scan_left / SCAN_TIME)
-	beam.visible = _scan_left > 0.0
-	if _scan_left <= 0.0:
-		supply["status"].text = "验收完成"
+	if scan and _scan_left == 0.0:
+		supply["status"].text = "货舱 02  →  中庭\n减振件  /  备用电芯"
+	var target := 0.93 if supply["open"] else 0.0
+	cover.position.y = move_toward(cover.position.y, target, dt * 1.85)
+
+
+func _update_interlock(enemies: Array) -> void:
+	var live := 0
+	for enemy in enemies:
+		if enemy.alive:
+			live += 1
+	var status: Label3D = interlock["status"]
+	if _door_open:
+		status.text = "联锁解除\n通往回廊实验舱"
+	elif live == 0:
+		status.text = "警戒解除\n舱门开启中"
+	else:
+		status.text = "安全联锁  /  舱门闭锁\n中庭警戒目标  %02d" % live
+	var trace: Node3D = interlock["trace"]
+	trace.visible = live > 0 and not _door_open

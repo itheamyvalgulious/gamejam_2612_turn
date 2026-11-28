@@ -161,10 +161,12 @@ func _arrival() -> void:
 		var x: float = side * 5.48
 		block("wall", Vector3(0.55, 7.55, 6.42), Vector3(x, 11.77, 28.16))
 		block("metal", Vector3(0.16, 7.66, 0.47), Vector3(x - side * 0.34, 11.85, 25.02), false)
-		_duct(Vector3(x - side * 0.36, 13.48, 28.13), -side * PI * 0.5, 2.6, "AIR RETURN")
+		_duct(Vector3(x - side * 0.36, 13.72 if side < 0.0 else 13.48, 28.13),
+			-side * PI * 0.5, 2.6, "" if side < 0.0 else "AIR RETURN")
 		block("dark", Vector3(0.065, 0.18, 5.70), Vector3(side * 3.97, 8.012, 28.35), false)
 	for z in [24.35, 26.55, 28.75]:
 		_arrow(kit, Vector3(0, 8.044, z))
+	_atrium_map(Vector3(-5.13, 11.29, 26.71))
 	light(Vector3(0, 14.35, 28.30), Color("e8ebf1"), 2.6, 12.0)
 	light(Vector3(4.75, 14.76, 30.22), Color("fb7282"), 0.65, 5.8)
 
@@ -211,33 +213,88 @@ func _upper_deck() -> void:
 		block("paint", Vector3(0.51, 0.027, 0.17), Vector3(-4.45 + i * 0.89, 8.051, 17.29), false)
 	for z in [18.55, 20.75, 22.95]:
 		_arrow(kit, Vector3(0, 8.045, z))
-	# A directory fin and its attached bench identify this as a crew mezzanine.
-	var directory := Vector3(-9.9, 8.0, 22.38)
-	block("frame", Vector3(3.25, 0.20, 0.76), directory + Vector3.UP * 0.10, false)
-	block("dark", Vector3(2.82, 2.92, 0.27), directory + Vector3.UP * 1.53)
-	block("teal", Vector3(2.52, 1.93, 0.046), directory + Vector3(0, 1.76, 0.16), false)
-	_sign("CENTRAL GALLERIA", directory + Vector3(0, 2.32, 0.195), 0.0031)
-	_sign("中庭上层", directory + Vector3(0, 1.71, 0.195), 0.0045)
-	for y in [1.42, 1.22]:
-		block("cyan", Vector3(1.84 if y > 1.3 else 1.32, 0.026, 0.027),
-			directory + Vector3(-0.14, y, 0.185), false)
-	var key := directory + Vector3(1.02, 1.27, 0.227)
-	_station_switch(key, 0.0)
-	var destination := _sign("", directory + Vector3(0.04, 1.00, 0.20), 0.0039)
-	controls.directory = {"id": "directory", "at": key + Vector3.BACK * 0.11, "normal": Vector3.BACK,
-		"guide": _stair_guide(), "status": destination}
+
 	_bench(Vector3(-11.67, 8.0, 28.79), 4.2, "warm", PI)
 
 
-func _stair_guide() -> Node3D:
-	var guides := Kit.new()
-	guides.material("cyan", kit.mats["cyan"])
-	for x in [-7.0, -4.0, 4.0, 8.0, 12.0, 16.0, 20.0, 24.0, 28.0]:
-		guides.push_xf(Transform3D(Basis(Vector3.UP, -PI * 0.5), Vector3(x, 8.057, 25.13)))
-		_arrow(guides, Vector3.ZERO)
-		guides.pop_xf()
-	_arrow(guides, Vector3(29.0, 8.057, 22.76))
-	return guides.commit(root, "ReturnStairGuide", false)
+func _atrium_map(at: Vector3) -> void:
+	var axes := Basis(Vector3.UP, PI * 0.5)
+	kit.push_xf(Transform3D(axes, at))
+	kit.box_bevel("frame", Vector3(3.86, 3.04, 0.22), Vector3.ZERO, 0.075)
+	kit.box_bevel("dark", Vector3(3.67, 2.80, 0.10), Vector3(0, 0.05, 0.13), 0.044)
+	kit.box_bevel("teal", Vector3(3.49, 2.65, 0.046), Vector3(0, 0.06, 0.184), 0.019)
+	kit.box("amber", Vector3(0.12, 0.030, 0.014), Vector3(1.64, -1.385, 0.176))
+	kit.box_bevel("frame", Vector3(0.58, 0.53, 0.16), Vector3(0, -1.60, 0.085), 0.037)
+	kit.pop_xf()
+	var key := at + axes * Vector3(0, -1.69, 0.20)
+	_station_switch(key, PI * 0.5)
+
+	var map := Node3D.new()
+	map.name = "AtriumWallMap"
+	map.transform = Transform3D(axes, at + Vector3.RIGHT * 0.218)
+	root.add_child(map)
+	var plan := Kit.new()
+	plan.material("map_field", glow(Color("183137"), 0.46))
+	plan.material("map_lines", glow(Color("538084"), 0.59))
+	plan.material("map_deck", glow(Color("3e676d"), 0.52))
+	plan.material("map_edges", glow(Color("88b4b4"), 0.70))
+	plan.material("map_fixture", glow(Color("426167"), 0.47))
+	plan.box("map_field", Vector3(3.47, 2.64, 0.025), Vector3(0, 0.06, 0))
+	_map_plate(plan, "map_deck", Vector2(-15.0, 17.0), Vector2(15.0, 32.0), 0.040)
+	_map_plate(plan, "map_deck", Vector2(14.8, 18.0), Vector2(32.3, 29.4), 0.040)
+	_map_plate(plan, "map_lines", Vector2(26, -10), Vector2(32, 18), 0.030)
+	for z in range(-9, 18, 2):
+		_map_plate(plan, "map_edges", Vector2(26.40, z), Vector2(31.60, z + 0.42), 0.054)
+	_map_plate(plan, "map_fixture", Vector2(-39.5, -14.9), Vector2(-26.7, 4.8), 0.034)
+	_map_plate(plan, "map_fixture", Vector2(-5.5, -28), Vector2(5.5, -23.5), 0.034)
+	for x in [-21.5, 21.5]:
+		for z in [-19.0, -1.0, 16.0]:
+			_map_plate(plan, "map_fixture", Vector2(x - 0.75, z - 0.82), Vector2(x + 0.75, z + 0.82), 0.037)
+	plan.push_xf(Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Controls.map_point(Vector3(17.55, 0, -21.75), 0.041)))
+	plan.cyl("map_fixture", 0.28, 0.28, 0.015, 24)
+	plan.pop_xf()
+	plan.tube("map_edges", [
+		Controls.map_point(Vector3(-40.5, 0, 31), 0.059),
+		Controls.map_point(Vector3(-40.5, 0, -31), 0.059),
+		Controls.map_point(Vector3(-5.5, 0, -31), 0.059),
+		Controls.map_point(Vector3(-5.5, 0, -32.9), 0.059),
+		Controls.map_point(Vector3(5.5, 0, -32.9), 0.059),
+		Controls.map_point(Vector3(5.5, 0, -31), 0.059),
+		Controls.map_point(Vector3(40.5, 0, -31), 0.059),
+		Controls.map_point(Vector3(40.5, 0, 31), 0.059),
+		Controls.map_point(Vector3(5.5, 0, 31), 0.059),
+	], 0.013, 8)
+	_map_plate(plan, "map_edges", Vector2(-40.5, 30.7), Vector2(-5.5, 31.3), 0.059)
+	plan.commit(map, "DeckOutline", false)
+	var contacts: Array[Dictionary] = []
+	var contact_glow := StandardMaterial3D.new()
+	contact_glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	contact_glow.albedo_color = Color("fb3c47")
+	for i in 3:
+		var anchor := Node3D.new()
+		anchor.name = "UnitContact" + str(i)
+		map.add_child(anchor)
+		var dot := Kit.new()
+		dot.material("contact", contact_glow)
+		dot.push_xf(Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3.ZERO))
+		dot.cyl("contact", 0.043, 0.043, 0.020, 16)
+		dot.pop_xf()
+		var cross := Kit.new()
+		cross.material("contact", contact_glow)
+		for diagonal in [-1.0, 1.0]:
+			cross.tube("contact", [Vector3(-0.043, -diagonal * 0.043, 0), Vector3(0.043, diagonal * 0.043, 0)],
+				0.0125, 8)
+		contacts.append({"anchor": anchor, "dot": dot.commit(anchor, "Detected", false),
+			"cross": cross.commit(anchor, "Defeated", false)})
+	controls.directory = {"id": "directory", "at": key + Vector3.RIGHT * 0.11,
+		"normal": Vector3.RIGHT, "model": map, "contacts": contacts}
+
+
+func _map_plate(plan, material: String, start: Vector2, finish_at: Vector2, depth: float) -> void:
+	var center := (start + finish_at) * 0.5
+	var span := (finish_at - start) * Controls.MAP_SCALE
+	plan.box(material, Vector3(span.x, span.y, 0.014),
+		Controls.map_point(Vector3(center.x, 0, center.y), depth))
 
 
 func _return_stairs() -> void:
@@ -367,24 +424,43 @@ func _pantry(at: Vector3) -> void:
 
 
 func _supply_reader(at: Vector3) -> void:
-	block("dark", Vector3(1.47, 0.11, 1.98), at + Vector3.UP * 0.055, false)
-	block("metal", Vector3(1.22, 0.08, 1.66), at + Vector3.UP * 0.112, false)
-	block("bronze", Vector3(0.67, 0.34, 0.92), at + Vector3(-0.05, 0.32, 0), false)
-	for z in [-0.29, 0.29]:
-		block("dark", Vector3(0.69, 0.034, 0.085), at + Vector3(-0.05, 0.504, z), false)
+	block("dark", Vector3(1.71, 0.18, 2.54), at + Vector3.UP * 0.09, false)
+	block("metal", Vector3(1.44, 0.09, 2.32), at + Vector3.UP * 0.19, false)
+	block("frame", Vector3(0.26, 1.45, 2.43), at + Vector3(-0.74, 0.73, 0))
+	for z in [-1.16, 1.16]:
+		block("frame", Vector3(1.55, 2.22, 0.155), at + Vector3(-0.03, 1.10, z))
+		block("metal", Vector3(0.14, 2.14, 0.081), at + Vector3(0.79, 1.11, z), false)
+	block("dark", Vector3(1.58, 0.18, 2.54), at + Vector3(-0.02, 2.19, 0), true, true)
+	block("dark", Vector3(0.16, 0.53, 2.43), at + Vector3(0.76, 1.74, 0), false)
+	block("teal", Vector3(0.037, 0.47, 2.28), at + Vector3(0.865, 1.76, 0), false)
+	block("worklight", Vector3(0.13, 0.062, 1.91), at + Vector3(0.27, 1.405, 0), false)
+	var status := _sign("", at + Vector3(0.899, 1.77, 0), 0.00325, PI * 0.5)
+	# Matching stamped cargo case, with visibly distinct spring and power modules in its insert.
+	block("bronze", Vector3(1.04, 0.22, 1.92), at + Vector3(0.01, 0.33, 0), false)
 	for z in [-0.87, 0.87]:
-		block("frame", Vector3(0.26, 0.88, 0.14), at + Vector3(-0.49, 0.51, z), false)
-	block("frame", Vector3(0.32, 0.15, 1.92), at + Vector3(-0.49, 0.93, 0), false)
-	block("teal", Vector3(0.038, 0.39, 1.45), at + Vector3(-0.31, 1.03, 0), false)
-	var status := _sign("", at + Vector3(-0.283, 1.03, 0), 0.00375, PI * 0.5)
-	var beam := Kit.new()
-	beam.material("cyan", kit.mats["cyan"])
-	beam.box("cyan", Vector3(1.09, 0.022, 0.06), Vector3.ZERO)
-	var scan := beam.commit(root, "SupplyScanLine", false)
+		block("bronze", Vector3(1.04, 0.29, 0.11), at + Vector3(0.01, 0.56, z), false)
+	block("bronze", Vector3(0.086, 0.22, 1.78), at + Vector3(0.50, 0.53, 0), false)
+	_sign("H02", at + Vector3(0.555, 0.53, 0), 0.0025, PI * 0.5)
+	for z in [-0.55, -0.25]:
+		kit.push_xf(Transform3D(Basis(Vector3.FORWARD, PI * 0.5), at + Vector3(0.01, 0.61, z)))
+		kit.cyl("metal", 0.105, 0.105, 0.70, 12)
+		for ring in range(-2, 3):
+			kit.torus("dark", 0.11, 0.017, 12, 6, Vector3(0, ring * 0.086, 0))
+		kit.pop_xf()
+	for z in [0.22, 0.54]:
+		block("teal", Vector3(0.72, 0.22, 0.25), at + Vector3(0, 0.57, z), false)
+		block("cyan", Vector3(0.09, 0.029, 0.08), at + Vector3(0.24, 0.696, z), false)
+	var shutter := Kit.new()
+	shutter.material("frame", kit.mats["frame"])
+	shutter.material("metal", kit.mats["metal"])
+	shutter.box_bevel("frame", Vector3(0.13, 0.97, 2.19), at + Vector3(0.77, 0.75, 0), 0.035)
+	for y in [0.41, 0.60, 0.79, 0.98, 1.16]:
+		shutter.box("metal", Vector3(0.048, 0.022, 2.08), at + Vector3(0.845, y, 0))
+	var cover := shutter.commit(root, "SupplyInspectionShutter", true)
 	var key := at + Vector3(1.21, -0.11, 0.82)
 	_station_switch(key, PI * 0.5)
 	controls.supply = {"id": "supply", "at": key + Vector3.RIGHT * 0.11, "normal": Vector3.RIGHT,
-		"beam": scan, "scan_start": at + Vector3(-0.05, 0.535, 0), "status": status}
+		"cover": cover, "status": status}
 
 
 func _service_shutters(at: Vector3) -> void:
@@ -425,8 +501,6 @@ func _information_island(at: Vector3) -> void:
 	block("ceramic", Vector3(4.88, 0.16, 3.10), at + Vector3.UP * 1.27, false)
 	block("frame", Vector3(3.30, 1.75, 0.42), at + Vector3(0, 2.13, -0.71))
 	block("teal", Vector3(2.92, 1.39, 0.048), at + Vector3(0, 2.19, -0.477), false)
-	_sign("DECK DIRECTORY", at + Vector3(0, 2.62, -0.442), 0.0048)
-	_sign("实验舱 ↑", at + Vector3(0.46, 2.14, -0.438), 0.0046)
 	for i in 3:
 		block("cyan", Vector3(0.74 + 0.17 * i, 0.040, 0.019),
 			at + Vector3(-0.69, 2.11 - i * 0.164, -0.445), false)
@@ -456,13 +530,8 @@ func _lounge(at: Vector3) -> void:
 		block("upholstery", Vector3(2.89, 1.83, 0.105), at + Vector3(x, 1.06, -3.93), false)
 	block("frame", Vector3(1.78, 0.77, 1.02), at + Vector3(0, 0.385, -0.52), true, true)
 	block("ceramic", Vector3(3.15, 0.18, 1.61), at + Vector3(0, 0.86, -0.52), true, true, 0.12)
-	var lamps: Array[OmniLight3D] = []
 	for x in [-2.35, 2.35]:
-		lamps.append(light(at + Vector3(x, 5.45, -0.50), Color("b8d3e2"), Controls.LAMP_POWER, 9.35))
-	var key := at + Vector3(-4.42, 2.27, -3.75)
-	_station_switch(key, PI * 0.5)
-	controls.lounge = {"id": "lounge", "at": key + Vector3.RIGHT * 0.11, "normal": Vector3.RIGHT,
-		"material": kit.mats["lounge_light"], "lamps": lamps}
+		light(at + Vector3(x, 5.45, -0.50), Color("b8d3e2"), 2.7, 9.35)
 
 
 func _station_switch(at: Vector3, yaw: float) -> void:
@@ -520,22 +589,37 @@ func _research_bulkhead() -> void:
 			block("frame", Vector3(0.22, 0.69, 0.48),
 				Vector3(side * span, 15.48, -31.14), false)
 		block("frame", Vector3(0.98, 1.04, 0.64), Vector3(side * 24.24, 13.66, -31.10), false)
-		block("dark", Vector3(3.46, 2.18, 0.73), Vector3(side * 7.76, 1.09, -28.07))
-	block("frame", Vector3(3.78, 3.95, 0.66), Vector3(-7.76, 4.04, -28.06), false)
-	block("dark", Vector3(3.50, 3.68, 0.098), Vector3(-7.76, 4.04, -27.708), false)
-	block("teal", Vector3(3.18, 1.81, 0.044), Vector3(-7.76, 4.53, -27.648), false)
-	_sign("ACCESS CONTROL", Vector3(-7.76, 5.02, -27.618), 0.0035)
-	for i in 3:
-		var y := 4.53 - 0.28 * i
-		block("cyan", Vector3(0.14, 0.075, 0.026), Vector3(-8.97, y, -27.616), false)
-		block("metal", Vector3(1.96 - i * 0.22, 0.056, 0.022), Vector3(-7.65, y, -27.613), false)
-	block("metal", Vector3(2.68, 0.18, 0.49), Vector3(-7.76, 2.69, -27.50), false)
+	block("dark", Vector3(3.46, 2.18, 0.73), Vector3(7.76, 1.09, -28.07))
+	_lab_interlock(Vector3(-10.18, 0, -27.84))
 	block("frame", Vector3(3.79, 4.04, 0.68), Vector3(7.76, 4.04, -28.05), false)
 	_duct(Vector3(7.76, 4.82, -27.68), 0.0, 3.18, "FILTER BANK")
 	block("dark", Vector3(3.22, 1.28, 0.18), Vector3(7.76, 3.11, -27.67), false)
 	for x in [6.78, 7.76, 8.74]:
 		block("metal", Vector3(0.71, 0.74, 0.11), Vector3(x, 3.09, -27.56), false)
 		block("amber", Vector3(0.17, 0.063, 0.043), Vector3(x, 3.29, -27.49), false)
+
+
+func _lab_interlock(at: Vector3) -> void:
+	block("dark", Vector3(3.46, 2.18, 0.73), at + Vector3.UP * 1.09)
+	block("frame", Vector3(3.78, 3.95, 0.66), at + Vector3.UP * 4.04)
+	block("dark", Vector3(3.50, 3.68, 0.098), at + Vector3(0, 4.04, 0.352), false)
+	block("teal", Vector3(3.18, 1.81, 0.044), at + Vector3(0, 4.53, 0.412), false)
+	_sign("舱门联锁查询", at + Vector3(0, 5.065, 0.442), 0.0037)
+	block("metal", Vector3(2.68, 0.18, 0.49), at + Vector3(0, 2.69, 0.56), false)
+	var key := at + Vector3(-0.71, 3.02, 0.53)
+	_station_switch(key, 0.0)
+	var screen := Node3D.new()
+	screen.name = "GateInterlockReadout"
+	root.add_child(screen)
+	var status := _sign("", at + Vector3(0, 4.44, 0.459), 0.00415)
+	status.reparent(screen, false)
+	var markers := Kit.new()
+	markers.material("amber", kit.mats["amber"])
+	for x in [-4.3, 4.3]:
+		for z in [-25.58, -24.35, -23.12]:
+			markers.box("amber", Vector3(0.26, 0.025, 0.45), Vector3(x, 0.047, z))
+	controls.interlock = {"id": "interlock", "at": key + Vector3.BACK * 0.11, "normal": Vector3.BACK,
+		"screen": screen, "status": status, "trace": markers.commit(root, "LockedGateTelltales", false)}
 
 
 func _research_utilities() -> void:
@@ -674,9 +758,11 @@ func _duct(at: Vector3, yaw: float, width: float, label: String) -> void:
 		for y in [-0.53, 0.53]:
 			var screw := Vector3(side * (width * 0.5 - 0.04), y, 0.207)
 			kit.tube("metal", [screw, screw + Vector3.BACK * 0.027], 0.038, 8)
-	kit.box_bevel("dark", Vector3(1.24, 0.20, 0.30), Vector3(0, -0.73, 0.11), 0.038)
+	if not label.is_empty():
+		kit.box_bevel("dark", Vector3(1.24, 0.20, 0.30), Vector3(0, -0.73, 0.11), 0.038)
 	kit.pop_xf()
-	_sign(label, xf * Vector3(0, -0.73, 0.278), 0.0019, yaw)
+	if not label.is_empty():
+		_sign(label, xf * Vector3(0, -0.73, 0.278), 0.0019, yaw)
 
 
 func _arrow(batch, at: Vector3) -> void:

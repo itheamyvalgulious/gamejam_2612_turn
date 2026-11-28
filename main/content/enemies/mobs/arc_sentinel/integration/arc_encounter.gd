@@ -16,6 +16,8 @@ var _consumed := true
 var _ground_move: Callable
 var _support_floor: Callable
 var _waypoint: Callable
+var _ground_pose: Callable
+var _ground_lift := 0.0
 var _fall_speed := 0.0
 ## 寻路点缓存：路径规划对每只 sentinel 每帧要跑多次碰撞采样，按 0.12s /
 ## 位移 0.6m 复用即可，肉眼与命中判定都察觉不到差别。
@@ -28,6 +30,7 @@ var _wp_valid := false
 
 func _on_respawn() -> void:
 	_fall_speed = 0.0
+	_ground_lift = 0.0
 	_cooldown = 0.0
 	_attack = 0
 	_consumed = true
@@ -89,11 +92,34 @@ func use_ground_routes(move: Callable, support: Callable, waypoint: Callable) ->
 	_waypoint = waypoint
 
 
+func use_ground_pose(solve: Callable) -> void:
+	_ground_pose = solve
+
+
+func _restore_ground_base() -> void:
+	if not _ground_pose.is_valid():
+		return
+	rig.global_position -= Vector3.UP * _ground_lift
+	rig.rotation.x = 0.0
+	_ground_lift = 0.0
+
+
+func _fit_ground_pose() -> void:
+	if not _ground_pose.is_valid():
+		return
+	var pose: Vector2 = _ground_pose.call(rig.global_position, rig.rotation.y)
+	rig.rotation.x = pose.x
+	_ground_lift = pose.y
+	rig.global_position += Vector3.UP * _ground_lift
+
+
 func hurt(amount: float, normal := Vector3.UP, knock := 0.0) -> void:
 	if _ground_move.is_valid() and alive and amount > 0.0 and knock > 0.0:
+		_restore_ground_base()
 		var from: Vector3 = rig.global_position
 		var push := normal.slide(Vector3.UP).normalized() * knock
 		rig.global_position = _ground_move.call(from, from + push)
+		_fit_ground_pose()
 		_blade_now = _blade()
 		_blade_prev = _blade_now
 		knock = 0.0
@@ -137,6 +163,7 @@ func step(dt: float, ctx: Dictionary) -> void:
 	_guard_broken = maxf(0.0, _guard_broken - dt)
 	_cooldown = maxf(0.0, _cooldown - dt)
 	var pace := 0.0
+	_restore_ground_base()
 	var grounded := _settle_on_ground(dt)
 	var clip: String = rig.current_anim
 	if grounded and player != null and player.alive and level.state == "fight" and clip in ["idle", "run"]:
@@ -203,6 +230,8 @@ func step(dt: float, ctx: Dictionary) -> void:
 			rig.play_anim("idle")
 	rig.set_track_speed(pace / SCALE, pace / SCALE)
 	_blade_prev = _blade_now
+	if grounded:
+		_fit_ground_pose()
 	rig._process(dt)
 	_blade_now = _blade()
 

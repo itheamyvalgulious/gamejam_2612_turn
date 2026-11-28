@@ -421,6 +421,8 @@ func _r_support_at(pos: Vector3, ceiling := INF) -> float:
 		if _poly_contains(region["poly"], p):
 			best = h
 	for line in lines:
+		if not line.get("interpolate_support", true):
+			continue
 		var info := _line_info(line, p)
 		if info.is_empty():
 			continue
