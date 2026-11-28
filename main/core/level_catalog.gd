@@ -12,6 +12,7 @@ const LEVELS := [
 	["病房 · 夜班", "穿过病床区、中央隔墙和镜面走廊。", "ward", "", [], "night_ward", "room_shared"],
 	["坠击中庭 · 高低差", "下层有一名刀客。可在右侧楼梯利用高低差交战。", "galleria", "", ["--galleria-height-test"], "galleria_height_test"],
 	["三号船坞", "空间样段：沿地面黄色走道绕到东南气闸。甲板中央是 Boss 占位。", "hangar", "", [], "hangar", "room_shared"],
+	["轨道船背", "船尾实验室被炸开，沿 190 m 船背推进；清场、拆供能节点、穿过防空光闸，抵达船坞大门。", "space_hull", "", [], "space_hull", "room_shared"],
 ]
 
 static func level_count() -> int:
