@@ -82,7 +82,8 @@ func _check(idx: int, entry: Dictionary) -> int:
 	var spec: Dictionary = {}
 	for m in script.get_script_method_list():
 		if String(m.get("name", "")) == "nav_spec":
-			spec = script.nav_spec(arena)
+			# 各关 nav_spec 签名不统一：多数吃 arena，货舱 02 之类无参。
+			spec = script.nav_spec() if (m.get("args", []) as Array).is_empty() else script.nav_spec(arena)
 	var nav = NavField.build(arena, spec)
 	var st: Dictionary = nav.stats()
 	var conn: Dictionary = nav.connectivity()
