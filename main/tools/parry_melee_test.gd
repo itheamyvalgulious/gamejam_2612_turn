@@ -48,9 +48,21 @@ func _run() -> void:
 	pl_a.reset(Transform3D(Basis.IDENTITY, Vector3(0.0, 0.0, 4.0)))
 	if arc != null and arc.get("rig") != null:
 		arc.rig.global_position = Vector3(0.0, 0.0, 0.0)
+	var diag := "--diag" in OS.get_cmdline_user_args()
 	for _f in 1800:
 		pl_a.parry_timer = 1.0
 		await process_frame
+		if diag and arc != null and arc.is_attacking and _f >= 45 and _f <= 75:
+			var pspan: Vector2 = pl_a.rig.blade_span()
+			var s0: Vector3 = pl_a.rig.weapon_xf * Vector3(0, pspan.x, 0)
+			var s1: Vector3 = pl_a.rig.weapon_xf * Vector3(0, pspan.y, 0)
+			var bnow: Transform3D = arc._blade_now
+			var e0: Vector3 = bnow * Vector3(0, 0, 0)
+			var e1: Vector3 = bnow * Vector3(0, arc._blade_length, 0)
+			var seg_d: float = float(preload("res://core/active_parry.gd")._seg_seg(s0, s1, e0, e1)["d"])
+			print("f=%d t=%.3f atk=%s plan_pt=%s kind=%s left=%.3f seg_d=%.3f" % [
+				_f, float(arc.attack_elapsed), str(pl_a.rig.blade_path_active()),
+				str(pl_a._plan_point), str(pl_a._intercept_kind), float(pl_a._plan_left), seg_d])
 		if not pl_a.alive or int(pl_a.parry_stats.get("hits", 0)) > 0:
 			print("[parry-melee] ArcHIT frame=%d anim=%s t=%.3f dist=%.2f guard=%s label=%s" % [
 				_f, str(arc.rig.current_anim), float(arc.attack_elapsed),
@@ -65,6 +77,9 @@ func _run() -> void:
 		sw_a, bl_a, hi_a, str(pl_a.alive), str(pl_a.parry_stats), "PASS" if ok_a else "FAIL"])
 	if not ok_a:
 		fails += 1
+	if diag:
+		quit(0 if fails == 0 else 1)
+		return
 
 	# ---- Scenario B: 平地 vs Mech Duelist (lv9 lower floor, 35s) ----
 	var ctx_b := await _open_wait(9)

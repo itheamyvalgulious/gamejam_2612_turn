@@ -22,6 +22,8 @@ var floor_default := 0.0
 var regions: Array = []           # {id,poly(Vector2[],CCW),y0,y1,normal,center,aabb}
 var lines: Array = []             # {a,b,y0,y1,width,kind,connects,len,dir,perp,aabb}
 var obstacles: Array = []         # {poly(Vector2[])/aabb(AABB),y0,y1,pad,sight}
+var drop_links: Array = []        # {from_rect:Rect2,from_y:float,to_y:float}
+var phys_clear: Callable          # 可选物理净空回调: (pos: Vector3, radius: float, allow_air: bool) -> bool
 var _region_grid := {}            # Vector2i -> Array[int]
 var _obstacle_grid := {}          # Vector2i -> Array[int]
 var _adj := {}                    # region index -> Array[{to:int, link:String, line:int}]
@@ -31,6 +33,7 @@ var _adjacent_step := ADJACENT_STEP
 var _ob_y0 := PackedFloat64Array()
 var _ob_y1 := PackedFloat64Array()
 var _ob_actor := PackedByteArray()
+var _ob_region := PackedStringArray()
 var _ob_rect: Array = []
 var _ob_poly: Array = []
 var _ob_isrect := PackedByteArray()
@@ -109,6 +112,7 @@ func prof_dump() -> String:
 static func build(arena: Dictionary, spec: Dictionary = {}) -> RefCounted:
 	var field = new()
 	field.floor_default = float(spec.get("floor_default", arena.get("floor_y", 0.0)))
+	var explicit := bool(spec.get("explicit_surfaces", false))
 	var walkables := _box_set(arena.get("walkables", []))
 	var ignore_boxes: Array = []
 	for ib in spec.get("ignore_box", []):
@@ -116,87 +120,113 @@ static func build(arena: Dictionary, spec: Dictionary = {}) -> RefCounted:
 
 	# ---- 区域：显式 regions / arena.platforms / walkables 顶面 / 主地面 ----
 	for item in spec.get("regions", []):
-		var poly: PackedVector2Array = item["poly"]
+		var poly: PackedVector2Array = _to_poly(item["poly"]) if not (item["poly"] is PackedVector2Array) else item["poly"]
 		var y0: float = float(item.get("y0", 0.0))
 		var y1: float = float(item.get("y1", item.get("h", y0)))
-		field._add_region(poly, y0, y1, String(item.get("id", "")))
-	if bool(spec.get("platforms", true)):
-		for p in arena.get("platforms", []):
-			var c: Vector3 = p["c"]
-			var hx := float(p["hx"])
-			var hz := float(p["hz"])
-			var top := float(p["h"])
+		var rid := field._add_region(poly, y0, y1, String(item.get("id", "")))
+		if rid >= 0 and bool(item.get("allow_air", false)):
+			field.regions[rid]["allow_air"] = true
+	if not explicit:
+		if bool(spec.get("platforms", true)):
+			for p in arena.get("platforms", []):
+				var c: Vector3 = p["c"]
+				var hx := float(p["hx"])
+				var hz := float(p["hz"])
+				var top := float(p["h"])
+				field._add_region(PackedVector2Array([
+					Vector2(c.x - hx, c.z - hz), Vector2(c.x + hx, c.z - hz),
+					Vector2(c.x + hx, c.z + hz), Vector2(c.x - hx, c.z + hz)]), top, top, "")
+		var solids: Array = arena.get("solids", [])
+		for box: AABB in solids:
+			if not walkables.has(box):
+				continue
+			if _ignored(box, ignore_boxes):
+				continue
+			if box.size.x < 0.35 or box.size.z < 0.35:
+				continue
 			field._add_region(PackedVector2Array([
-				Vector2(c.x - hx, c.z - hz), Vector2(c.x + hx, c.z - hz),
-				Vector2(c.x + hx, c.z + hz), Vector2(c.x - hx, c.z + hz)]), top, top, "")
-	var solids: Array = arena.get("solids", [])
-	for box: AABB in solids:
-		if not walkables.has(box):
-			continue
-		if _ignored(box, ignore_boxes):
-			continue
-		if box.size.x < 0.35 or box.size.z < 0.35:
-			continue
-		field._add_region(PackedVector2Array([
-			Vector2(box.position.x, box.position.z), Vector2(box.end.x, box.position.z),
-			Vector2(box.end.x, box.end.z), Vector2(box.position.x, box.end.z)]), box.end.y, box.end.y, "")
+				Vector2(box.position.x, box.position.z), Vector2(box.end.x, box.position.z),
+				Vector2(box.end.x, box.end.z), Vector2(box.position.x, box.end.z)]), box.end.y, box.end.y, "")
 
-	var floor_y: float = field.floor_default
-	var floor_polys: Array = []
-	if spec.has("floor_polys"):
-		for item in spec["floor_polys"]:
-			floor_polys.append(item)
-	elif spec.has("floor_poly"):
-		floor_polys.append(spec["floor_poly"])
-	for item in floor_polys:
-		var poly := _to_poly(item)
-		field._add_region(poly, floor_y, floor_y, "floor")
-	if floor_polys.is_empty() and spec.has("floor_circle"):
-		var poly := PackedVector2Array()
-		var radius := float(spec["floor_circle"]) - float(spec.get("floor_margin", 0.0))
-		for i in 32:
-			var a := TAU * float(i) / 32.0
-			poly.append(Vector2(cos(a), sin(a)) * radius)
-		field._add_region(poly, floor_y, floor_y, "floor")
-	if floor_polys.is_empty() and not spec.has("floor_circle"):
-		var bounds: AABB = arena.get("bounds", AABB())
-		if bounds.size.length_squared() > 0.1:
-			var m := float(spec.get("floor_margin", 0.0))
-			field._add_region(PackedVector2Array([
-				Vector2(bounds.position.x + m, bounds.position.z + m),
-				Vector2(bounds.end.x - m, bounds.position.z + m),
-				Vector2(bounds.end.x - m, bounds.end.z - m),
-				Vector2(bounds.position.x + m, bounds.end.z - m)]), floor_y, floor_y, "floor")
+		var floor_y: float = field.floor_default
+		var floor_polys: Array = []
+		if spec.has("floor_polys"):
+			for item in spec["floor_polys"]:
+				floor_polys.append(item)
+		elif spec.has("floor_poly"):
+			floor_polys.append(spec["floor_poly"])
+		for item in floor_polys:
+			var poly := _to_poly(item)
+			field._add_region(poly, floor_y, floor_y, "floor")
+		if floor_polys.is_empty() and spec.has("floor_circle"):
+			var poly := PackedVector2Array()
+			var radius := float(spec["floor_circle"]) - float(spec.get("floor_margin", 0.0))
+			for i in 32:
+				var a := TAU * float(i) / 32.0
+				poly.append(Vector2(cos(a), sin(a)) * radius)
+			field._add_region(poly, floor_y, floor_y, "floor")
+		if floor_polys.is_empty() and not spec.has("floor_circle"):
+			var bounds: AABB = arena.get("bounds", AABB())
+			if bounds.size.length_squared() > 0.1:
+				var m := float(spec.get("floor_margin", 0.0))
+				field._add_region(PackedVector2Array([
+					Vector2(bounds.position.x + m, bounds.position.z + m),
+					Vector2(bounds.end.x - m, bounds.position.z + m),
+					Vector2(bounds.end.x - m, bounds.end.z - m),
+					Vector2(bounds.position.x + m, bounds.end.z - m)]), floor_y, floor_y, "floor")
 
 	# ---- 线：楼梯/坡道/攀爬 ----
 	for item in spec.get("lines", []):
 		field._add_line(item)
 
-	# ---- 障碍：solids（非 walkable 顶面为障碍体、walkable 侧面为可踩侧边）----
-	var cover_shrink := float(spec.get("cover_shrink", 1.2))
-	for box: AABB in solids:
-		if _ignored(box, ignore_boxes):
-			continue
-		var walk := walkables.has(box)
-		var pad := "none" if walk else "actor"
-		if walk and box.end.y <= field.floor_default + 0.06:
-			continue	# 贴地面的装饰板既不是面也不是障碍
-		if box.end.y <= field.floor_default + DEFAULT_STEP_HEIGHT and not walk:
-			continue	# 低于台阶高度的散件：脚下支持自然越过
-		field._add_obstacle_box(box, pad, true)
+	# ---- 单向跌落边（高台 → 下层）----
+	for dl in spec.get("drop_links", []):
+		field.drop_links.append(dl)
+
+	# ---- 面内 2D 挖空障碍（只作用于对应 surface_y / region_id，绝不跨层或挡住楼梯斜坡）----
+	for cut in spec.get("cutouts", []):
+		var sy := float(cut.get("surface_y", field.floor_default))
+		var sight := bool(cut.get("sight", false))
+		var h := float(cut.get("height", 2.8 if sight else 1.2))
+		var pad := String(cut.get("pad", "actor"))
+		var rid := String(cut.get("region_id", ""))
+		var poly: PackedVector2Array
+		if cut.has("rect"):
+			var rc: Rect2 = cut["rect"]
+			poly = PackedVector2Array([
+				rc.position, Vector2(rc.end.x, rc.position.y),
+				rc.end, Vector2(rc.position.x, rc.end.y)])
+		else:
+			poly = _to_poly(cut["poly"]) if not (cut["poly"] is PackedVector2Array) else cut["poly"]
+		field._add_obstacle_poly(poly, sy - 0.15, sy + h, pad, sight, rid)
+
+	# ---- 障碍：solids（仅非 explicit 模式自动导入）----
+	if not explicit:
+		var cover_shrink := float(spec.get("cover_shrink", 1.2))
+		var solids: Array = arena.get("solids", [])
+		for box: AABB in solids:
+			if _ignored(box, ignore_boxes):
+				continue
+			var walk := walkables.has(box)
+			var pad := "none" if walk else "actor"
+			if walk and box.end.y <= field.floor_default + 0.06:
+				continue	# 贴地面的装饰板既不是面也不是障碍
+			if box.end.y <= field.floor_default + DEFAULT_STEP_HEIGHT and not walk:
+				continue	# 低于台阶高度的散件：脚下支持自然越过
+			field._add_obstacle_box(box, pad, true)
+		if bool(spec.get("walls_obstacles", true)):
+			var wall_h := float(spec.get("wall_thickness", 0.6))
+			for w in arena.get("walls", []):
+				field._add_wall(w, wall_h, bool(spec.get("walls_sight", false)))
+		if bool(spec.get("cover_obstacles", true)):
+			for c in arena.get("cover", []):
+				var center: Vector3 = c["c"]
+				var r := maxf(0.15, float(c["r"]) - cover_shrink)
+				var base := float(c.get("base_y", center.y))
+				var poly := _circle_poly(Vector2(center.x, center.z), r, 8)
+				field._add_obstacle_poly(poly, base, base + float(c["h"]), "actor", true)
 	for item in spec.get("obstacles", []):
 		field._add_obstacle(item)
-	if bool(spec.get("walls_obstacles", true)):
-		var wall_h := float(spec.get("wall_thickness", 0.6))
-		for w in arena.get("walls", []):
-			field._add_wall(w, wall_h, bool(spec.get("walls_sight", false)))
-	if bool(spec.get("cover_obstacles", true)):
-		for c in arena.get("cover", []):
-			var center: Vector3 = c["c"]
-			var r := maxf(0.15, float(c["r"]) - cover_shrink)
-			var base := float(c.get("base_y", center.y))
-			var poly := _circle_poly(Vector2(center.x, center.z), r, 8)
-			field._add_obstacle_poly(poly, base, base + float(c["h"]), "actor", true)
 
 	field._index()
 	field._adjacent_step = float(spec.get("adjacent_step", ADJACENT_STEP))
@@ -308,13 +338,13 @@ func _add_wall(w: Dictionary, thickness: float, sight: bool) -> void:
 	_add_obstacle_poly(poly, base, top, "actor", sight)
 
 
-func _add_obstacle_poly(poly: PackedVector2Array, y0: float, y1: float, pad: String, sight: bool) -> void:
+func _add_obstacle_poly(poly: PackedVector2Array, y0: float, y1: float, pad: String, sight: bool, region_id := "") -> void:
 	if poly.size() < 3 or y1 - y0 < 0.05:
 		return
 	poly = _ccw(poly)
 	obstacles.append({
 		"poly": poly, "y0": y0, "y1": y1, "pad": pad, "sight": sight,
-		"aabb": _poly_aabb(poly),
+		"region_id": region_id, "aabb": _poly_aabb(poly),
 	})
 
 
@@ -354,12 +384,14 @@ func _index() -> void:
 	_ob_y0 = PackedFloat64Array()
 	_ob_y1 = PackedFloat64Array()
 	_ob_actor = PackedByteArray()
+	_ob_region = PackedStringArray()
 	_ob_rect = []
 	_ob_poly = []
 	for o: Dictionary in obstacles:
 		_ob_y0.append(float(o["y0"]))
 		_ob_y1.append(float(o["y1"]))
 		_ob_actor.append(1 if String(o["pad"]) == "actor" else 0)
+		_ob_region.append(String(o.get("region_id", "")))
 		_ob_rect.append(o["aabb"])
 		_ob_poly.append(o["poly"])
 	_ob_isrect = PackedByteArray()
@@ -548,7 +580,7 @@ func _region_link(a: Dictionary, b: Dictionary) -> Dictionary:
 	var share_z := minf(ra.end.y, rb.end.y) - maxf(ra.position.y, rb.position.y)
 	var touch_x := absf(ra.end.x - rb.position.x) < 0.05 or absf(rb.end.x - ra.position.x) < 0.05
 	var touch_z := absf(ra.end.y - rb.position.y) < 0.05 or absf(rb.end.y - ra.position.y) < 0.05
-	if (touch_x and share_z > 0.05) or (touch_z and share_x > 0.05):
+	if (touch_x and share_z > 0.05) or (touch_z and share_x > 0.05) or (share_x > 0.05 and share_z > 0.05):
 		return {"to": regions.find(b), "link": "edge", "line": -1}
 	return {}
 
@@ -602,7 +634,7 @@ func _r_region_at(pos: Vector3) -> int:
 	var best_h := -INF
 	for i in _region_candidates(p):
 		var region: Dictionary = regions[i]
-		if float(region["y0"]) > pos.y + 0.55:
+		if absf(float(region["y0"]) - pos.y) > 0.65:
 			continue
 		if not _poly_contains(region["poly"], p):
 			continue
@@ -707,11 +739,23 @@ func _nearest_on_poly(poly: PackedVector2Array, p: Vector2) -> Vector2:
 	return best
 
 
+func _region_tag_at(pos: Vector3) -> String:
+	if stair_at(pos, 0.35) >= 0:
+		return "__line__"
+	var ri := region_at(pos)
+	return String(regions[ri]["id"]) if ri >= 0 else ""
+
+
 ## 障碍阻挡判定：feet 高度 + 体高内与棱柱相交；pad=actor 按精确欧氏圆半径膨胀（圆角）。
-func _r_blocked_at(pos: Vector3, radius: float, step_height: float) -> bool:
+## region_id 非空时跳过绑定到其他 region 的挖空（"__line__" 跳过所有 region 绑定挖空）。
+func _r_blocked_at(pos: Vector3, radius: float, step_height: float, region_id := "") -> bool:
+	var rid := region_id if region_id != "" else _region_tag_at(pos)
 	var p := Vector2(pos.x, pos.z)
 	var head := pos.y + STANCE_HEIGHT
 	for i: int in _pt_obstacles(p, radius + 0.1):
+		var orid := _ob_region[i]
+		if orid != "" and rid != "" and orid != rid:
+			continue
 		if pos.y >= _ob_y1[i] - step_height or head <= _ob_y0[i] + 0.02:
 			continue
 		if _ob_within(i, p, radius if _ob_actor[i] != 0 else 0.0):
@@ -720,18 +764,22 @@ func _r_blocked_at(pos: Vector3, radius: float, step_height: float) -> bool:
 
 
 ## 竖直圆柱净空（旧 _duelist_body_clear 的元信息版）。
-func _blocked_at(pos: Vector3, radius: float, step_height: float) -> bool:
+func _blocked_at(pos: Vector3, radius: float, step_height: float, region_id := "") -> bool:
 	if _prof_on or _prof_tick():
 		var _t0 := Time.get_ticks_usec()
-		var _r: bool = _r_blocked_at(pos, radius, step_height)
+		var _r: bool = _r_blocked_at(pos, radius, step_height, region_id)
 		_prof_add("_blocked_at", _t0)
 		return _r
-	return _r_blocked_at(pos, radius, step_height)
+	return _r_blocked_at(pos, radius, step_height, region_id)
 
 
 func _r_column_clear(at: Vector3, radius: float, bottom: float, top: float) -> bool:
+	var rid := _region_tag_at(at)
 	var p := Vector2(at.x, at.z)
 	for i: int in _pt_obstacles(p, radius + 0.1):
+		var orid := _ob_region[i]
+		if orid != "" and rid != "" and orid != rid:
+			continue
 		if at.y + top <= _ob_y0[i] or at.y + bottom >= _ob_y1[i]:
 			continue
 		if _ob_within(i, p, radius if _ob_actor[i] != 0 else 0.0):
@@ -805,19 +853,56 @@ func move_clear(from: Vector3, to: Vector3, radius: float,
 		and absf(landed.y - to.y) <= step_height + 0.15
 
 
+func _is_air_region_at(pos: Vector3) -> bool:
+	var p := Vector2(pos.x, pos.z)
+	for region: Dictionary in regions:
+		if not bool(region.get("allow_air", false)):
+			continue
+		if absf(float(region["y0"]) - pos.y) > 0.65:
+			continue
+		if _poly_margin(region["poly"], p) >= 0.0:
+			return true
+	return false
+
+
+func _point_walkable(pos: Vector3, radius: float, step_height: float,
+		upper: Dictionary, allow_air_goal := false) -> bool:
+	var sup := support_at(pos, pos.y + step_height)
+	if sup < -INF * 0.5 or absf(sup - pos.y) > step_height + 0.65:
+		return false
+	var q := Vector3(pos.x, sup, pos.z)
+	if not allow_air_goal and _is_air_region_at(q):
+		return false
+	if _blocked_at(q, radius, step_height):
+		return false
+	if not upper.is_empty() and not column_clear(q, float(upper["radius"]),
+			float(upper["bottom"]), float(upper["top"])):
+		return false
+	if phys_clear.is_valid():
+		var allow_phys_air := allow_air_goal or stair_at(q, 0.4) >= 0
+		if not bool(phys_clear.call(q, radius, allow_phys_air)):
+			return false
+	return true
+
+
 ## 若起点被推入障碍膨胀区或悬空边缘，沿最短脱离方向推回合法站立点。
 func depenetrate(pos: Vector3, radius: float, step_height := DEFAULT_STEP_HEIGHT,
 		upper: Dictionary = {}) -> Vector3:
 	var sup0 := support_at(pos, pos.y + step_height)
-	var cur := Vector3(pos.x, sup0 if sup0 > -INF * 0.5 else pos.y, pos.z)
-	if sup0 > -INF * 0.5 and not _blocked_at(cur, radius, step_height) \
+	var same_floor := sup0 > -INF * 0.5 and absf(sup0 - pos.y) <= step_height + 0.65
+	var cur := Vector3(pos.x, sup0 if same_floor else pos.y, pos.z)
+	if same_floor and not _blocked_at(cur, radius, step_height) \
 			and (upper.is_empty() or column_clear(cur, float(upper["radius"]),
 				float(upper["bottom"]), float(upper["top"]))):
 		return cur
 	var p := Vector2(cur.x, cur.z)
 	var head := cur.y + STANCE_HEIGHT
+	var rid := _region_tag_at(cur)
 	for i in _obstacle_candidates(Rect2(p, Vector2.ZERO).grow(radius + 0.5)):
 		var o: Dictionary = obstacles[i]
+		var orid := String(o.get("region_id", ""))
+		if orid != "" and rid != "" and orid != rid:
+			continue
 		if cur.y >= float(o["y1"]) - step_height or head <= float(o["y0"]) + 0.02:
 			continue
 		var pad := radius if String(o["pad"]) == "actor" else 0.0
@@ -844,24 +929,124 @@ func depenetrate(pos: Vector3, radius: float, step_height := DEFAULT_STEP_HEIGHT
 				p += best_n * (best_d + pad + 0.03)
 	var cand := Vector3(p.x, cur.y, p.y)
 	var s_cand := support_at(cand, cur.y + step_height)
-	if s_cand > -INF * 0.5:
+	# 水平去穿透不得把人送下楼层（例如二楼边缘护栏推出楼板外直接掉到一楼）
+	if s_cand > -INF * 0.5 and absf(s_cand - cur.y) <= step_height + 0.35:
 		cand.y = s_cand
 		if not _blocked_at(cand, radius, step_height) and (upper.is_empty()
 				or column_clear(cand, float(upper["radius"]), float(upper["bottom"]), float(upper["top"]))):
 			return cand
-	# 兜底：8 方向小半径采样最近可站点
-	for r_off in [0.35, 0.75, 1.35]:
+	# 兜底：8 方向小半径采样最近可站点（半径需能跨出膨胀障碍带，同时保持同层）
+	for r_off in [0.35, 0.75, 1.35, radius * 1.6]:
 		for k in 8:
 			var ang := TAU * float(k) / 8.0
 			var probe := Vector3(pos.x + cos(ang) * r_off, pos.y, pos.z + sin(ang) * r_off)
-			var sp := support_at(probe, pos.y + step_height)
-			if sp < -INF * 0.5:
+			var sp := support_at(probe, cur.y + step_height)
+			if sp < -INF * 0.5 or absf(sp - cur.y) > step_height + 0.35:
 				continue
 			probe.y = sp
 			if not _blocked_at(probe, radius, step_height) and (upper.is_empty()
 					or column_clear(probe, float(upper["radius"]), float(upper["bottom"]), float(upper["top"]))):
 				return probe
-	return pos
+	return cur
+
+
+func _refine_goal_boundary(anchor: Vector3, raw_pos: Vector3, radius: float,
+		step_height: float, upper: Dictionary, allow_air_goal: bool) -> Vector3:
+	var lo := anchor
+	var hi := Vector3(raw_pos.x, anchor.y, raw_pos.z)
+	for _step in 4:
+		var mid := lo.lerp(hi, 0.5)
+		var sm := support_at(mid, anchor.y + step_height)
+		if sm > -INF * 0.5 and absf(sm - anchor.y) <= step_height + 0.35:
+			var cand := Vector3(mid.x, sm, mid.z)
+			if _point_walkable(cand, radius, step_height, upper, allow_air_goal) \
+					and move_clear(anchor, cand, radius, step_height, 0.6, upper):
+				lo = cand
+				continue
+		hi = mid
+	return lo
+
+
+## 将任意世界坐标（如玩家位置）投影到同层最近的可走导航点。
+func project_goal(pos: Vector3, radius: float, step_height := DEFAULT_STEP_HEIGHT,
+		upper: Dictionary = {}, allow_air_goal := false) -> Vector3:
+	var sup0 := support_at(pos, pos.y + step_height)
+	if sup0 > -INF * 0.5 and absf(sup0 - pos.y) <= 1.25:
+		var direct := Vector3(pos.x, sup0, pos.z)
+		if _point_walkable(direct, radius, step_height, upper, allow_air_goal):
+			return direct
+	var dep := depenetrate(pos, radius, step_height, upper)
+	if absf(dep.y - pos.y) <= 1.25 and _point_walkable(dep, radius, step_height, upper, allow_air_goal):
+		if (dep - pos).slide(Vector3.UP).length_squared() > 1.0:
+			return _refine_goal_boundary(dep, pos, radius, step_height, upper, allow_air_goal)
+		return dep
+	var graph := _get_graph(radius, step_height, upper)
+	var nodes: Array = graph["nodes"]
+	if nodes.is_empty():
+		return dep
+	var best_idx := -1
+	var best_score := INF
+	# Pass 1: 严格同层最近节点（楼梯节点仅在玩家确实靠近楼梯时算同层，避免站在展柜顶等高处时被 40u 外的楼梯吸走）
+	for i in nodes.size():
+		var p: Vector3 = nodes[i]["pos"]
+		if absf(p.y - pos.y) > 1.5:
+			continue
+		if not allow_air_goal and _is_air_region_at(p):
+			continue
+		var d2_xz := (p - pos).slide(Vector3.UP).length_squared()
+		if d2_xz > 36.0 and stair_at(p, 0.4) >= 0:
+			continue
+		var d2 := p.distance_squared_to(pos)
+		if d2 < best_score:
+			best_score = d2
+			best_idx = i
+	# Pass 2: 兜底（如玩家站在 2.8u 展柜顶或空中时找下方最近可达节点）
+	if best_idx < 0:
+		for i in nodes.size():
+			var p: Vector3 = nodes[i]["pos"]
+			if p.y > pos.y + 1.5:
+				continue
+			if not allow_air_goal and _is_air_region_at(p):
+				continue
+			var dy := p.y - pos.y
+			var score := (p - pos).slide(Vector3.UP).length_squared() + 4.0 * dy * dy
+			if score < best_score:
+				best_score = score
+				best_idx = i
+	if best_idx < 0:
+		for i in nodes.size():
+			var p: Vector3 = nodes[i]["pos"]
+			if not allow_air_goal and _is_air_region_at(p):
+				continue
+			var d2 := p.distance_squared_to(pos)
+			if d2 < best_score:
+				best_score = d2
+				best_idx = i
+	if best_idx < 0:
+		for i in nodes.size():
+			var p: Vector3 = nodes[i]["pos"]
+			var d2 := p.distance_squared_to(pos)
+			if d2 < best_score:
+				best_score = d2
+				best_idx = i
+	if best_idx < 0:
+		return dep
+	var best_pos: Vector3 = nodes[best_idx]["pos"]
+	if absf(best_pos.y - pos.y) <= 1.5:
+		var lo := best_pos
+		var hi := Vector3(pos.x, best_pos.y, pos.z)
+		for _step in 4:
+			var mid := lo.lerp(hi, 0.5)
+			var sm := support_at(mid, best_pos.y + step_height)
+			if sm > -INF * 0.5 and absf(sm - best_pos.y) <= step_height + 0.35:
+				var cand := Vector3(mid.x, sm, mid.z)
+				if _point_walkable(cand, radius, step_height, upper, allow_air_goal) \
+						and move_clear(best_pos, cand, radius, step_height, 0.6, upper):
+					lo = cand
+					continue
+			hi = mid
+		return lo
+	return best_pos
 
 
 func _step_valid(cur: Vector3, target_xz: Vector3, radius: float,
@@ -875,6 +1060,14 @@ func _step_valid(cur: Vector3, target_xz: Vector3, radius: float,
 	if not upper.is_empty() and not column_clear(cand, float(upper["radius"]),
 			float(upper["bottom"]), float(upper["top"])):
 		return Vector3.INF
+	if phys_clear.is_valid():
+		var allow_air := stair_at(cand, 0.4) >= 0
+		if not allow_air:
+			var ri := region_at(cand)
+			if ri >= 0 and bool(regions[ri].get("allow_air", false)):
+				allow_air = true
+		if not bool(phys_clear.call(cand, radius, allow_air)):
+			return Vector3.INF
 	return cand
 
 
@@ -1075,6 +1268,11 @@ const ANCHOR_CELL := 6.0
 const ANCHOR_RADIUS := 6.0
 
 
+func clear_graphs() -> void:
+	_graphs.clear()
+	_path_cache.clear()
+
+
 func prewarm_graph(radius: float, step_height := DEFAULT_STEP_HEIGHT, upper: Dictionary = {}) -> void:
 	_get_graph(radius, step_height, upper)
 
@@ -1092,9 +1290,12 @@ func _get_graph(radius: float, step_height: float, upper: Dictionary) -> Diction
 	var u_bot := float(upper.get("bottom", 0.0))
 	var u_top := float(upper.get("top", 0.0))
 
+	var has_phys := phys_clear.is_valid()
 	# 1. 每个 region 采样网格点
 	for ri in regions.size():
 		var region: Dictionary = regions[ri]
+		var rid := String(region["id"])
+		var allow_air := bool(region.get("allow_air", false))
 		var aabb: Rect2 = region["aabb"]
 		var ry := float(region["y0"])
 		var poly: PackedVector2Array = region["poly"]
@@ -1109,9 +1310,11 @@ func _get_graph(radius: float, step_height: float, upper: Dictionary) -> Diction
 				if not _poly_contains(poly, p2):
 					continue
 				var p3 := Vector3(p2.x, ry, p2.y)
-				if _blocked_at(p3, radius, step_height):
+				if _blocked_at(p3, radius, step_height, rid):
 					continue
 				if has_upper and not column_clear(p3, u_rad, u_bot, u_top):
+					continue
+				if has_phys and not bool(phys_clear.call(p3, radius, allow_air)):
 					continue
 				var nid := nodes.size()
 				nodes.append({"pos": p3, "ri": ri, "li": -1, "nbrs": []})
@@ -1119,7 +1322,9 @@ func _get_graph(radius: float, step_height: float, upper: Dictionary) -> Diction
 		if grid.is_empty():
 			var c2: Vector2 = region["center"]
 			var c3 := Vector3(c2.x, ry, c2.y)
-			if not _blocked_at(c3, radius, step_height) and (not has_upper or column_clear(c3, u_rad, u_bot, u_top)):
+			if not _blocked_at(c3, radius, step_height, rid) \
+					and (not has_upper or column_clear(c3, u_rad, u_bot, u_top)) \
+					and (not has_phys or bool(phys_clear.call(c3, radius, allow_air))):
 				var nid := nodes.size()
 				nodes.append({"pos": c3, "ri": ri, "li": -1, "nbrs": []})
 				grid[Vector2i(0, 0)] = nid
@@ -1138,13 +1343,17 @@ func _get_graph(radius: float, step_height: float, upper: Dictionary) -> Diction
 				var id_b: int = grid[nk]
 				var pb: Vector3 = nodes[id_b]["pos"]
 				var mid := (pa + pb) * 0.5
-				var ok := not _blocked_at(mid, radius, step_height) and (not has_upper or column_clear(mid, u_rad, u_bot, u_top))
+				var ok := not _blocked_at(mid, radius, step_height, rid) and (not has_upper or column_clear(mid, u_rad, u_bot, u_top))
+				if ok and has_phys:
+					ok = bool(phys_clear.call(mid, radius, allow_air))
 				if ok and d.x != 0 and d.y != 0:
 					var q1 := pa.lerp(pb, 0.25)
 					var q3 := pa.lerp(pb, 0.75)
-					ok = not _blocked_at(q1, radius, step_height) and not _blocked_at(q3, radius, step_height)
+					ok = not _blocked_at(q1, radius, step_height, rid) and not _blocked_at(q3, radius, step_height, rid)
 					if ok and has_upper:
 						ok = column_clear(q1, u_rad, u_bot, u_top) and column_clear(q3, u_rad, u_bot, u_top)
+					if ok and has_phys:
+						ok = bool(phys_clear.call(q1, radius, allow_air)) and bool(phys_clear.call(q3, radius, allow_air))
 				if ok:
 					var cost := pa.distance_to(pb)
 					(nodes[id_a]["nbrs"] as Array).append({"to": id_b, "cost": cost})
@@ -1201,9 +1410,11 @@ func _get_graph(radius: float, step_height: float, upper: Dictionary) -> Diction
 			var t := float(si) / float(steps)
 			var p2 := (line["a"] as Vector2).lerp(line["b"] as Vector2, t)
 			var p3 := Vector3(p2.x, lerpf(float(line["y0"]), float(line["y1"]), t), p2.y)
-			if _blocked_at(p3, radius, step_height):
+			if _blocked_at(p3, radius, step_height, "__line__"):
 				continue
 			if has_upper and not column_clear(p3, u_rad, u_bot, u_top):
+				continue
+			if has_phys and not bool(phys_clear.call(p3, radius, true)):
 				continue
 			var nid := nodes.size()
 			nodes.append({"pos": p3, "ri": -1, "li": li, "nbrs": []})
@@ -1217,24 +1428,24 @@ func _get_graph(radius: float, step_height: float, upper: Dictionary) -> Diction
 			(nodes[ia]["nbrs"] as Array).append({"to": ib, "cost": cost})
 			(nodes[ib]["nbrs"] as Array).append({"to": ia, "cost": cost})
 		l_cells[li] = l_ids
-		# 将 line 端点与附近同层 region 节点连接
+		# 将 line 端点与附近同层 region 节点连接（最多取 3 个最近可达点，保证多角度出入顺畅）
 		for end_id in ([l_ids[0], l_ids[-1]] if not l_ids.is_empty() else []):
 			var pe: Vector3 = nodes[int(end_id)]["pos"]
 			for ri in regions.size():
 				if absf(float(regions[ri]["y0"]) - pe.y) > 0.65:
 					continue
 				var ga: Dictionary = r_cells.get(ri, {})
-				var best_r := -1
-				var best_d := 16.0
+				var end_cands: Array = []
 				for ka in ga:
 					var idr: int = ga[ka]
 					var pr: Vector3 = nodes[idr]["pos"]
 					var d2 := pe.distance_squared_to(pr)
-					if d2 < best_d and move_clear(pe, pr, radius, step_height, 0.6, upper):
-						best_d = d2
-						best_r = idr
-				if best_r >= 0:
-					var cost := sqrt(best_d)
+					if d2 < 36.0 and move_clear(pe, pr, radius, step_height, 0.6, upper):
+						end_cands.append(Vector2(d2, idr))
+				end_cands.sort()
+				for ci in mini(4, end_cands.size()):
+					var best_r := int(end_cands[ci].y)
+					var cost := sqrt(float(end_cands[ci].x))
 					(nodes[int(end_id)]["nbrs"] as Array).append({"to": best_r, "cost": cost})
 					(nodes[best_r]["nbrs"] as Array).append({"to": int(end_id), "cost": cost})
 
@@ -1249,6 +1460,32 @@ func _get_graph(radius: float, step_height: float, upper: Dictionary) -> Diction
 			var j := int(e["to"])
 			if j > i:
 				astar.connect_points(i, j, true)
+	# 4. 单向跌落边（上层延伸面 → 下层地面）：只许下跳，不许逆向爬墙
+	for dl: Dictionary in drop_links:
+		var rc: Rect2 = dl["from_rect"]
+		var from_y := float(dl["from_y"])
+		var to_y := float(dl["to_y"])
+		var low_nodes: Array = []
+		for vi in nodes.size():
+			var vp: Vector3 = nodes[vi]["pos"]
+			if absf(vp.y - to_y) <= 0.65:
+				low_nodes.append(vi)
+		for ui in nodes.size():
+			var up: Vector3 = nodes[ui]["pos"]
+			if absf(up.y - from_y) > 0.65:
+				continue
+			if not rc.has_point(Vector2(up.x, up.z)):
+				continue
+			var best_v := -1
+			var best_d2 := 12.25  # 3.5u^2
+			for vi: int in low_nodes:
+				var vp: Vector3 = nodes[vi]["pos"]
+				var d2 := (up - vp).slide(Vector3.UP).length_squared()
+				if d2 < best_d2:
+					best_d2 = d2
+					best_v = vi
+			if best_v >= 0:
+				astar.connect_points(ui, best_v, false)
 	var node_cells := {}
 	for i in nodes.size():
 		var p: Vector3 = nodes[i]["pos"]
@@ -1302,8 +1539,11 @@ func _graph_path(from: Vector3, goal: Vector3, radius: float,
 	if nodes.is_empty():
 		return []
 	var start_pos := depenetrate(from, radius, step_height, upper)
-	var goal_pos := depenetrate(goal, radius, step_height, upper)
+	var goal_pos := project_goal(goal, radius, step_height, upper, false)
 	var starts := _graph_anchors(graph, start_pos, radius, step_height, upper)
+	if starts.is_empty():
+		start_pos = project_goal(from, radius, step_height, upper, true)
+		starts = _graph_anchors(graph, start_pos, radius, step_height, upper)
 	var goals := _graph_anchors(graph, goal_pos, radius, step_height, upper)
 	if starts.is_empty() or goals.is_empty():
 		return []
@@ -1333,7 +1573,7 @@ func _graph_path(from: Vector3, goal: Vector3, radius: float,
 func _path_uncached(from: Vector3, goal: Vector3, radius: float,
 		step_height := DEFAULT_STEP_HEIGHT, upper: Dictionary = {}) -> Array:
 	var start := depenetrate(from, radius, step_height, upper)
-	var target := depenetrate(goal, radius, step_height, upper)
+	var target := project_goal(goal, radius, step_height, upper, false)
 	if move_clear(start, target, radius, step_height, 0.6, upper):
 		return [target]
 	var route := _graph_path(start, target, radius, step_height, upper)
@@ -1376,13 +1616,14 @@ func path(from: Vector3, goal: Vector3, radius: float,
 
 func _r_next_waypoint(from: Vector3, goal: Vector3, radius: float,
 		step_height := DEFAULT_STEP_HEIGHT, pull := 0.0, upper: Dictionary = {}) -> Vector3:
-	var heading := (goal - from).slide(Vector3.UP)
-	if pull > 0.0 and absf(goal.y - from.y) <= step_height + 0.15 and heading.length() > pull:
+	var nav_goal := project_goal(goal, radius, step_height, upper, false)
+	var heading := (nav_goal - from).slide(Vector3.UP)
+	if pull > 0.0 and absf(nav_goal.y - from.y) <= step_height + 0.15 and heading.length() > pull:
 		var probe := from + heading.limit_length(pull)
 		var reach := move_supported(from, probe, radius, step_height, 0.6, upper)
 		if (reach - probe).slide(Vector3.UP).length() < 0.06 and absf(reach.y - probe.y) <= step_height + 0.15:
 			return probe
-	var pts := path(from, goal, radius, step_height, upper)
+	var pts := path(from, nav_goal, radius, step_height, upper)
 	if pts.is_empty():
 		return from
 	# 找最远的「从 from 可直接走到」的拉直点。拉直路径上相邻点互为可走，
@@ -1518,7 +1759,7 @@ func _r_route(from: Vector3, goal: Vector3, radius: float, step_height: float,
 		var is_goal := _node_key(b_node) == _node_key(goal_node)
 		if String(a_node["kind"]) == "line":
 			# 已在 line 上：爬升段算走完，落点取 line 端或 goal 在线上的投影。
-			if is_goal:
+			if is_goal and String(b_node["kind"]) == "line":
 				var exit := _line_exit_for_goal(b_node, goal)
 				if (exit - cursor).slide(Vector3.UP).length() > 0.05:
 					pts.append(exit)
