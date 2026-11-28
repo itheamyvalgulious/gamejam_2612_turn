@@ -573,7 +573,6 @@ func _r_support_at(pos: Vector3, ceiling := INF) -> float:
 		var t := rel.dot(_line_dir[li])
 		var length := _line_len[li]
 		if t < 0.0 or t > length:
->>>>>>> 6950d79 (perf(nav): 中庭追击寻路消除单帧尖峰——AStar3D 图搜索 + 扁平热表 + 路点二分 + 规划预算)
 			continue
 		if absf(rel.dot(_line_perp[li])) > _line_half[li]:
 			continue
