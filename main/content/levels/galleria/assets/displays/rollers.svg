@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 1024 512">
+  <defs>
+    <pattern id="sample" width="42" height="32" patternUnits="userSpaceOnUse"><path d="M42 0H0V32" fill="none" stroke="#253a41" stroke-width="2"/></pattern>
+  </defs>
+  <path d="M47 116h930" stroke="#3b525b" stroke-width="2"/>
+  <path d="M78 302h852v71H78z" fill="#243036" stroke="#769098" stroke-width="3"/>
+  <path d="M93 330h818v15H93z" fill="#17252b"/>
+  <path d="M115 307v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58m30-58v58" stroke="#576e75" stroke-width="4"/>
+  <path d="M143 304v-84h166v84m38 0v-84h166v84m38 0v-84h166v84m37 0v-84h142v84" stroke="#374f56" stroke-width="4" fill="none"/>
+  <path d="M106 408h811M106 399v18m811-18v18m-421-18v18" stroke="#547078" stroke-width="2"/>
+</svg>

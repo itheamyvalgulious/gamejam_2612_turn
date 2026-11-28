@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 1024 512">
+  <defs>
+    <pattern id="sample" width="42" height="32" patternUnits="userSpaceOnUse"><path d="M42 0H0V32" fill="none" stroke="#253a41" stroke-width="2"/></pattern>
+  </defs>
+  <path d="M47 116h930" stroke="#3b525b" stroke-width="2"/>
+  <path d="M47 154h930v58H47zm0 68h930v63H47zm0 73h930v63H47z" fill="#16242a"/>
+  <path d="M48 155h930m-930 202h930m-930 48h930m-930 44h930M492 154v204M761 154v204" stroke="#30454c" stroke-width="2"/>
+  <path d="M49 155h13v57H49zm0 67h6v63h-6zm0 73h6v63h-6z" fill="#9aa7a5"/>
+  <path d="M518 397v60m22-60v60m5-60v60m19-60v60m13-60v60m6-60v60m12-60v60m17-60v60m6-60v60m7-60v60m14-60v60m20-60v60m10-60v60m15-60v60m7-60v60m20-60v60m10-60v60m22-60v60m10-60v60m7-60v60m20-60v60m10-60v60m14-60v60m26-60v60m14-60v60m9-60v60m15-60v60m7-60v60m12-60v60m30-60v60m9-60v60m19-60v60m15-60v60m8-60v60" fill="none" stroke="#7b9195" stroke-width="4"/>
+  <path d="M940 246h17v17h-17zm0 74h17v17h-17z" fill="#829d9e"/>
+</svg>

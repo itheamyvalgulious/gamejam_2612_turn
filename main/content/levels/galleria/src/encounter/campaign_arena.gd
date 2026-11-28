@@ -2,6 +2,7 @@ extends "res://src/encounter/art.gd"
 ## The campaign deck keeps the established drop and stair heights.
 
 const Controls = preload("res://src/encounter/gallery_controls.gd")
+const Displays = preload("res://src/encounter/atrium_displays.gd")
 const HALF_WIDTH := 36.0
 const HALF_DEPTH := 32.0
 const CAMPAIGN_HALF_WIDTH := 41.5
@@ -20,6 +21,7 @@ const LAB_EXIT := Rect2(-LAB_PASSAGE_HALF_WIDTH, -39.0, LAB_PASSAGE_HALF_WIDTH *
 const LANDING := Vector3(0, 0, 12.1)
 
 var controls := Controls.new()
+var displays := Displays.new()
 
 
 func build_campaign() -> Dictionary:
@@ -80,7 +82,6 @@ func _materials() -> void:
 		"rough_bias": 0.24, "wear_amount": 0.24}))
 	kit.material("upholstery", shader_mat("wall", {"base_col": Color("657b83"),
 		"trim_col": Color("404d55"), "style": 2, "grime": 0.14}))
-	kit.material("glass", shader_mat("glazing", {"glass_tint": Color("344551"), "weathering": 0.12}))
 	var soffit := StandardMaterial3D.new()
 	soffit.albedo_color = Color("5b626a")
 	soffit.metallic = 0.30
@@ -111,8 +112,11 @@ func _build_shell() -> void:
 			block("frame", Vector3(0.81, 25, 0.55), rib)
 			block("metal", Vector3(0.87, 0.43, 0.72), rib - Vector3.UP * 11.92, false)
 			block("metal", Vector3(0.87, 0.52, 0.72), rib + Vector3.UP * 11.84, false)
-		for z in [-17.6, 0.0, 17.6]:
-			_upper_observation_bays(Vector3(x - side * 0.53, 16.50, z), side)
+		var screen_x: float = x - side * 0.53
+		var yaw: float = -side * PI * 0.5
+		var subjects := ["maintenance", "rollers", "supply"] if side < 0.0 else ["stairs", "habitat", "airlock"]
+		for i in subjects.size():
+			_wall_display(Vector3(screen_x, 16.50, (i - 1) * 17.6), yaw, 12.0, subjects[i])
 	block("wall", Vector3(span, 25, 0.90), Vector3(0, 12.50, 32.45))
 	block("wall", Vector3(span, 17.0, 0.90), Vector3(0, 16.50, -32.45))
 	for side in [-1.0, 1.0]:
@@ -133,18 +137,14 @@ func _build_shell() -> void:
 			block("warm", Vector3(0.068, 0.25, 0.91), Vector3(x - side * 0.60, 2.45, position_z), false)
 
 
-func _upper_observation_bays(at: Vector3, side: float) -> void:
-	block("dark", Vector3(0.22, 6.9, 13.64), at, false)
-	block("glass", Vector3(0.13, 5.96, 12.75), at + Vector3.LEFT * (side * 0.14), false)
-	for y in [-3.08, 3.08]:
-		block("frame", Vector3(0.34, 0.27, 13.35), at + Vector3(-side * 0.14, y, 0), false)
-	for z in [-6.51, -2.17, 2.17, 6.51]:
-		block("frame", Vector3(0.41, 6.14, 0.21), at + Vector3(-side * 0.16, 0, z), false)
-	for z in [-4.33, 0.0, 4.33]:
-		block("metal", Vector3(0.25, 0.18, 3.76), at + Vector3(-side * 0.21, -2.81, z), false)
-		block("white", Vector3(0.03, 0.065, 3.24), at + Vector3(-side * 0.212, 2.53, z), false)
-		for y in [-2.61, -2.43, -2.25]:
-			block("dark", Vector3(0.045, 0.046, 3.60), at + Vector3(-side * 0.245, y, z), false)
+func _wall_display(at: Vector3, yaw: float, width: float, subject: String,
+		stand_off := 0.45) -> void:
+	var instrument := displays.mount(root, kit, at, yaw, width, subject, stand_off)
+	if subject == Displays.INTERLOCK:
+		controls.wall_interlock = instrument["status"]
+		controls.wall_interlock_material = instrument["material"]
+	elif subject == Displays.ACTUATOR:
+		controls.door_actuator = instrument
 
 
 func _arrival() -> void:
@@ -566,12 +566,10 @@ func _research_bulkhead() -> void:
 	block("metal", Vector3(16.85, 0.10, 0.16), Vector3(0, 14.62, -30.91), false)
 	for x in [-6.72, 6.72]:
 		_duct(Vector3(x, 11.94, -31.01), 0.0, 3.56, "RESEARCH RETURN")
-	for x in [-31.7, -20.7, 20.7, 31.7]:
-		block("panel_ship", Vector3(10.75, 5.7, 0.24), Vector3(x, 18.25, -31.87), false)
-		block("frame", Vector3(10.9, 0.25, 0.37), Vector3(x, 15.40, -31.79), false)
-		block("frame", Vector3(10.9, 0.25, 0.37), Vector3(x, 21.13, -31.79), false)
-		for dx in [-4.70, 4.70]:
-			block("metal", Vector3(0.077, 4.76, 0.085), Vector3(x + dx, 18.25, -31.721), false)
+	_wall_display(Vector3(-31.7, 18.25, -31.87), 0.0, 10.0, "air_handling", 0.67)
+	_wall_display(Vector3(-20.7, 18.25, -31.87), 0.0, 10.0, Displays.INTERLOCK, 0.67)
+	_wall_display(Vector3(20.7, 18.25, -31.87), 0.0, 10.0, Displays.ACTUATOR, 0.67)
+	_wall_display(Vector3(31.7, 18.25, -31.87), 0.0, 10.0, "power", 0.67)
 	for x in [-12.6, 12.6, -17.25, 17.25]:
 		var column := Vector3(x, 11.25, -31.5)
 		block("frame", Vector3(0.66, 22.50, 0.65), column, false)

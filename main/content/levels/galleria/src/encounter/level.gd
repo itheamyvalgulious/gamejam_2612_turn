@@ -132,7 +132,8 @@ func step(dt: float, ctx: Dictionary) -> void:
 	state_t += dt
 	if arena.has("controls"):
 		arena["controls"].step(dt, cam.fp_transform(), geometry,
-			player.alive and state in ["fight", "clear"], enemies, _lab_lift >= 4.65)
+			player.alive and state in ["fight", "clear"], enemies, _lab_lift >= 4.65,
+			_lab_lift / SceneArena.LAB_GATE_STROKE)
 	if state in ["fight", "clear"]:
 		for enemy in enemies:
 			enemy.step(dt, ctx)

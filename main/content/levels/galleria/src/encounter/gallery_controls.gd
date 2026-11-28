@@ -9,6 +9,11 @@ const CONTACT_DEPTH := 0.10
 var directory: Dictionary
 var supply: Dictionary
 var interlock: Dictionary
+var wall_interlock: Label3D
+var wall_interlock_material: ShaderMaterial
+var _wall_interlock_state := -1
+var door_actuator: Dictionary
+var _actuator_percent := -1
 var _prompt: Label3D
 var _scan_left := 0.0
 var _door_open := false
@@ -40,16 +45,18 @@ func reset() -> void:
 	supply["status"].text = "货舱 02  /  补给查验"
 	interlock["screen"].hide()
 	interlock["trace"].hide()
+	_set_wall_interlock("安全闭锁", Color("cfb18b"), 0)
+	_update_actuator(0.0)
 
 
 func step(dt: float, eye: Transform3D, geometry: Geometry, enabled: bool,
-		enemies: Array, door_open: bool) -> void:
+		enemies: Array, door_open: bool, door_travel: float) -> void:
 	_door_open = door_open
 	_step_supply(dt)
 	if directory["model"].visible:
 		_update_deck_contacts(enemies)
-	if interlock["screen"].visible:
-		_update_interlock(enemies)
+	_update_interlock(enemies)
+	_update_actuator(door_travel)
 	var key := B.event_text("interact")
 	if not enabled or key == "—":
 		_prompt.hide()
@@ -133,6 +140,14 @@ func _update_interlock(enemies: Array) -> void:
 	for enemy in enemies:
 		if enemy.alive:
 			live += 1
+	if _door_open:
+		_set_wall_interlock("允许通行", Color("b3d3cf"), 2)
+	elif live == 0:
+		_set_wall_interlock("舱门开启中", Color("d3c4a1"), 1)
+	else:
+		_set_wall_interlock("安全闭锁", Color("cfb18b"), 0)
+	if not interlock["screen"].visible:
+		return
 	var status: Label3D = interlock["status"]
 	if _door_open:
 		status.text = "联锁解除\n通往回廊实验舱"
@@ -142,3 +157,23 @@ func _update_interlock(enemies: Array) -> void:
 		status.text = "安全联锁  /  舱门闭锁\n中庭警戒目标  %02d" % live
 	var trace: Node3D = interlock["trace"]
 	trace.visible = live > 0 and not _door_open
+
+
+func _set_wall_interlock(message: String, tint: Color, state: int) -> void:
+	if state == _wall_interlock_state:
+		return
+	_wall_interlock_state = state
+	wall_interlock.text = message
+	wall_interlock.modulate = tint
+	wall_interlock_material.set_shader_parameter("signal_state", state)
+
+
+func _update_actuator(travel: float) -> void:
+	var percent := roundi(clampf(travel, 0.0, 1.0) * 100.0)
+	if percent == _actuator_percent:
+		return
+	_actuator_percent = percent
+	var label: Label3D = door_actuator["position_label"]
+	var material: ShaderMaterial = door_actuator["material"]
+	label.text = "%02d %%" % percent
+	material.set_shader_parameter("travel", percent * 0.01)
